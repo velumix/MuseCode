@@ -10,7 +10,7 @@
 !define MUI_WELCOMEPAGE_TITLE "Welcome to Muse Code Setup"
 !define MUI_WELCOMEPAGE_TEXT "Muse Code is a desktop companion for the Muse coding agent.$\r$\n$\r$\nThis wizard will install Muse Code on your computer.$\r$\n$\r$\nClick Next to continue."
 !define MUI_FINISHPAGE_TITLE "Muse Code is installed"
-!define MUI_FINISHPAGE_TEXT "Muse Code was installed successfully.$\r$\n$\r$\nKeep \"Run Muse Code\" checked and click Finish to launch it."
+!define MUI_FINISHPAGE_TEXT "Muse Code was installed successfully.$\r$\n$\r$\nKeep $\"Run Muse Code$\" checked and click Finish to launch it."
 BrandingText "Muse Code Setup"
 
 !macro NSIS_HOOK_PREINSTALL
