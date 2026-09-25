@@ -1,4 +1,5 @@
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -16,7 +17,13 @@ pub struct PtySession {
 
 #[derive(Default)]
 pub struct PtyState {
-    session: Mutex<Option<PtySession>>,
+    sessions: Mutex<HashMap<String, PtySession>>,
+}
+
+#[derive(serde::Serialize, Clone)]
+pub struct SpawnInfo {
+    pub id: String,
+    pub backend: String,
 }
 
 /// Locate the `muse` CLI on PATH, honouring PATHEXT on Windows so shims
@@ -111,13 +118,16 @@ fn split_valid_utf8(buf: &[u8]) -> (String, usize) {
     }
 }
 
-fn kill_session(state: &State<PtyState>) {
-    if let Ok(mut guard) = state.session.lock() {
-        if let Some(session) = guard.take() {
-            if let Ok(mut child) = session.child.lock() {
-                if let Some(mut child) = child.take() {
-                    let _ = child.kill();
-                }
+fn kill_session(state: &State<PtyState>, id: &str) {
+    let session = state
+        .sessions
+        .lock()
+        .ok()
+        .and_then(|mut sessions| sessions.remove(id));
+    if let Some(session) = session {
+        if let Ok(mut child) = session.child.lock() {
+            if let Some(mut child) = child.take() {
+                let _ = child.kill();
             }
         }
     }
@@ -126,16 +136,16 @@ fn kill_session(state: &State<PtyState>) {
 /// Poll for the child exit code after EOF, then report it. `try_wait` is
 /// used instead of blocking `wait` so a wedged child cannot deadlock the
 /// reader thread against `pty_kill`.
-fn report_exit_code(app: &AppHandle) {
+fn report_exit_code(app: &AppHandle, id: &str) {
     let mut code: Option<u32> = None;
     for _ in 0..EXIT_POLL_ATTEMPTS {
         let found = app
             .state::<PtyState>()
-            .session
+            .sessions
             .lock()
             .ok()
-            .and_then(|session| {
-                session.as_ref().and_then(|s| {
+            .and_then(|sessions| {
+                sessions.get(id).and_then(|s| {
                     s.child
                         .lock()
                         .ok()
@@ -148,10 +158,10 @@ fn report_exit_code(app: &AppHandle) {
         }
         std::thread::sleep(std::time::Duration::from_millis(EXIT_POLL_INTERVAL_MS));
     }
-    let _ = app.emit("pty-exit", serde_json::json!({ "code": code }));
+    let _ = app.emit("pty-exit", serde_json::json!({ "id": id, "code": code }));
 }
 
-fn spawn_reader(app: AppHandle, mut reader: Box<dyn Read + Send>) {
+fn spawn_reader(app: AppHandle, id: String, mut reader: Box<dyn Read + Send>) {
     std::thread::spawn(move || {
         let mut pending: Vec<u8> = Vec::new();
         let mut buf = [0u8; READ_CHUNK];
@@ -162,7 +172,7 @@ fn spawn_reader(app: AppHandle, mut reader: Box<dyn Read + Send>) {
                     pending.extend_from_slice(&buf[..n]);
                     let (text, consumed) = split_valid_utf8(&pending);
                     if !text.is_empty() {
-                        let _ = app.emit("pty-data", text);
+                        let _ = app.emit("pty-data", serde_json::json!({ "id": id, "data": text }));
                     }
                     pending.drain(..consumed);
                 }
@@ -172,18 +182,24 @@ fn spawn_reader(app: AppHandle, mut reader: Box<dyn Read + Send>) {
         if !pending.is_empty() {
             let text = String::from_utf8_lossy(&pending).into_owned();
             if !text.is_empty() {
-                let _ = app.emit("pty-data", text);
+                let _ = app.emit("pty-data", serde_json::json!({ "id": id, "data": text }));
             }
         }
-        report_exit_code(&app);
+        report_exit_code(&app, &id);
     });
 }
 
-/// Spawn the `muse` CLI inside a new PTY, replacing any existing session.
-/// Returns the resolved path of the CLI for display in the UI.
+/// Spawn the `muse` CLI inside a new PTY registered under `id`,
+/// replacing any session already registered under that id.
 #[tauri::command]
-pub fn pty_spawn(app: AppHandle, state: State<PtyState>, cols: u16, rows: u16) -> Result<String, String> {
-    kill_session(&state);
+pub fn pty_spawn(
+    app: AppHandle,
+    state: State<PtyState>,
+    id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<SpawnInfo, String> {
+    kill_session(&state, &id);
     let muse_path = resolve_muse().ok_or_else(|| {
         "Could not find the `muse` CLI on PATH. Install the Muse CLI and make sure `muse` works in a terminal, then restart the session.".to_string()
     })?;
@@ -210,27 +226,37 @@ pub fn pty_spawn(app: AppHandle, state: State<PtyState>, cols: u16, rows: u16) -
         .master
         .try_clone_reader()
         .map_err(|e| format!("failed to attach terminal output: {e}"))?;
-    *state
-        .session
+    state
+        .sessions
         .lock()
-        .map_err(|_| "terminal state is unavailable".to_string())? = Some(PtySession {
-        master: pair.master,
-        writer: Mutex::new(writer),
-        child: Mutex::new(Some(child)),
-    });
-    spawn_reader(app, reader);
-    Ok(muse_path.display().to_string())
+        .map_err(|_| "terminal state is unavailable".to_string())?
+        .insert(
+            id.clone(),
+            PtySession {
+                master: pair.master,
+                writer: Mutex::new(writer),
+                child: Mutex::new(Some(child)),
+            },
+        );
+    spawn_reader(app, id.clone(), reader);
+    Ok(SpawnInfo {
+        id,
+        backend: muse_path.display().to_string(),
+    })
 }
 
-/// Write keystrokes / pasted input to the PTY.
+/// Write keystrokes / pasted input to the session's PTY.
 #[tauri::command]
-pub fn pty_write(state: State<PtyState>, data: String) -> Result<(), String> {
-    let session = state
-        .session
+pub fn pty_write(state: State<PtyState>, id: String, data: String) -> Result<(), String> {
+    let sessions = state
+        .sessions
         .lock()
         .map_err(|_| "terminal state is unavailable".to_string())?;
-    let session = session.as_ref().ok_or_else(|| "no active session".to_string())?;
-    let mut writer = session.writer.lock().map_err(|_| "terminal input is unavailable".to_string())?;
+    let session = sessions.get(&id).ok_or_else(|| "session not found".to_string())?;
+    let mut writer = session
+        .writer
+        .lock()
+        .map_err(|_| "terminal input is unavailable".to_string())?;
     use std::io::Write;
     writer
         .write_all(data.as_bytes())
@@ -239,14 +265,14 @@ pub fn pty_write(state: State<PtyState>, data: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Notify the PTY (and the TUI inside it) of a new terminal size.
+/// Notify the session's PTY (and the TUI inside it) of a new terminal size.
 #[tauri::command]
-pub fn pty_resize(state: State<PtyState>, cols: u16, rows: u16) -> Result<(), String> {
-    let session = state
-        .session
+pub fn pty_resize(state: State<PtyState>, id: String, cols: u16, rows: u16) -> Result<(), String> {
+    let sessions = state
+        .sessions
         .lock()
         .map_err(|_| "terminal state is unavailable".to_string())?;
-    let session = session.as_ref().ok_or_else(|| "no active session".to_string())?;
+    let session = sessions.get(&id).ok_or_else(|| "session not found".to_string())?;
     session
         .master
         .resize(PtySize {
@@ -259,10 +285,10 @@ pub fn pty_resize(state: State<PtyState>, cols: u16, rows: u16) -> Result<(), St
     Ok(())
 }
 
-/// Terminate the active session, if any. Always succeeds.
+/// Terminate the session registered under `id`, if any. Always succeeds.
 #[tauri::command]
-pub fn pty_kill(state: State<PtyState>) -> Result<(), String> {
-    kill_session(&state);
+pub fn pty_kill(state: State<PtyState>, id: String) -> Result<(), String> {
+    kill_session(&state, &id);
     Ok(())
 }
 
@@ -296,7 +322,7 @@ mod tests {
     #[test]
     fn invalid_byte_becomes_replacement_char() {
         let (text, consumed) = split_valid_utf8(b"a\xffb");
-        assert_eq!(text, "a�");
+        assert_eq!(text, "a\u{FFFD}");
         assert_eq!(consumed, 2);
     }
 

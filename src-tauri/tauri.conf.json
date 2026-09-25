@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Muse Code",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.velumix.musecode",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -41,6 +41,8 @@
         "displayLanguageSelector": false,
         "compression": "lzma",
         "startMenuFolder": "Muse Code",
+        "headerImage": "nsis/header.bmp",
+        "sidebarImage": "nsis/sidebar.bmp",
         "installerHooks": "nsis/installer-hooks.nsi"
       }
     }

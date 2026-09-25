@@ -1,6 +1,6 @@
 [package]
 name = "muse-code-app"
-version = "0.1.0"
+version = "0.2.0"
 description = "Muse Code — a desktop companion for the Muse coding agent"
 authors = ["velumix"]
 edition = "2021"

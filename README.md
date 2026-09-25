@@ -1,8 +1,8 @@
 # Muse Code (desktop)
 
-A Tauri + React desktop shell for the [Muse](https://github.com/anthropics/claude-code) coding agent.
-v1 hosts the `muse` CLI inside an embedded terminal (xterm.js over a native
-ConPTY), in a frameless window with a custom title bar.
+A Tauri + React desktop shell for the Muse coding agent.
+Hosts the `muse` CLI in embedded terminal sessions (xterm.js over native
+ConPTY), in a frameless window with session tabs.
 
 ## Prerequisites
 
@@ -17,27 +17,40 @@ npm install
 npm run tauri dev
 ```
 
-## Build the installer
+## Install / uninstall
 
-```sh
-npm run tauri build -- --bundles nsis
+```powershell
+.\scripts\install.ps1 -Build            # release build + silent install
+.\scripts\install.ps1 -Build -Launch    # ...and launch it
+.\scripts\install.ps1 -Uninstall         # silent uninstall
 ```
 
-Produces `src-tauri/target/release/bundle/nsis/Muse Code_<version>_x64-setup.exe`.
-The installer uses custom NSIS hooks (`src-tauri/nsis/installer-hooks.nsi`):
-branded welcome/finish pages plus a post-install check that warns when the
-`muse` CLI is missing from `PATH`.
+The installer is a custom NSIS bundle (`src-tauri/nsis/`): branded
+welcome/finish pages, custom header/sidebar art, plus a post-install check
+that warns when the `muse` CLI is missing from `PATH`.
+
+Brand assets are generated reproducibly with `.\scripts\make-assets.ps1`
+(app icon source, NSIS bitmaps); `npx tauri icon` turns the source PNG into
+the full icon set.
+
+## Shortcuts
+
+- `Ctrl+T` new session, `Ctrl+Tab` / `Ctrl+Shift+Tab` switch sessions
+- `Ctrl+F` find in terminal, `Enter` / `Shift+Enter` next/previous match
+- `Ctrl+=` / `Ctrl+-` / `Ctrl+0` terminal zoom in/out/reset
 
 ## Tests
 
 ```sh
-cargo test -p muse-code-app --lib   # run from src-tauri/
+cargo test --lib   # run from src-tauri/
 ```
 
 Covers the PTY output decoder (UTF-8 split across reads, invalid bytes).
 
 ## Layout
 
-- `src/` — React UI: `components/TitleBar.tsx`, `components/TerminalView.tsx`
-- `src-tauri/src/pty.rs` — PTY session manager (`pty_spawn/write/resize/kill`)
-- `src-tauri/nsis/installer-hooks.nsi` — custom installer hooks
+- `src/` — React UI: `TitleBar`, `TabBar`, `TerminalView`, `SearchBar`
+- `src-tauri/src/pty.rs` — multi-session PTY manager
+  (`pty_spawn/write/resize/kill`, `pty-data` / `pty-exit` events)
+- `src-tauri/nsis/` — installer hooks + custom bitmaps
+- `scripts/` — `install.ps1`, `make-assets.ps1`

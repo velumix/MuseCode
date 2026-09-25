@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -9,23 +10,32 @@ import "@xterm/xterm/css/xterm.css";
 
 export type PtyStatus =
   | { kind: "starting" }
-  | { kind: "running"; Backend: string }
+  | { kind: "running"; backend: string }
   | { kind: "exited"; code: number | null }
   | { kind: "error"; message: string };
 
-interface TerminalViewProps {
-  /** Bump to tear down the session and spawn a fresh one. */
-  sessionKey: number;
-  onStatus: (status: PtyStatus) => void;
-  onTerminal: (term: Terminal | null) => void;
+export interface TerminalHandles {
+  term: Terminal;
+  fit: FitAddon;
+  search: SearchAddon;
 }
 
-export default function TerminalView({ sessionKey, onStatus, onTerminal }: TerminalViewProps) {
+interface TerminalViewProps {
+  sessionId: string;
+  active: boolean;
+  /** Bump to tear down the session and spawn a fresh one. */
+  sessionKey: number;
+  onStatus: (sessionId: string, status: PtyStatus) => void;
+  onHandles: (sessionId: string, handles: TerminalHandles | null) => void;
+}
+
+export default function TerminalView({ sessionId, active, sessionKey, onStatus, onHandles }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const liveRef = useRef<{ term: Terminal; fit: FitAddon } | null>(null);
   const statusRef = useRef(onStatus);
   statusRef.current = onStatus;
-  const terminalRef = useRef(onTerminal);
-  terminalRef.current = onTerminal;
+  const handlesRef = useRef(onHandles);
+  handlesRef.current = onHandles;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -64,7 +74,9 @@ export default function TerminalView({ sessionKey, onStatus, onTerminal }: Termi
     });
 
     const fit = new FitAddon();
+    const search = new SearchAddon();
     term.loadAddon(fit);
+    term.loadAddon(search);
     term.loadAddon(
       new WebLinksAddon((_event, uri) => {
         openUrl(uri).catch(() => {});
@@ -72,11 +84,12 @@ export default function TerminalView({ sessionKey, onStatus, onTerminal }: Termi
     );
     term.open(el);
     fit.fit();
-    terminalRef.current(term);
+    liveRef.current = { term, fit };
+    handlesRef.current(sessionId, { term, fit, search });
 
     const unlistens: Array<() => void> = [];
     const setStatus = (s: PtyStatus) => {
-      if (!disposed) statusRef.current(s);
+      if (!disposed) statusRef.current(sessionId, s);
     };
     setStatus({ kind: "starting" });
 
@@ -84,20 +97,21 @@ export default function TerminalView({ sessionKey, onStatus, onTerminal }: Termi
     (async () => {
       try {
         unlistens.push(
-          await listen<string>("pty-data", (e) => {
-            if (!disposed) term.write(e.payload);
+          await listen<{ id: string; data: string }>("pty-data", (e) => {
+            if (!disposed && e.payload.id === sessionId) term.write(e.payload.data);
           }),
         );
         unlistens.push(
-          await listen<{ code: number | null }>("pty-exit", (e) => {
-            setStatus({ kind: "exited", code: e.payload.code });
+          await listen<{ id: string; code: number | null }>("pty-exit", (e) => {
+            if (e.payload.id === sessionId) setStatus({ kind: "exited", code: e.payload.code });
           }),
         );
-        const Backend = await invoke<string>("pty_spawn", {
+        const info = await invoke<{ id: string; backend: string }>("pty_spawn", {
+          id: sessionId,
           cols: Math.max(1, term.cols),
           rows: Math.max(1, term.rows),
         });
-        setStatus({ kind: "running", Backend });
+        setStatus({ kind: "running", backend: info.backend });
       } catch (err) {
         setStatus({
           kind: "error",
@@ -107,7 +121,7 @@ export default function TerminalView({ sessionKey, onStatus, onTerminal }: Termi
     })();
 
     term.onData((data) => {
-      invoke("pty_write", { data }).catch(() => {});
+      invoke("pty_write", { id: sessionId, data }).catch(() => {});
     });
 
     const ro = new ResizeObserver(() => {
@@ -115,6 +129,7 @@ export default function TerminalView({ sessionKey, onStatus, onTerminal }: Termi
       try {
         fit.fit();
         invoke("pty_resize", {
+          id: sessionId,
           cols: Math.max(1, term.cols),
           rows: Math.max(1, term.rows),
         }).catch(() => {});
@@ -128,11 +143,32 @@ export default function TerminalView({ sessionKey, onStatus, onTerminal }: Termi
       disposed = true;
       ro.disconnect();
       for (const unlisten of unlistens) unlisten();
-      terminalRef.current(null);
+      liveRef.current = null;
+      handlesRef.current(sessionId, null);
       term.dispose();
-      invoke("pty_kill").catch(() => {});
+      invoke("pty_kill", { id: sessionId }).catch(() => {});
     };
-  }, [sessionKey]);
+  }, [sessionId, sessionKey]);
 
-  return <div ref={containerRef} className="terminal-host" />;
+  // Hidden tabs have no layout box; refit once this tab becomes visible.
+  useEffect(() => {
+    if (!active) return;
+    const frame = requestAnimationFrame(() => {
+      const live = liveRef.current;
+      if (!live) return;
+      try {
+        live.fit.fit();
+        invoke("pty_resize", {
+          id: sessionId,
+          cols: Math.max(1, live.term.cols),
+          rows: Math.max(1, live.term.rows),
+        }).catch(() => {});
+      } catch {
+        // Tearing down; safe to ignore.
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [active, sessionId]);
+
+  return <div ref={containerRef} className={active ? "terminal-host" : "terminal-host hidden"} />;
 }
