@@ -72,6 +72,9 @@ pub struct TurnInfo {
 }
 
 fn emit(app: &AppHandle, id: &str, event: AgentEvent) {
+    app.state::<crate::session_log::SessionLog>()
+        .record(id, &event);
+    crate::remote::changed(app);
     // Emit failures mean the window is gone; nothing left to report to.
     let _ = app.emit(
         "agent-event",
@@ -325,23 +328,28 @@ fn spawn_reader(
         if let Ok(mut prompt) = session.prompt.lock() {
             prompt.take();
         }
-        if let Ok(mut running) = session.running.lock() {
-            *running = false;
-        }
         // Completion is visible only after the process is reaped and the
-        // next turn can be accepted. Old readers never mutate replacements.
-        let current = state.sessions.lock().ok().is_some_and(|sessions| {
+        // next turn can be accepted. Keep registration locked through the
+        // terminal event so a competing phone/desktop send cannot overtake it.
+        let sessions = state.sessions.lock().unwrap();
+        let current = {
             sessions
                 .get(&id)
                 .is_some_and(|current| Arc::ptr_eq(current, &session))
-        });
+        };
+        *session.running.lock().unwrap() = false;
+        let mut outcome = None;
         if current {
             if let Some(event) = terminal {
                 emit(&app, &id, event.clone());
                 if let AgentEvent::TurnEnd { status, .. } = event {
-                    crate::desktop::notify_turn(&app, &session.tab_id, &status);
+                    outcome = Some(status);
                 }
             }
+        }
+        drop(sessions);
+        if let Some(status) = outcome {
+            crate::desktop::notify_turn(&app, &session.tab_id, &status);
         }
     });
 }
@@ -352,6 +360,7 @@ fn spawn_reader(
 /// untouched.
 #[tauri::command]
 pub fn agent_new(
+    app: AppHandle,
     state: State<AgentState>,
     id: String,
     workspace: Option<String>,
@@ -377,6 +386,9 @@ pub fn agent_new(
     if let Some(old) = old {
         old.stop();
     }
+    app.state::<crate::session_log::SessionLog>()
+        .register(&id, workspace.display().to_string());
+    crate::remote::changed(&app);
     Ok(NewInfo {
         id,
         session_id,
@@ -394,6 +406,7 @@ pub fn agent_send(
     id: String,
     prompt: String,
     yolo: bool,
+    remote: Option<bool>,
 ) -> Result<TurnInfo, String> {
     if prompt.trim().is_empty() {
         return Err("prompt is empty".to_string());
@@ -461,6 +474,14 @@ pub fn agent_send(
             .map_err(|_| "agent state is unavailable".to_string())? = Some(child);
     }
     drop(sessions);
+    emit(
+        &app,
+        &id,
+        AgentEvent::TurnStart {
+            prompt,
+            remote: remote.unwrap_or(false),
+        },
+    );
     spawn_reader(app, id.clone(), session, staged, stdout, stderr);
     Ok(TurnInfo { id, turn_id })
 }
@@ -475,7 +496,7 @@ pub fn agent_stop(state: State<AgentState>, id: String) -> Result<(), String> {
 /// Drop the tab's agent session, stopping any running turn and removing
 /// its staged prompt. The muse-side session log is left on disk.
 #[tauri::command]
-pub fn agent_destroy(state: State<AgentState>, id: String) -> Result<(), String> {
+pub fn agent_destroy(app: AppHandle, state: State<AgentState>, id: String) -> Result<(), String> {
     let session = state
         .sessions
         .lock()
@@ -484,6 +505,8 @@ pub fn agent_destroy(state: State<AgentState>, id: String) -> Result<(), String>
     if let Some(session) = session {
         session.stop();
     }
+    app.state::<crate::session_log::SessionLog>().remove(&id);
+    crate::remote::changed(&app);
     Ok(())
 }
 

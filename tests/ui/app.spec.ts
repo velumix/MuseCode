@@ -6,10 +6,13 @@ import AxeBuilder from "@axe-core/playwright";
 async function boot(page: Page, delay = 0) {
   await page.addInitScript(({ delay }) => {
     const w = window as any;
+    w.isTauri = true;
     const callbacks = new Map();
     const listeners = new Map();
     let serial = 0;
     const api = w.qa = { calls: [] as any[], sessions: new Map(), failSend: false,
+      remote: { enabled: false, url: null as string | null, error: null, devices: [] as any[], pending: null as any,
+        tailscale: { installed: true, connected: true, hostname: "desktop.tail.ts.net", message: "Connected to your private network." } },
       desktop: { notifications_enabled: true, last_error: null }, pendingNavigation: null as string | null,
       emit(event: string, payload: unknown) {
         for (const [id, entry] of listeners) {
@@ -28,6 +31,12 @@ async function boot(page: Page, delay = 0) {
       unregisterCallback(id: number) { callbacks.delete(id); },
       async invoke(cmd: string, args: any = {}) {
         api.calls.push({ cmd, args });
+        if (cmd === "remote_status" || cmd === "remote_check_tailscale") return { ...api.remote };
+        if (cmd === "remote_enable") { api.remote.enabled = args.enabled; api.remote.url = args.enabled ? "https://desktop.tail.ts.net:8443" : null; return { ...api.remote }; }
+        if (cmd === "remote_pair") return { url: "https://desktop.tail.ts.net:8443/#pair=test", code: "482196", expires_at: Math.floor(Date.now() / 1000) + 120, svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="white"/></svg>' };
+        if (cmd === "remote_approve") { api.remote.devices.push({ id: "phone", name: api.remote.pending.name, control: args.control, created_at: Math.floor(Date.now() / 1000) }); api.remote.pending = null; return; }
+        if (cmd === "remote_cancel_pairing") { api.remote.pending = null; return; }
+        if (cmd === "remote_revoke") { api.remote.devices = api.remote.devices.filter((d: any) => d.id !== args.id); return; }
         if (cmd === "desktop_status") return api.desktop;
         if (cmd === "desktop_set_notifications") { api.desktop.notifications_enabled = args.enabled; return { ...api.desktop }; }
         if (cmd === "desktop_take_navigation") { const id = api.pendingNavigation; api.pendingNavigation = null; return id; }
@@ -67,6 +76,49 @@ async function boot(page: Page, delay = 0) {
 }
 
 const composer = (page: Page) => page.locator(".chat-wrap:not(.hidden) textarea");
+
+test("desktop pairing offers QR, matching-code approval, view-only access and revocation", async ({ page }) => {
+  await boot(page);
+  await page.getByRole("button", { name: "Connect phone", exact: true }).click();
+  const panel = page.getByRole("dialog", { name: "Connect your phone" });
+  await panel.getByRole("button", { name: "Enable remote access" }).click();
+  await panel.getByRole("button", { name: "Show pairing code" }).click();
+  await expect(panel.getByRole("img")).toBeVisible();
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations).toEqual([]);
+  await page.evaluate(() => {
+    const qa = (window as any).qa;
+    qa.remote.pending = { name: "My Pixel", code: "482196", expires_at: Math.floor(Date.now() / 1000) + 120 };
+    qa.emit("remote-status", { ...qa.remote });
+  });
+  await expect(panel.getByText("482196")).toBeVisible();
+  await panel.getByLabel("Allow sending messages and stopping tasks").uncheck();
+  await panel.getByRole("button", { name: "Connect phone", exact: true }).click();
+  await expect(panel.getByText(/View only · paired/)).toBeVisible();
+  await panel.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await expect(panel.getByText("My Pixel", { exact: true })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Connect phone", exact: true })).toBeFocused();
+});
+
+test("desktop reflects phone-originated messages without duplicating CLI echoes", async ({ page }) => {
+  await boot(page);
+  await composer(page).fill("Desktop draft");
+  await page.evaluate(() => {
+    const qa = (window as any).qa;
+    const id = qa.calls.filter((c: any) => c.cmd === "agent_new").at(-1).args.id;
+    qa.emit("agent-event", { id, event: { kind: "turn_start", prompt: "From my phone", remote: true } });
+    qa.emit("agent-event", { id, event: { kind: "user_message", text: "From my phone" } });
+    qa.emit("agent-event", { id, event: { kind: "assistant_delta", text: "Shared result" } });
+    qa.emit("agent-event", { id, event: { kind: "turn_end", status: "completed" } });
+  });
+  await expect(page.locator(".msg.user")).toHaveCount(1);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("From my phone");
+  await expect(page.locator(".msg.assistant")).toContainText("Shared result");
+  await expect(composer(page)).toHaveValue("Desktop draft");
+});
+
 async function send(page: Page, text = "Review this project") {
   await composer(page).fill(text);
   await composer(page).press("Enter");

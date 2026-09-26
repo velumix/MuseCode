@@ -11,6 +11,7 @@ import type { PtyStatus, TerminalHandles } from "./components/TerminalView";
 import ChatView from "./components/ChatView";
 import type { AgentStatus } from "./components/ChatView";
 import CommandPalette from "./components/CommandPalette";
+const RemotePanel = lazy(() => import("./components/RemotePanel"));
 import type { PaletteAction } from "./components/CommandPalette";
 import "./App.css";
 
@@ -67,6 +68,7 @@ export default function App() {
   const [activeId, setActiveId] = useState<string>(() => "");
   const [searchOpen, setSearchOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [remoteOpen, setRemoteOpen] = useState(false);
   const [desktop, setDesktop] = useState<DesktopStatus>({ notifications_enabled: true, last_error: null });
   const [desktopMessage, setDesktopMessage] = useState<{ text: string; error: boolean } | null>(null);
 
@@ -335,6 +337,7 @@ export default function App() {
   const failed = activeTab && (tabStatus(activeTab).kind === "error" || tabStatus(activeTab).kind === "exited");
 
   const paletteActions: PaletteAction[] = [
+    { id: "cmd-remote", title: "Connect your phone with Tailscale", run: () => setRemoteOpen(true) },
     { id: "cmd-new", title: "New agent tab", hint: "Ctrl+T", run: newTab },
     { id: "cmd-focus", title: "Focus message input", hint: "Ctrl+L", run: focusComposer },
     {
@@ -441,12 +444,14 @@ export default function App() {
           </>
         )}
         <span className="status-spacer" />
+        <button type="button" className="notification-toggle" onClick={() => setRemoteOpen(true)}><Icon name="phone" size={13} />Connect phone</button>
         <button type="button" className="notification-toggle" aria-label="Background notifications" aria-pressed={desktop.notifications_enabled} title={desktop.notifications_enabled ? "Background notifications on — click to mute" : "Background notifications muted — click to enable"} onClick={() => void toggleNotifications()}><Icon name="bell" size={13} />{desktop.notifications_enabled ? "Notifications on" : "Notifications muted"}</button>
         <span className="footer-hint" title="Closing the window keeps Muse running. Use the tray menu or Ctrl+K → Quit to exit.">Runs in tray</span>
       </footer>
       </section>
       </div>
       {paletteOpen && <CommandPalette actions={paletteActions} onClose={() => setPaletteOpen(false)} />}
+      {remoteOpen && <Suspense fallback={null}><RemotePanel onClose={() => setRemoteOpen(false)} /></Suspense>}
     </div>
   );
 }

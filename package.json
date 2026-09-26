@@ -11,6 +11,7 @@
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
     "check": "npm run build && npm test && npm run test:rust",
     "check:native": "cargo build --manifest-path src-tauri/Cargo.toml && node scripts/native-smoke.mjs",
+    "check:remote": "npm run build && cargo build --manifest-path src-tauri/Cargo.toml && node scripts/remote-smoke.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

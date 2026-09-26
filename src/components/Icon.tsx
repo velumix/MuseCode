@@ -1,9 +1,10 @@
 import type { CSSProperties } from "react";
 import museMark from "../assets/muse-mark.png";
 
-export type IconName = "search" | "plus" | "chat" | "folder" | "code" | "terminal" | "arrow" | "down" | "reset" | "command" | "check" | "copy" | "close" | "shield" | "bell";
+export type IconName = "search" | "plus" | "chat" | "folder" | "code" | "terminal" | "arrow" | "down" | "reset" | "command" | "check" | "copy" | "close" | "shield" | "bell" | "phone";
 
 const paths: Record<IconName, string> = {
+  phone: "M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm2 0v3h6V2M11 18h2",
   search: "M21 21l-4.4-4.4M19 10.5a8.5 8.5 0 1 1-17 0 8.5 8.5 0 0 1 17 0Z",
   plus: "M12 5v14M5 12h14",
   chat: "M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z",

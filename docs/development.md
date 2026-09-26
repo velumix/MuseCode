@@ -57,6 +57,7 @@ Windows desktop and are run locally using the commands below.
 ```sh
 npm run check          # TypeScript + production frontend build + browser tests + Rust tests
 npm run check:native   # Windows debug build + real WebView2/IPC/ConPTY smoke test
+npm run check:remote   # real Tailscale HTTPS + native app + phone browser (Tailscale sign-in required)
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
 
@@ -70,6 +71,18 @@ for the packaged build, or `node scripts/native-smoke.mjs --installed --notifica
 installing the current bundle to also verify Windows Notification Center delivery and the
 registered COM activation path. These checks use isolated notification preferences.
 Test artifacts are written to ignored `test-results/` and `.qa/` directories.
+
+The remote smoke test uses the real signed-in Tailscale client and a temporary foreground
+Serve route on 8443. It requires that port to be unused, and refuses to attach to a running
+MuseCode instance. It pairs a separate browser with isolated app settings, runs fixture
+turns while the desktop is hidden, stops a fixture process tree, reloads history, and revokes
+the phone. It removes its own route on exit. For the installed bundle use
+`node scripts/remote-smoke.mjs --installed`. This test is intentionally not run in CI because
+it needs a signed-in tailnet; Rust HTTP tests cover the access boundary without a network.
+
+Run `npm run build` before testing the phone interface in a debug native build. Tauri's asset
+resolver serves the built `dist/remote.html` and assets; Vite hot reload is desktop-only.
+See [remote access](remote-access.md) for permissions, lifecycle, limits, and setup.
 
 Coverage includes chat/tool/todo rendering, final answers, error recovery, workspace changes,
 tab and mode preservation, race-prone startup/teardown, keyboard/clipboard interactions,
@@ -116,6 +129,12 @@ those workflows. YOLO changes approval/sandbox behavior; it does not add interac
   (`pty_spawn/write/resize/kill`, `pty-data` / `pty-exit` events)
 - `src-tauri/src/desktop.rs` — tray lifetime, single-instance restoration, notification settings
 - `src-tauri/src/windows_notifications.rs` — Windows toasts and COM conversation activation
+- `src/remote/` — mobile interface, reconnects, and transcript rendering
+- `src/components/RemotePanel.tsx` — desktop pairing and device management
+- `src-tauri/src/remote.rs` — loopback HTTP API, cookies, live events, and remote commands
+- `src-tauri/src/remote_auth.rs` — one-use pairing and revocable device credentials
+- `src-tauri/src/session_log.rs` — backend event replay independent of the desktop WebView
+- `src-tauri/src/tailscale.rs` — client discovery, connection status, and owned Serve lifecycle
 - `src-tauri/nsis/` — installer hooks + custom bitmaps
 - `scripts/` — `install.ps1`, `make-assets.ps1`
 - `docs/rich-agent-ui.md` — rich-agent-UI design + CLI probe findings

@@ -2,6 +2,7 @@ import { isValidElement, memo, useCallback, useState, type MouseEvent, type Reac
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { isTauri } from "@tauri-apps/api/core";
 import { copyText } from "./clip";
 
 function isWebUrl(href: string): boolean {
@@ -19,7 +20,10 @@ function MdLink({ href, children }: { href?: string; children?: ReactNode }) {
     <a
       href={href}
       title={href}
+      target="_blank"
+      rel="noopener noreferrer"
       onClick={(e: MouseEvent) => {
+        if (!isTauri()) return;
         e.preventDefault();
         openUrl(href).catch(() => {});
       }}

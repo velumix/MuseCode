@@ -311,6 +311,23 @@ export default function ChatView({ sessionId, active, sessionKey, onStatus, onWo
       if (disposed || envelope.id !== nativeId) return;
       const e = envelope.event;
       switch (e.kind) {
+        case "turn_start": {
+          if (!e.remote) break;
+          const prompt = asString(e.prompt) ?? "";
+          assistantSeenRef.current = false;
+          runningRef.current = true;
+          turnStartRef.current = Date.now();
+          setRunning(true);
+          setActivity("Sent from your phone");
+          setStatus({ kind: "running", detail: "Sent from your phone" });
+          if (!titleAssignedRef.current) {
+            titleAssignedRef.current = true;
+            onTitle(sessionId, prompt.replace(/\s+/g, " ").slice(0, 48));
+          }
+          historyRef.current = [...historyRef.current.slice(-49), prompt];
+          setBlocks((prev) => [...prev, { id: ++idRef.current, kind: "user", text: prompt }]);
+          break;
+        }
         case "user_message":
           // Local echo already shows the sent prompt; the stream copy would duplicate it.
           break;

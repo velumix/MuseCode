@@ -1,0 +1,944 @@
+//! Private HTTPS is terminated by Tailscale Serve; this listener binds loopback only.
+//! HTTP clients have a deliberately small API and never receive Tauri IPC access.
+use crate::{
+    remote_auth::{self, Auth, Device, Pending, Saved},
+    runner,
+    session_log::SessionLog,
+    tailscale,
+};
+use axum::{
+    body::Body,
+    extract::{DefaultBodyLimit, Path, Query, State},
+    http::{HeaderMap, HeaderValue, Method, StatusCode},
+    middleware::{self, Next},
+    response::{
+        sse::{Event, KeepAlive},
+        IntoResponse, Response, Sse,
+    },
+    routing::{get, post},
+    Json, Router,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::{
+    convert::Infallible,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::{oneshot, watch};
+
+const COOKIE: &str = "__Host-muse";
+
+struct Inner {
+    auth: Auth,
+    origin: Option<String>,
+    server: Option<oneshot::Sender<()>>,
+    serve: Option<tokio::process::Child>,
+    tailscale: tailscale::Status,
+    error: Option<String>,
+}
+
+pub struct Core {
+    inner: Mutex<Inner>,
+    changes: watch::Sender<u64>,
+    operation: tokio::sync::Mutex<()>,
+    path: PathBuf,
+}
+pub struct RemoteState(Arc<Core>);
+
+#[derive(Clone)]
+struct WebState {
+    core: Arc<Core>,
+    app: Option<AppHandle>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct Status {
+    enabled: bool,
+    url: Option<String>,
+    tailscale: tailscale::Status,
+    devices: Vec<Device>,
+    pending: Option<Pending>,
+    error: Option<String>,
+}
+
+type ApiResult = Result<Json<Value>, ApiError>;
+struct ApiError(StatusCode, String);
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        (self.0, Json(json!({"error": self.1}))).into_response()
+    }
+}
+fn bad(message: impl Into<String>) -> ApiError {
+    ApiError(StatusCode::BAD_REQUEST, message.into())
+}
+fn unauthorized() -> ApiError {
+    ApiError(
+        StatusCode::UNAUTHORIZED,
+        "Pair this phone with MuseCode on your desktop.".into(),
+    )
+}
+
+fn status(core: &Core) -> Status {
+    let inner = core.inner.lock().unwrap();
+    Status {
+        enabled: inner.origin.is_some(),
+        url: inner.origin.clone(),
+        tailscale: inner.tailscale.clone(),
+        devices: inner
+            .auth
+            .saved
+            .devices
+            .iter()
+            .filter(|d| d.expires_at > remote_auth::now())
+            .map(Device::public)
+            .collect(),
+        pending: inner.auth.pending(remote_auth::now()),
+        error: inner.error.clone(),
+    }
+}
+
+impl Core {
+    fn persist(&self, saved: &Saved) -> Result<(), String> {
+        let parent = self
+            .path
+            .parent()
+            .ok_or("Remote settings directory is unavailable.")?;
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        let temporary = self.path.with_extension("json.tmp");
+        std::fs::write(
+            &temporary,
+            serde_json::to_vec_pretty(saved).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        std::fs::rename(temporary, &self.path).map_err(|e| e.to_string())
+    }
+    fn notify(&self) {
+        self.changes.send_modify(|n| *n = n.wrapping_add(1));
+    }
+}
+
+pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let config = std::env::var_os("MUSE_CODE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or(app.path().app_config_dir()?);
+    let path = config.join("remote.json");
+    let saved: Saved = std::fs::read(&path)
+        .ok()
+        .and_then(|data| serde_json::from_slice(&data).ok())
+        .unwrap_or_default();
+    let resume = saved.enabled;
+    let (changes, _) = watch::channel(0);
+    let core = Arc::new(Core {
+        inner: Mutex::new(Inner {
+            auth: Auth::new(saved),
+            origin: None,
+            server: None,
+            serve: None,
+            tailscale: tailscale::Status::default(),
+            error: None,
+        }),
+        changes,
+        operation: tokio::sync::Mutex::new(()),
+        path,
+    });
+    app.manage(RemoteState(core));
+    let handle = app.handle().clone();
+    tauri::async_runtime::spawn(async move {
+        if resume {
+            let _ = remote_enable(handle.clone(), true).await;
+        } else {
+            let _ = remote_check_tailscale(handle.clone()).await;
+        }
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            if handle
+                .state::<crate::desktop::DesktopState>()
+                .quitting
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                break;
+            }
+            let core = &handle.state::<RemoteState>().0;
+            let stopped = core
+                .inner
+                .lock()
+                .unwrap()
+                .serve
+                .as_mut()
+                .is_some_and(|child| child.try_wait().map_or(true, |exit| exit.is_some()));
+            if stopped {
+                shutdown(&handle);
+                core.inner.lock().unwrap().error = Some("Tailscale disconnected. Check its connection, then enable remote access again.".into());
+                let _ = remote_check_tailscale(handle.clone()).await;
+            }
+        }
+    });
+    Ok(())
+}
+
+pub fn changed(app: &AppHandle) {
+    if let Some(state) = app.try_state::<RemoteState>() {
+        state.0.notify();
+    }
+}
+fn publish(app: &AppHandle, core: &Core) {
+    core.notify();
+    let _ = app.emit("remote-status", status(core));
+}
+
+pub fn shutdown(app: &AppHandle) {
+    if let Some(state) = app.try_state::<RemoteState>() {
+        let mut inner = state.0.inner.lock().unwrap();
+        inner.origin = None;
+        inner.auth.pairing = None;
+        if let Some(server) = inner.server.take() {
+            let _ = server.send(());
+        }
+        if let Some(mut child) = inner.serve.take() {
+            let _ = child.start_kill();
+        }
+        state.0.notify();
+    }
+}
+
+#[tauri::command]
+pub fn remote_status(state: tauri::State<RemoteState>) -> Status {
+    status(&state.0)
+}
+
+#[tauri::command]
+pub async fn remote_check_tailscale(app: AppHandle) -> Status {
+    let info = tailscale::status().await;
+    let core = &app.state::<RemoteState>().0;
+    core.inner.lock().unwrap().tailscale = info;
+    publish(&app, core);
+    status(core)
+}
+
+#[tauri::command]
+pub async fn remote_enable(app: AppHandle, enabled: bool) -> Result<Status, String> {
+    let core = app.state::<RemoteState>().0.clone();
+    let _operation = core.operation.lock().await;
+    if !enabled {
+        shutdown(&app);
+        let mut inner = core.inner.lock().unwrap();
+        inner.auth.saved.enabled = false;
+        inner.error = None;
+        core.persist(&inner.auth.saved)?;
+        drop(inner);
+        publish(&app, &core);
+        return Ok(status(&core));
+    }
+    if core.inner.lock().unwrap().origin.is_some() {
+        return Ok(status(&core));
+    }
+    let result = start(&app, &core).await;
+    if let Err(error) = &result {
+        core.inner.lock().unwrap().error = Some(error.clone());
+    }
+    publish(&app, &core);
+    result.map(|()| status(&core))
+}
+
+async fn start(app: &AppHandle, core: &Arc<Core>) -> Result<(), String> {
+    let info = tailscale::status().await;
+    core.inner.lock().unwrap().tailscale = info.clone();
+    if !info.connected {
+        return Err(info.message);
+    }
+    let hostname = info
+        .hostname
+        .ok_or("Enable MagicDNS in Tailscale, then try again.")?;
+    if !hostname.ends_with(".ts.net")
+        || !hostname
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+    {
+        return Err("Tailscale did not provide a valid private DNS name.".into());
+    }
+    if app.asset_resolver().get("remote.html".into()).is_none() {
+        return Err(
+            "The phone interface is missing. Build the frontend and restart MuseCode.".into(),
+        );
+    }
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .map_err(|e| e.to_string())?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let child = tailscale::start(port).await?;
+    let origin = format!("https://{hostname}:{}", tailscale::HTTPS_PORT);
+    let (stop, stopped) = oneshot::channel();
+    {
+        let mut inner = core.inner.lock().unwrap();
+        inner.auth.saved.enabled = true;
+        if let Err(error) = core.persist(&inner.auth.saved) {
+            inner.auth.saved.enabled = false;
+            return Err(error);
+        }
+        inner.origin = Some(origin);
+        inner.serve = Some(child);
+        inner.server = Some(stop);
+        inner.error = None;
+    }
+    let web = WebState {
+        core: core.clone(),
+        app: Some(app.clone()),
+    };
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = axum::serve(listener, router(web))
+            .with_graceful_shutdown(async {
+                let _ = stopped.await;
+            })
+            .await
+        {
+            let core = &handle.state::<RemoteState>().0;
+            shutdown(&handle);
+            core.inner.lock().unwrap().error = Some(format!("Remote access stopped: {error}"));
+            publish(&handle, core);
+        }
+    });
+    Ok(())
+}
+
+#[derive(Serialize)]
+pub struct Invitation {
+    url: String,
+    svg: String,
+    code: String,
+    expires_at: u64,
+}
+
+#[tauri::command]
+pub fn remote_pair(app: AppHandle) -> Result<Invitation, String> {
+    let core = &app.state::<RemoteState>().0;
+    let mut inner = core.inner.lock().unwrap();
+    let origin = inner.origin.clone().ok_or("Enable remote access first.")?;
+    let (token, code) = inner.auth.invite(remote_auth::now());
+    let url = format!("{origin}/#pair={token}");
+    let qr = qrcode::QrCode::new(url.as_bytes()).map_err(|e| e.to_string())?;
+    let svg = qr
+        .render::<qrcode::render::svg::Color>()
+        .min_dimensions(256, 256)
+        .build();
+    let invitation = Invitation {
+        url,
+        svg,
+        code,
+        expires_at: remote_auth::now() + remote_auth::PAIR_SECONDS,
+    };
+    drop(inner);
+    publish(&app, core);
+    Ok(invitation)
+}
+
+#[tauri::command]
+pub fn remote_approve(app: AppHandle, code: String, control: bool) -> Result<(), String> {
+    let core = &app.state::<RemoteState>().0;
+    let mut inner = core.inner.lock().unwrap();
+    inner.auth.approve(&code, control, remote_auth::now())?;
+    if let Err(error) = core.persist(&inner.auth.saved) {
+        if let Some(device) = inner.auth.pairing.as_mut().and_then(|p| p.device.take()) {
+            inner.auth.saved.devices.retain(|d| d.id != device.id);
+        }
+        return Err(error);
+    }
+    drop(inner);
+    publish(&app, core);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn remote_cancel_pairing(app: AppHandle) {
+    let core = &app.state::<RemoteState>().0;
+    core.inner.lock().unwrap().auth.pairing = None;
+    publish(&app, core);
+}
+
+#[tauri::command]
+pub fn remote_revoke(app: AppHandle, id: String) -> Result<(), String> {
+    let core = &app.state::<RemoteState>().0;
+    let mut inner = core.inner.lock().unwrap();
+    inner.auth.saved.devices.retain(|d| d.id != id);
+    // A consumed pairing must never re-issue a revoked cookie.
+    if inner
+        .auth
+        .pairing
+        .as_ref()
+        .is_some_and(|p| p.device.as_ref().is_some_and(|d| d.id == id))
+    {
+        inner.auth.pairing = None;
+    }
+    let result = core.persist(&inner.auth.saved);
+    drop(inner);
+    publish(&app, core);
+    result
+}
+
+fn router(state: WebState) -> Router {
+    Router::new()
+        .route("/api/me", get(me))
+        .route("/api/logout", post(logout))
+        .route("/api/pair/claim", post(claim))
+        .route("/api/pair/finish", post(finish))
+        .route("/api/sessions", get(sessions))
+        .route("/api/sessions/{id}", get(replay))
+        .route("/api/sessions/{id}/send", post(send))
+        .route("/api/sessions/{id}/stop", post(stop))
+        .route("/api/events", get(events))
+        .fallback(asset)
+        .layer(DefaultBodyLimit::max(64 * 1024))
+        .layer(middleware::from_fn_with_state(state.clone(), boundary))
+        .with_state(state)
+}
+
+async fn boundary(
+    State(state): State<WebState>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let origin = state.core.inner.lock().unwrap().origin.clone();
+    let Some(origin) = origin else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "Remote access is off.").into_response();
+    };
+    let headers = request.headers();
+    let host = headers.get("host").and_then(|h| h.to_str().ok());
+    if host != origin.strip_prefix("https://") {
+        return (StatusCode::FORBIDDEN, "Unrecognized host.").into_response();
+    }
+    let supplied_origin = headers.get("origin").and_then(|h| h.to_str().ok());
+    if supplied_origin.is_some_and(|o| o != origin) {
+        return (StatusCode::FORBIDDEN, "Unrecognized origin.").into_response();
+    }
+    if request.method() != Method::GET
+        && request.method() != Method::HEAD
+        && (supplied_origin != Some(origin.as_str())
+            || headers.get("x-muse-request").and_then(|h| h.to_str().ok()) != Some("1"))
+    {
+        return (StatusCode::FORBIDDEN, "Use the MuseCode phone interface.").into_response();
+    }
+    let mut response = next.run(request).await;
+    for (key, value) in [
+        ("cache-control", "no-store"), ("x-content-type-options", "nosniff"),
+        ("referrer-policy", "no-referrer"), ("x-frame-options", "DENY"),
+        ("content-security-policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"),
+        ("permissions-policy", "camera=(), microphone=(), geolocation=()"),
+    ] { response.headers_mut().insert(key, HeaderValue::from_static(value)); }
+    response
+}
+
+fn credential(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get("cookie")?
+        .to_str()
+        .ok()?
+        .split(';')
+        .find_map(|part| {
+            let (name, value) = part.trim().split_once('=')?;
+            (name == COOKIE).then_some(value)
+        })
+}
+fn authenticate(state: &WebState, headers: &HeaderMap, control: bool) -> Result<Device, ApiError> {
+    let inner = state.core.inner.lock().unwrap();
+    if inner.origin.is_none() {
+        return Err(unauthorized());
+    }
+    let device = inner
+        .auth
+        .authenticate(credential(headers).unwrap_or_default(), remote_auth::now())
+        .ok_or_else(unauthorized)?;
+    if control && !device.control {
+        return Err(ApiError(
+            StatusCode::FORBIDDEN,
+            "This phone has view-only access.".into(),
+        ));
+    }
+    Ok(device)
+}
+
+async fn me(State(state): State<WebState>, headers: HeaderMap) -> ApiResult {
+    let device = authenticate(&state, &headers, false)?;
+    Ok(Json(
+        json!({"device": device.public(), "computer": state.core.inner.lock().unwrap().tailscale.hostname}),
+    ))
+}
+
+#[derive(Deserialize)]
+struct Claim {
+    invitation: String,
+    claim: String,
+    name: String,
+}
+async fn claim(State(state): State<WebState>, Json(body): Json<Claim>) -> ApiResult {
+    let pending = state
+        .core
+        .inner
+        .lock()
+        .unwrap()
+        .auth
+        .claim(
+            &body.invitation,
+            &body.claim,
+            &body.name,
+            remote_auth::now(),
+        )
+        .map_err(bad)?;
+    if let Some(app) = &state.app {
+        publish(app, &state.core);
+    }
+    Ok(Json(json!({"pending": pending})))
+}
+
+#[derive(Deserialize)]
+struct Finish {
+    claim: String,
+}
+async fn finish(
+    State(state): State<WebState>,
+    Json(body): Json<Finish>,
+) -> Result<Response, ApiError> {
+    let inner = state.core.inner.lock().unwrap();
+    let paired = inner
+        .auth
+        .finish(&body.claim, remote_auth::now())
+        .map_err(bad)?;
+    let Some((device, token)) = paired else {
+        return Ok(Json(json!({"status": "pending"})).into_response());
+    };
+    let mut response = Json(json!({"status": "paired", "device": device.public()})).into_response();
+    response.headers_mut().insert(
+        "set-cookie",
+        HeaderValue::from_str(&format!(
+            "{COOKIE}={token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age={}",
+            device.expires_at.saturating_sub(remote_auth::now())
+        ))
+        .map_err(|_| bad("Invalid login."))?,
+    );
+    Ok(response)
+}
+
+async fn logout(State(state): State<WebState>, headers: HeaderMap) -> Result<Response, ApiError> {
+    let device = authenticate(&state, &headers, false)?;
+    {
+        let mut inner = state.core.inner.lock().unwrap();
+        inner.auth.saved.devices.retain(|d| d.id != device.id);
+        state.core.persist(&inner.auth.saved).map_err(bad)?;
+    }
+    if let Some(app) = &state.app {
+        publish(app, &state.core);
+    }
+    let mut response = Json(json!({"ok":true})).into_response();
+    response.headers_mut().insert(
+        "set-cookie",
+        HeaderValue::from_static(
+            "__Host-muse=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0",
+        ),
+    );
+    Ok(response)
+}
+
+async fn sessions(State(state): State<WebState>, headers: HeaderMap) -> ApiResult {
+    authenticate(&state, &headers, false)?;
+    let app = state
+        .app
+        .as_ref()
+        .ok_or_else(|| bad("Desktop unavailable."))?;
+    Ok(Json(
+        json!({"sessions": app.state::<SessionLog>().summaries()}),
+    ))
+}
+
+#[derive(Deserialize)]
+struct Cursor {
+    #[serde(default)]
+    after: u64,
+}
+async fn replay(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(cursor): Query<Cursor>,
+) -> ApiResult {
+    authenticate(&state, &headers, false)?;
+    let app = state
+        .app
+        .as_ref()
+        .ok_or_else(|| bad("Desktop unavailable."))?;
+    let replay = app
+        .state::<SessionLog>()
+        .replay(&id, cursor.after)
+        .ok_or(ApiError(
+            StatusCode::NOT_FOUND,
+            "This conversation was closed on the desktop.".into(),
+        ))?;
+    Ok(Json(json!(replay)))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Prompt {
+    prompt: String,
+}
+async fn send(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<Prompt>,
+) -> ApiResult {
+    authenticate(&state, &headers, true)?;
+    if body.prompt.trim().is_empty() || body.prompt.chars().count() > 16_000 {
+        return Err(bad("Enter a message of up to 16,000 characters."));
+    }
+    let app = state.app.ok_or_else(|| bad("Desktop unavailable."))?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        runner::agent_send(
+            app.clone(),
+            app.state::<runner::AgentState>(),
+            id,
+            body.prompt,
+            false,
+            Some(true),
+        )
+    })
+    .await
+    .map_err(|e| bad(e.to_string()))?
+    .map_err(|e| ApiError(StatusCode::CONFLICT, e))?;
+    Ok(Json(json!(result)))
+}
+
+async fn stop(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> ApiResult {
+    authenticate(&state, &headers, true)?;
+    let app = state.app.ok_or_else(|| bad("Desktop unavailable."))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        runner::agent_stop(app.state::<runner::AgentState>(), id)
+    })
+    .await
+    .map_err(|e| bad(e.to_string()))?
+    .map_err(bad)?;
+    Ok(Json(json!({"ok":true})))
+}
+
+async fn events(State(state): State<WebState>, headers: HeaderMap) -> Result<Response, ApiError> {
+    authenticate(&state, &headers, false)?;
+    let mut receiver = state.core.changes.subscribe();
+    let stream = async_stream::stream! {
+        yield Ok::<Event, Infallible>(Event::default().event("change").data("ready"));
+        let mut check = tokio::time::interval(Duration::from_secs(2));
+        loop {
+            let changed = tokio::select! { result = receiver.changed() => { if result.is_err() { break; } true }, _ = check.tick() => false };
+            if authenticate(&state, &headers, false).is_err() {
+                yield Ok(Event::default().event("revoked").data("Pair again"));
+                break;
+            }
+            if changed { yield Ok(Event::default().event("change").data("updated")); }
+        }
+    };
+    Ok(Sse::new(stream)
+        .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
+        .into_response())
+}
+
+async fn asset(State(state): State<WebState>, uri: axum::http::Uri) -> Response {
+    let path = uri.path().trim_start_matches('/');
+    let name = if path.is_empty() { "remote.html" } else { path };
+    let allowed = matches!(
+        name,
+        "remote.html"
+            | "manifest.webmanifest"
+            | "sw.js"
+            | "muse-icon.png"
+            | "pwa-192.png"
+            | "pwa-512.png"
+    ) || name.strip_prefix("assets/").is_some_and(|s| {
+        !s.is_empty()
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+    });
+    if !allowed {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let Some(app) = state.app else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Some(asset) = app.asset_resolver().get(name.into()) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let mut response = Response::new(Body::from(asset.bytes));
+    if let Ok(mime) = HeaderValue::from_str(&asset.mime_type) {
+        response.headers_mut().insert("content-type", mime);
+    }
+    response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    fn fixture(control: bool) -> (WebState, String) {
+        let token = remote_auth::secret();
+        let saved = Saved {
+            enabled: true,
+            devices: vec![Device {
+                id: "phone".into(),
+                name: "Test phone".into(),
+                control,
+                credential_hash: remote_auth::hash(&token),
+                created_at: remote_auth::now(),
+                expires_at: remote_auth::now() + 60,
+            }],
+        };
+        let (changes, _) = watch::channel(0);
+        let core = Arc::new(Core {
+            inner: Mutex::new(Inner {
+                auth: Auth::new(saved),
+                origin: Some("https://desktop.test.ts.net:8443".into()),
+                server: None,
+                serve: None,
+                tailscale: tailscale::Status::default(),
+                error: None,
+            }),
+            changes,
+            operation: tokio::sync::Mutex::new(()),
+            path: std::env::temp_dir()
+                .join(format!("muse-remote-test-{}.json", uuid::Uuid::new_v4())),
+        });
+        (WebState { core, app: None }, token)
+    }
+    fn request(path: &str, token: Option<&str>, body: Option<Value>) -> Request<Body> {
+        let mut request = Request::builder()
+            .uri(path)
+            .header("host", "desktop.test.ts.net:8443");
+        if let Some(token) = token {
+            request = request.header("cookie", format!("{COOKIE}={token}"));
+        }
+        if let Some(body) = body {
+            request
+                .method("POST")
+                .header("origin", "https://desktop.test.ts.net:8443")
+                .header("x-muse-request", "1")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap()
+        } else {
+            request.body(Body::empty()).unwrap()
+        }
+    }
+    async fn body(response: Response) -> Value {
+        serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), 100_000)
+                .await
+                .unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn private_data_requires_pairing_and_never_returns_credential_hash() {
+        let (state, token) = fixture(true);
+        for path in [
+            "/api/me",
+            "/api/sessions",
+            "/api/sessions/one",
+            "/api/events",
+        ] {
+            assert_eq!(
+                router(state.clone())
+                    .oneshot(request(path, None, None))
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::UNAUTHORIZED
+            );
+        }
+        let response = router(state)
+            .oneshot(request("/api/me", Some(&token), None))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        let value = body(response).await;
+        assert!(value["device"].get("credential_hash").is_none());
+        assert_eq!(value["device"]["name"], "Test phone");
+    }
+    #[tokio::test]
+    async fn host_origin_and_csrf_header_are_required() {
+        let (state, token) = fixture(true);
+        let mut evil = request("/api/me", Some(&token), None);
+        evil.headers_mut()
+            .insert("host", HeaderValue::from_static("attacker.example"));
+        assert_eq!(
+            router(state.clone()).oneshot(evil).await.unwrap().status(),
+            StatusCode::FORBIDDEN
+        );
+        let mut evil = request("/api/logout", Some(&token), Some(json!({})));
+        evil.headers_mut().insert(
+            "origin",
+            HeaderValue::from_static("https://attacker.example"),
+        );
+        assert_eq!(
+            router(state.clone()).oneshot(evil).await.unwrap().status(),
+            StatusCode::FORBIDDEN
+        );
+        let mut evil = request("/api/logout", Some(&token), Some(json!({})));
+        evil.headers_mut().remove("x-muse-request");
+        assert_eq!(
+            router(state).oneshot(evil).await.unwrap().status(),
+            StatusCode::FORBIDDEN
+        );
+    }
+    #[tokio::test]
+    async fn read_only_devices_cannot_send_or_stop_and_extra_controls_are_rejected() {
+        let (state, token) = fixture(false);
+        assert_eq!(
+            router(state.clone())
+                .oneshot(request(
+                    "/api/sessions/one/send",
+                    Some(&token),
+                    Some(json!({"prompt":"hello"}))
+                ))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            router(state.clone())
+                .oneshot(request(
+                    "/api/sessions/one/stop",
+                    Some(&token),
+                    Some(json!({}))
+                ))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            router(state)
+                .oneshot(request(
+                    "/api/sessions/one/send",
+                    Some(&token),
+                    Some(json!({"prompt":"hello","yolo":true}))
+                ))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+    }
+    #[tokio::test]
+    async fn pairing_cookie_needs_desktop_approval_and_revocation_is_immediate() {
+        let (state, _) = fixture(true);
+        let claim = remote_auth::secret();
+        let (invitation, code) = state
+            .core
+            .inner
+            .lock()
+            .unwrap()
+            .auth
+            .invite(remote_auth::now());
+        let response = router(state.clone())
+            .oneshot(request(
+                "/api/pair/claim",
+                None,
+                Some(json!({"invitation":invitation,"claim":claim,"name":"My phone"})),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let response = router(state.clone())
+            .oneshot(request(
+                "/api/pair/finish",
+                None,
+                Some(json!({"claim":claim})),
+            ))
+            .await
+            .unwrap();
+        assert!(response.headers().get("set-cookie").is_none());
+        state
+            .core
+            .inner
+            .lock()
+            .unwrap()
+            .auth
+            .approve(&code, true, remote_auth::now())
+            .unwrap();
+        let response = router(state.clone())
+            .oneshot(request(
+                "/api/pair/finish",
+                None,
+                Some(json!({"claim":claim})),
+            ))
+            .await
+            .unwrap();
+        let cookie = response.headers()["set-cookie"]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        assert!(cookie.contains("HttpOnly; Secure; SameSite=Strict"));
+        let token = cookie.split(';').next().unwrap().split_once('=').unwrap().1;
+        assert_eq!(
+            router(state.clone())
+                .oneshot(request("/api/me", Some(token), None))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+        state.core.inner.lock().unwrap().auth.saved.devices.clear();
+        assert_eq!(
+            router(state.clone())
+                .oneshot(request("/api/me", Some(token), None))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let response = router(state)
+            .oneshot(request(
+                "/api/pair/finish",
+                None,
+                Some(json!({"claim":claim})),
+            ))
+            .await
+            .unwrap();
+        assert!(response.headers().get("set-cookie").is_none());
+    }
+    #[tokio::test]
+    async fn disabling_remote_access_blocks_existing_cookies_and_path_traversal() {
+        let (state, token) = fixture(true);
+        for path in [
+            "/index.html",
+            "/assets/../../remote.json",
+            "/api/agent_send",
+            "/src/main.tsx",
+        ] {
+            assert_eq!(
+                router(state.clone())
+                    .oneshot(request(path, Some(&token), None))
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::NOT_FOUND
+            );
+        }
+        state.core.inner.lock().unwrap().origin = None;
+        assert_eq!(
+            router(state)
+                .oneshot(request("/api/me", Some(&token), None))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+}

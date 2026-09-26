@@ -32,6 +32,10 @@ pub struct TodoItem {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AgentEvent {
+    TurnStart {
+        prompt: String,
+        remote: bool,
+    },
     UserMessage {
         text: String,
     },

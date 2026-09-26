@@ -1,7 +1,11 @@
 mod desktop;
 mod events;
 mod pty;
+mod remote;
+mod remote_auth;
 mod runner;
+mod session_log;
+mod tailscale;
 
 use pty::PtyState;
 use runner::AgentState;
@@ -16,7 +20,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(PtyState::default())
         .manage(AgentState::default())
-        .setup(desktop::setup)
+        .manage(session_log::SessionLog::default())
+        .setup(|app| {
+            desktop::setup(app)?;
+            remote::setup(app)
+        })
         .on_window_event(desktop::close_to_tray)
         .invoke_handler(tauri::generate_handler![
             pty::pty_spawn,
@@ -28,6 +36,13 @@ pub fn run() {
             runner::agent_send,
             runner::agent_stop,
             runner::agent_destroy,
+            remote::remote_status,
+            remote::remote_check_tailscale,
+            remote::remote_enable,
+            remote::remote_pair,
+            remote::remote_approve,
+            remote::remote_cancel_pairing,
+            remote::remote_revoke,
             desktop::desktop_status,
             desktop::desktop_set_notifications,
             desktop::desktop_test_notification,
@@ -39,6 +54,7 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
+                remote::shutdown(app);
                 desktop::shutdown(app);
                 app.state::<AgentState>().shutdown();
                 app.state::<PtyState>().shutdown();

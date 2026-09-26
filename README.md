@@ -35,6 +35,7 @@ So I made it. **MuseCode is my desktop app around the Muse CLI**, with chat, an 
 | :-- | :-- |
 | **Close it. Keep working.** | Closing the window sends MuseCode to the tray. Running tasks, terminals, tabs, and drafts stay alive. |
 | **Real Windows notifications.** | Background Agent turns notify you when they finish or fail. Open the notification to return to its conversation. |
+| **Take the conversation with you.** | Pair your phone with a QR code, follow live Agent activity, send messages, and stop tasks through your private Tailscale connection. |
 | **A quieter workspace.** | Charcoal surfaces, blue accents, readable conversations, and motion that respects reduced-motion preferences. |
 | **See what the agent is doing.** | Streaming responses, Markdown and code blocks, tool activity, task lists, and visible errors. |
 | **Chat and terminal, together.** | Every tab has an Agent view and an embedded terminal. Switching views preserves both. |
@@ -79,6 +80,31 @@ Prefer to build it yourself? See [Build from source](#build-from-source) below.
 
 Notification text keeps prompts, answers, and workspace details inside the app. Windows notification settings and Do not disturb still apply. Use **Send a test Windows notification** in the command palette to check your setup.
 
+## Your desktop, from your phone
+
+MuseCode includes a mobile interface you can add to your home screen. Your desktop runs
+the agent; your phone shows the same Agent conversations and can send messages or stop work,
+including while the desktop window is closed to the tray.
+
+<p align="center"><a href="docs/images/musecode-phone.png"><img src="docs/images/musecode-phone.png" alt="MuseCode's phone interface with a shared conversation and remote message composer" width="320" /></a><br /><sub>Actual phone interface with sample content.</sub></p>
+
+1. Install [Tailscale](https://tailscale.com/download) on your desktop and phone, and connect both to the same network.
+2. In MuseCode, choose **Connect phone → Enable remote access**. Enable HTTPS in Tailscale if prompted.
+3. Choose **Show pairing code**, then scan the QR with your phone camera.
+4. Name the phone and confirm its matching code on your desktop. You can grant control or view-only access.
+5. Add MuseCode to your phone's home screen from the browser menu.
+
+The QR expires after two minutes and can be claimed by one phone. Paired devices appear in
+**Connected devices**, where you can disconnect them. Phone logins expire after 90 days.
+[Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve) provides private HTTPS
+on port **8443**; MuseCode leaves other Serve routes alone and does not enable public Funnel access.
+
+Keep the desktop awake and MuseCode running. Phone controls currently operate on Agent
+conversations opened on the desktop, using standard agent permissions. Terminal control,
+phone push notifications, and creating workspaces from the phone are not included yet.
+Reconnecting or refreshing the phone replays recent activity; quitting the desktop still
+ends its sessions. See [remote access details](docs/remote-access.md) for setup and troubleshooting.
+
 ## A few shortcuts worth knowing
 
 | Shortcut | Action |
@@ -115,7 +141,11 @@ See the [development guide](docs/development.md) for tests, native smoke checks,
 
 ## Where it stands
 
-The current app has passed **13 browser scenarios, 29 Rust tests, and native Windows smoke checks** covering tray behavior, real notification delivery, conversation activation, and process cleanup. [Windows CI](https://github.com/velumix/MuseCode/actions/workflows/windows.yml) checks the code and builds the installer.
+Automated checks cover desktop and phone interactions, pairing and access controls, reconnects,
+and the native agent runner. Windows smoke tests exercise tray behavior, notifications, and
+process cleanup. [Windows CI](https://github.com/velumix/MuseCode/actions/workflows/windows.yml)
+checks the code and builds the installer. The optional remote smoke test also exercises the
+installed Tailscale connection; see the [development guide](docs/development.md).
 
 There are still a few things I want to improve:
 
