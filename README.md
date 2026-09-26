@@ -1,135 +1,133 @@
-<img src="src/assets/muse-mark.png" alt="Muse Code logo" width="88" />
+<div align="center">
+  <img src="src/assets/muse-mark.png" alt="MuseCode's folded blue M" width="112" />
+  <h1>MuseCode</h1>
+  <p><strong>Muse, with a home on your desktop.</strong></p>
+  <p>A Windows desktop companion for the Muse CLI.<br />Created by <a href="https://github.com/velumix"><strong>Velumix</strong></a>.</p>
+  <p>
+    <a href="https://github.com/velumix/MuseCode/actions/workflows/windows.yml"><img src="https://github.com/velumix/MuseCode/actions/workflows/windows.yml/badge.svg" alt="Windows CI" /></a>
+    <img src="https://img.shields.io/badge/Windows-x64-357EF4?style=flat-square" alt="Windows x64" />
+    <img src="https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square" alt="Built with Tauri 2" />
+    <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square" alt="Built with React 19" />
+  </p>
+  <p>
+    <a href="#get-musecode"><strong>Get MuseCode</strong></a> ·
+    <a href="#why-i-built-it">The story</a> ·
+    <a href="docs/development.md">Development guide</a> ·
+    <a href="https://github.com/velumix/MuseCode/issues">Feedback &amp; ideas</a>
+  </p>
+</div>
 
-# MuseCode
+<p align="center">
+  <img src="docs/images/musecode-welcome.png" alt="MuseCode's dark desktop interface, conversation sidebar, and centered composer" width="1200" />
+</p>
 
-[![Windows CI](https://github.com/velumix/MuseCode/actions/workflows/windows.yml/badge.svg)](https://github.com/velumix/MuseCode/actions/workflows/windows.yml)
+## Why I built it
 
-A clean, dark Windows desktop app for the Muse coding agent. Chat with the agent, follow its
-tools and tasks, or switch to an embedded terminal. Close the window to keep working in the
-tray, and get native Windows notifications when a background Agent task completes or fails.
+I'm **[Velumix](https://github.com/velumix)**, and I built MuseCode because Muse only had a terminal version when I started this project.
 
-A Tauri + React desktop shell for the Muse coding agent.
-Each tab is a chat-first agent session driven by structured `muse exec --json`
-output (messages, tool calls, todos, approvals), with the embedded TUI
-terminal (xterm.js over native ConPTY) kept as a per-tab fallback, in a
-frameless window with a conversation sidebar.
+I wanted a proper app: something that could live in the Windows tray, keep working after I closed the window, and send me real notifications when it was done. I also wanted a clean, minimal interface that felt good to use every day.
 
-The interface uses charcoal surfaces, restrained blue accents, rounded conversation cards,
-and a centered composer. The sidebar becomes an icon rail in smaller windows. Conversations
-take their title from the first message; the top search opens commands and conversation switching.
+So I made it. **MuseCode is my desktop app around the Muse CLI**, with chat, an embedded terminal, background work, and native Windows notifications. The Muse CLI provides the coding agent; this repository is the desktop experience I built around it.
 
-## Prerequisites
+## Built for the way I wanted to work
 
-- Node.js 24 + npm (the tested version is pinned in `.node-version`)
-- Rust via rustup + MSVC build tools (the tested toolchain is pinned in `rust-toolchain.toml`)
-- The `muse` CLI on your `PATH` (the app shells out to it)
+| | What you get |
+| :-- | :-- |
+| **Close it. Keep working.** | Closing the window sends MuseCode to the tray. Running tasks, terminals, tabs, and drafts stay alive. |
+| **Real Windows notifications.** | Background Agent turns notify you when they finish or fail. Open the notification to return to its conversation. |
+| **A quieter workspace.** | Charcoal surfaces, blue accents, readable conversations, and motion that respects reduced-motion preferences. |
+| **See what the agent is doing.** | Streaming responses, Markdown and code blocks, tool activity, task lists, and visible errors. |
+| **Chat and terminal, together.** | Every tab has an Agent view and an embedded terminal. Switching views preserves both. |
+| **Pick up where you left off.** | Click the tray icon or open the desktop shortcut to restore the existing instance. |
+| **Keep your hands on the keyboard.** | A command palette, session shortcuts, terminal search, and zoom controls. |
 
-## Develop
+<table>
+  <tr>
+    <td width="50%"><a href="docs/images/musecode-conversation.png"><img src="docs/images/musecode-conversation.png" alt="A sample conversation in MuseCode" /></a></td>
+    <td width="50%"><a href="docs/images/musecode-commands.png"><img src="docs/images/musecode-commands.png" alt="MuseCode's command palette with notification controls" /></a></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Space for the conversation.</strong></td>
+    <td align="center"><strong>Your next action, a few keys away.</strong></td>
+  </tr>
+</table>
 
-```sh
-git clone https://github.com/velumix/MuseCode.git
-cd MuseCode
-npm ci
-npm run tauri dev
-```
+<p align="center"><sub>Actual app interface with sample content. Click a preview to see it at full size.</sub></p>
 
-## Install / uninstall
+## Get MuseCode
+
+**You'll need Windows x64 and a working Muse CLI installation.** The app uses the `muse` command already on your computer. Confirm that `muse --version` works in a terminal before launching it.
+
+1. Open [Windows CI](https://github.com/velumix/MuseCode/actions/workflows/windows.yml) and choose the latest successful run.
+2. Download **MuseCode-windows-x64** from **Artifacts** and extract the ZIP.
+3. Run **Muse Code_0.2.0_x64-setup.exe**, then launch **Muse Code** from your desktop or Start menu.
+
+CI artifacts require a GitHub sign-in and are retained for 14 days. These are unsigned development builds. Install the bundle so Windows can register the app's notification identity and click handler.
+
+Prefer to build it yourself? See [Build from source](#build-from-source) below.
+
+## At home in the tray
+
+| Action | What happens |
+| :-- | :-- |
+| Close the window or press `Alt+F4` | MuseCode hides to the tray and keeps running. |
+| Click the tray icon or launch the desktop shortcut | The same window, conversations, and drafts return. |
+| Finish or fail an Agent turn while MuseCode is hidden, minimized, or unfocused | Windows receives a notification for that conversation. |
+| Click a notification | MuseCode opens the matching Agent conversation. |
+| Toggle the footer bell or tray notification setting | Notifications are muted or enabled; your preference is saved. |
+| Choose **Quit Muse Code** from the tray or command palette | The app exits and stops its background work. |
+
+Notification text keeps prompts, answers, and workspace details inside the app. Windows notification settings and Do not disturb still apply. Use **Send a test Windows notification** in the command palette to check your setup.
+
+## A few shortcuts worth knowing
+
+| Shortcut | Action |
+| :-- | :-- |
+| `Ctrl+K` | Open the command palette |
+| `Ctrl+T` | Start a new conversation |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Switch conversations |
+| `Ctrl+1` … `Ctrl+9` | Jump to a conversation |
+| `Ctrl+L` | Focus the message input |
+| `Enter` / `Shift+Enter` | Send / add a new line |
+| `Ctrl+F` | Search the terminal |
+| `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Zoom the terminal in / out / reset |
+
+## Build from source
+
+Install Node.js 24, rustup, the Windows MSVC build tools, and the Muse CLI. The tested Node and Rust versions are pinned in [`.node-version`](.node-version) and [`rust-toolchain.toml`](rust-toolchain.toml).
 
 ```powershell
-.\scripts\install.ps1 -Build            # release build + silent install
-.\scripts\install.ps1 -Build -Launch    # ...and launch it
-.\scripts\install.ps1 -Uninstall         # silent uninstall
+git clone https://github.com/velumix/MuseCode.git
+cd MuseCode
+npm.cmd ci
+npm.cmd run tauri dev
 ```
 
-The installer is a custom NSIS bundle (`src-tauri/nsis/`): branded
-welcome/finish pages, custom header/sidebar art, plus a post-install check
-that warns when the `muse` CLI is missing from `PATH`.
+Build and install the Windows bundle:
 
-Brand exports are generated from the saved transparent master with
-`.\scripts\make-assets.ps1` (UI mark, favicon, platform icons, and NSIS artwork).
-See [the brand notes](docs/brand.md) for the master asset, generation prompt, and export process.
-
-The [Windows CI workflow](https://github.com/velumix/MuseCode/actions/workflows/windows.yml)
-runs the frontend, browser, Rust, formatting, and Clippy checks, then builds an NSIS installer.
-Open a successful workflow run and download **MuseCode-windows-x64** under Artifacts. These
-are unsigned development builds. Native tray/notification smoke tests require an interactive
-Windows desktop and are run locally using the commands below.
-
-## Shortcuts
-
-- `Ctrl+T` new session, `Ctrl+Tab` / `Ctrl+Shift+Tab` switch sessions
-- `Enter` send chat message, `Shift+Enter` newline, `Stop` interrupts the turn
-- Agent/Terminal toggle in the conversation header
-- `Ctrl+K` command palette, `Ctrl+L` focus message input, `Ctrl+1`–`Ctrl+9` jump to a tab
-- Arrow keys / Home / End move between focused session tabs; Delete closes the focused tab
-- `Ctrl+F` find in terminal, `Enter` / `Shift+Enter` next/previous match
-- `Ctrl+=` / `Ctrl+-` / `Ctrl+0` terminal zoom in/out/reset
-- Standard / YOLO toggle inside the composer controls YOLO (`--yolo`: no approvals/sandbox) for that tab's turns
-
-## Tests
-
-```sh
-npm run check          # TypeScript + production frontend build + browser tests + Rust tests
-npm run check:native   # Windows debug build + real WebView2/IPC/ConPTY smoke test
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Build
 ```
 
-On Windows with PowerShell script execution disabled, use `npm.cmd` / `npx.cmd`.
-Browser tests use installed Chrome or Edge; set `BROWSER_PATH` for another Chromium executable.
-The native test starts Vite if needed, launches a separate debug app with an isolated WebView2
-profile, and substitutes a deterministic CLI fixture only in that child's environment. It
-does not use the configured AI provider, alter the installed app, or change your CLI settings.
-Quit any running Muse instance before testing. Use `node scripts/native-smoke.mjs --release`
-for the packaged build, or `node scripts/native-smoke.mjs --installed --notifications` after
-installing the current bundle to also verify Windows Notification Center delivery and the
-registered COM activation path. These checks use isolated notification preferences.
-Test artifacts are written to ignored `test-results/` and `.qa/` directories.
+The app uses **Tauri 2 + Rust**, **React 19 + TypeScript**, and **xterm.js over Windows ConPTY**. Chat is driven by structured `muse exec --json` output. Tray lifetime and notification delivery run in the native backend.
 
-Coverage includes chat/tool/todo rendering, final answers, error recovery, workspace changes,
-tab and mode preservation, race-prone startup/teardown, keyboard/clipboard interactions,
-accessibility, PTY decoding, native process trees, close-to-tray survival, single-instance
-restoration, notification activation, and explicit Quit cleanup.
-See [the QA report](docs/qa-2026-09-26.md) for findings, evidence, and remaining work.
+See the [development guide](docs/development.md) for tests, native smoke checks, installer commands, and the project layout. The [QA report](docs/qa-2026-09-26.md) records the verified behavior and remaining work; the [brand notes](docs/brand.md) cover the logo and assets.
 
-## Session behavior
+## Where it stands
 
-Closing the window (including Alt+F4) hides Muse in the Windows system tray. Running Agent
-turns, terminals, tabs, and drafts stay alive. Click the Muse tray icon or open the desktop
-shortcut to restore the existing instance. Right-click the tray icon and choose **Quit Muse
-Code** to stop background work and exit; Quit is also available in the command palette.
+The current app has passed **13 browser scenarios, 29 Rust tests, and native Windows smoke checks** covering tray behavior, real notification delivery, conversation activation, and process cleanup. [Windows CI](https://github.com/velumix/MuseCode/actions/workflows/windows.yml) checks the code and builds the installer.
 
-Background Agent turns send native Windows notifications when they complete or fail while
-Muse is hidden, minimized, or unfocused. Click a notification to open its conversation.
-Notification text contains no prompt, answer, or workspace details. Mute notifications using
-the footer bell or tray menu; this preference survives restarts. The tray menu and command
-palette include **Send a test Windows notification**. Windows notification settings and Do
-not disturb still control delivery. Install the NSIS bundle to register Muse's notification
-identity and activation handler; the development executable alone does not install them.
+There are still a few things I want to improve:
 
-Switching between Agent and Terminal preserves both views until the tab closes. Terminal is
-a **separate conversation** launched in the tab's workspace; it does not share the Agent
-transcript. Applying a different valid workspace starts a fresh chat and restarts an existing
-terminal in that directory. Invalid workspace paths preserve the current conversation.
-Restart resets only the currently selected mode. Closing a tab stops its processes; closing
-the window preserves them. Explicit Quit stops every owned agent and terminal process.
+- **Save and restore sessions.** Tabs and drafts survive closing to the tray, but are still held in memory. Explicit Quit, crashes, and Windows restarts do not restore them yet.
+- **Interactive approvals in chat.** Chat currently displays approval notices and auto-cancels interactive questions. The terminal is available for interactive workflows.
+- **Easier project switching.** A folder picker, recent workspaces, and clearer project navigation are on the list.
 
-Transcripts and drafts live in memory. They survive hiding to the tray, but are not restored
-after explicit Quit, a crash, or a Windows restart.
-The CLI keeps its own session logs, but this UI has no history browser or restore operation yet.
-Headless chat displays approval notices and auto-cancels `request_user_input`; it cannot
-collect interactive approval/question responses. Use a separate Terminal conversation for
-those workflows. YOLO changes approval/sandbox behavior; it does not add interactive responses.
+Agent and Terminal are separate conversations within a tab. Terminal work keeps running in the tray, but completion notifications currently come from structured Agent turns. Changing a tab's workspace intentionally starts a fresh session.
 
-## Layout
+---
 
-- `src/` — React UI: `TitleBar`, `TabBar`, `ChatView`, `TerminalView`, `SearchBar`
-- `src-tauri/src/runner.rs` — headless agent sessions, one `muse exec --json`
-  child per turn (`agent_new/send/stop/destroy`, `agent-event` events)
-- `src-tauri/src/events.rs` — tolerant fold of the `--json` stream into UI events
-- `src-tauri/src/pty.rs` — multi-session PTY manager
-  (`pty_spawn/write/resize/kill`, `pty-data` / `pty-exit` events)
-- `src-tauri/src/desktop.rs` — tray lifetime, single-instance restoration, notification settings
-- `src-tauri/src/windows_notifications.rs` — Windows toasts and COM conversation activation
-- `src-tauri/nsis/` — installer hooks + custom bitmaps
-- `scripts/` — `install.ps1`, `make-assets.ps1`
-- `docs/rich-agent-ui.md` — rich-agent-UI design + CLI probe findings
+<p align="center">
+  Built by <a href="https://github.com/velumix"><strong>Velumix</strong></a>.<br />
+  <sub>I wanted Muse to feel at home on my desktop. Now it does.</sub>
+</p>
