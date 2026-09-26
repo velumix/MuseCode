@@ -24,6 +24,13 @@ playwright-report/
 *.key
 *.p12
 *.pfx
+*.jks
+*.keystore
+android/.gradle/
+android/**/build/
+android/local.properties
+android/*.apk
+artifacts/
 
 # Editor directories and files
 .vscode/*

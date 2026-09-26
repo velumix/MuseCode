@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/root"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
+    <LinearLayout android:id="@+id/connection_bar" android:layout_width="match_parent" android:layout_height="52dp"
+        android:orientation="horizontal" android:gravity="center_vertical" android:paddingStart="16dp" android:paddingEnd="4dp" android:visibility="gone">
+        <TextView android:id="@+id/desktop_name" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:text="@string/private_connection" android:textColor="@color/muse_muted" android:textSize="12sp" android:maxLines="1" android:ellipsize="end" />
+        <Button android:id="@+id/connection_menu" style="@style/MuseButton" android:layout_width="52dp" android:layout_height="48dp"
+            android:minWidth="0dp" android:padding="0dp" android:text="@string/menu_symbol" android:contentDescription="@string/connection_options" />
+    </LinearLayout>
+    <ProgressBar android:id="@+id/progress" style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent" android:layout_height="2dp" android:indeterminate="true" android:visibility="gone" />
+    <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+        <WebView android:id="@+id/web" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone" />
+        <ScrollView android:id="@+id/welcome" android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+                android:gravity="center_vertical" android:paddingStart="28dp" android:paddingEnd="28dp" android:paddingTop="32dp" android:paddingBottom="32dp">
+                <ImageView android:layout_width="72dp" android:layout_height="72dp" android:src="@drawable/muse_mark" android:contentDescription="@string/app_name" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="32dp"
+                    android:text="@string/home_eyebrow" android:textColor="@color/muse_blue" android:textSize="11sp" android:letterSpacing="0.12" android:fontFamily="sans-serif-medium" />
+                <TextView android:id="@+id/welcome_title" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"
+                    android:text="@string/home_title" android:textColor="@color/muse_text" android:textSize="42sp" android:fontFamily="sans-serif-medium" android:lineSpacingExtra="-3dp" />
+                <TextView android:id="@+id/welcome_description" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="18dp"
+                    android:text="@string/home_description" android:textColor="@color/muse_muted" android:textSize="16sp" android:lineSpacingExtra="5dp" />
+                <Button android:id="@+id/primary" style="@style/MuseButton" android:layout_width="match_parent" android:layout_height="56dp"
+                    android:layout_marginTop="32dp" android:background="@drawable/primary_button" android:text="@string/scan_qr" />
+                <Button android:id="@+id/paste_link" style="@style/MuseButton" android:layout_width="match_parent" android:layout_height="52dp"
+                    android:layout_marginTop="8dp" android:text="@string/paste_link" />
+                <Button android:id="@+id/tailscale" style="@style/MuseButton" android:layout_width="match_parent" android:layout_height="52dp"
+                    android:text="@string/open_tailscale" android:textColor="@color/muse_muted" />
+                <TextView android:id="@+id/welcome_hint" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="24dp"
+                    android:text="@string/home_hint" android:textColor="@color/muse_muted" android:textSize="13sp" android:lineSpacingExtra="4dp" />
+            </LinearLayout>
+        </ScrollView>
+    </FrameLayout>
+</LinearLayout>

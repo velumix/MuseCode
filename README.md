@@ -5,6 +5,7 @@
   <p>A Windows desktop companion for the Muse CLI.<br />Created by <a href="https://github.com/velumix"><strong>Velumix</strong></a>.</p>
   <p>
     <a href="https://github.com/velumix/MuseCode/actions/workflows/windows.yml"><img src="https://github.com/velumix/MuseCode/actions/workflows/windows.yml/badge.svg" alt="Windows CI" /></a>
+    <a href="https://github.com/velumix/MuseCode/actions/workflows/android.yml"><img src="https://github.com/velumix/MuseCode/actions/workflows/android.yml/badge.svg" alt="Android CI" /></a>
     <img src="https://img.shields.io/badge/Windows-x64-357EF4?style=flat-square" alt="Windows x64" />
     <img src="https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square" alt="Built with Tauri 2" />
     <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square" alt="Built with React 19" />
@@ -82,7 +83,9 @@ Notification text keeps prompts, answers, and workspace details inside the app. 
 
 ## Your desktop, from your phone
 
-MuseCode includes a mobile interface you can add to your home screen. Your desktop runs
+MuseCode includes an [Android APK](docs/android.md) with a built-in QR scanner, plus a mobile
+web app you can add to your home screen. Transfer the APK by Bluetooth, Quick Share, or USB
+and open it on your phone to install. Your desktop runs
 the agent; your phone shows the same Agent conversations and can send messages or stop work,
 including while the desktop window is closed to the tray.
 
@@ -90,9 +93,9 @@ including while the desktop window is closed to the tray.
 
 1. Install [Tailscale](https://tailscale.com/download) on your desktop and phone, and connect both to the same network.
 2. In MuseCode, choose **Connect phone → Enable remote access**. Enable HTTPS in Tailscale if prompted.
-3. Choose **Show pairing code**, then scan the QR with your phone camera.
+3. Choose **Show pairing code**, then scan it using **Scan desktop QR** in the Android app or your phone camera for the web version.
 4. Name the phone and confirm its matching code on your desktop. You can grant control or view-only access.
-5. Add MuseCode to your phone's home screen from the browser menu.
+5. The Android app remembers your connection. For the web version, add MuseCode to your home screen from the browser menu.
 
 The QR expires after two minutes and can be claimed by one phone. Paired devices appear in
 **Connected devices**, where you can disconnect them. Phone logins expire after 90 days.

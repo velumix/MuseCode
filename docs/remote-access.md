@@ -1,8 +1,9 @@
 # Remote access
 
-MuseCode's phone interface connects to the agent running on your Windows desktop. It is an
-installable web app, so Android does not need a separate MuseCode APK. Install the regular
-Tailscale app on both devices; MuseCode uses that client's private network and HTTPS support.
+MuseCode's phone interface connects to the agent running on your Windows desktop. Use the
+[Android APK](android.md) with its built-in QR scanner, or the installable mobile web app.
+Install the regular Tailscale app on both devices; MuseCode uses that client's private
+network and HTTPS support.
 
 ## Connect a phone
 
@@ -10,10 +11,10 @@ Tailscale app on both devices; MuseCode uses that client's private network and H
 2. Open **Connect phone** in MuseCode's footer or command palette. Refresh to check Tailscale.
 3. Enable remote access. If Tailscale needs HTTPS enabled for your network, follow its setup
    link and try again. Your tailnet's permissions must allow access to this device on TCP 8443.
-4. Show a QR code, scan it using your phone's camera, and name the phone.
+4. Show a QR code, scan it in the Android app (or your phone's camera for the web app), and name the phone.
 5. Compare the six-digit code on both screens and confirm on the desktop. Uncheck the control
    permission to grant view-only access.
-6. Use your browser's **Install app** or **Add to Home screen** option. On iOS this is in Safari's
+6. If using the web app, use your browser's **Install app** or **Add to Home screen** option. On iOS this is in Safari's
    Share menu. Browser support and installation labels vary.
 
 The QR expires in two minutes. Its invitation is single use: a second phone cannot claim it.
