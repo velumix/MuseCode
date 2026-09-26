@@ -210,7 +210,7 @@ public final class MainActivity extends AppCompatActivity {
     private void connect(DesktopAddress address) {
         Runnable load = () -> {
             desktop = address;
-            connectionUrl = address.url;
+            connectionUrl = address.navigationUrl();
             // Persist only the origin. The one-use QR invitation stays in memory.
             preferences.edit().putString("origin", address.origin).apply();
             findViewById(R.id.connection_bar).setVisibility(View.VISIBLE);

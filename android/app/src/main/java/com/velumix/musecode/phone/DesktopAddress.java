@@ -3,6 +3,7 @@ package com.velumix.musecode.phone;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /** Only MuseCode's private HTTPS origin can become an in-app desktop. */
@@ -42,5 +43,12 @@ final class DesktopAddress {
             return "https".equalsIgnoreCase(uri.getScheme()) && hostname.equalsIgnoreCase(uri.getHost())
                     && uri.getPort() == 8443 && uri.getRawUserInfo() == null;
         } catch (URISyntaxException | NullPointerException e) { return false; }
+    }
+
+    String navigationUrl() {
+        int fragment = url.indexOf('#');
+        // A new fragment alone is a same-document navigation. The phone UI reads
+        // invitations on mount, so each scan must create a fresh document.
+        return fragment < 0 ? url : origin + "/?connect=" + UUID.randomUUID() + url.substring(fragment);
     }
 }

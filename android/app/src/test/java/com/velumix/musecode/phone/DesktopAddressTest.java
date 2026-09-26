@@ -33,4 +33,13 @@ public class DesktopAddressTest {
         assertFalse(desktop.contains("http://desktop.tail123.ts.net:8443/"));
         assertFalse(desktop.contains(null));
     }
+    @Test public void rescanningForcesANewDocumentAndPreservesTheInvitation() {
+        DesktopAddress desktop = DesktopAddress.parse(ORIGIN + "/#pair=" + "c".repeat(64));
+        String first = desktop.navigationUrl();
+        String second = desktop.navigationUrl();
+        assertNotEquals(first.split("#")[0], second.split("#")[0]);
+        assertTrue(desktop.contains(first));
+        assertTrue(first.endsWith("#pair=" + "c".repeat(64)));
+        assertEquals(ORIGIN + "/", DesktopAddress.parse(ORIGIN).navigationUrl());
+    }
 }

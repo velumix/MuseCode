@@ -36,7 +36,9 @@ public class MainActivityTest {
         try (ActivityController<MainActivity> controller = Robolectric.buildActivity(MainActivity.class).setup()) {
             MainActivity activity = controller.get();
             activity.acceptAddress(qr);
-            assertEquals(qr, shadowOf((WebView) activity.findViewById(R.id.web)).getLastLoadedUrl());
+            String loaded = shadowOf((WebView) activity.findViewById(R.id.web)).getLastLoadedUrl();
+            assertTrue(loaded.startsWith(origin + "/?connect="));
+            assertTrue(loaded.endsWith("#pair=" + "b".repeat(64)));
             assertEquals(origin, activity.getSharedPreferences("desktop", 0).getString("origin", null));
             assertFalse(activity.getSharedPreferences("desktop", 0).getAll().toString().contains("pair="));
         }
