@@ -28,7 +28,7 @@ async function boot(page: Page, paired = true, control = true) {
     const body = request.method() === "POST" ? request.postDataJSON() : null;
     const answer = (value: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(value) });
     if (url.pathname === "/api/pair/claim") { remote.pending = true; return answer({ pending: { name: body.name, code: "482196", expires_at: Math.floor(Date.now() / 1000) + 120 } }); }
-    if (url.pathname === "/api/pair/finish") return answer(remote.paired ? { status: "paired", device: { id: "phone", name: "My phone", control } } : { status: "pending" });
+    if (url.pathname === "/api/pair/finish") return answer(remote.paired ? { status: "paired", device: { id: "phone", name: "My phone", control } } : { status: "pending", pending: { name: "My phone", code: "482196", expires_at: Math.floor(Date.now() / 1000) + 120 } });
     if (!remote.paired || remote.revoked) return answer({ error: "Pair again" }, 401);
     if (url.pathname === "/api/me") return answer({ device: { id: "phone", name: "My phone", control }, computer: "desktop.tail.ts.net" });
     if (url.pathname === "/api/sessions") return answer({ sessions: remote.sessions });
@@ -63,6 +63,8 @@ test("phone pairs with a matching code and waits for desktop approval", async ({
   await expect(page.getByText("Waiting for desktop confirmation")).toBeVisible();
   expect(remote.pending).toBe(true);
   await expect(page.getByLabel("Message your desktop agent")).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByLabel("Pairing code")).toHaveText("482196");
   remote.paired = true;
   await expect(page.getByLabel("Message your desktop agent")).toBeVisible();
   await expect(page.locator(".phone-online")).toBeVisible();

@@ -506,7 +506,10 @@ async fn finish(
         .finish(&body.claim, remote_auth::now())
         .map_err(bad)?;
     let Some((device, token)) = paired else {
-        return Ok(Json(json!({"status": "pending"})).into_response());
+        return Ok(Json(
+            json!({"status": "pending", "pending": inner.auth.pending(remote_auth::now())}),
+        )
+        .into_response());
     };
     let mut response = Json(json!({"status": "paired", "device": device.public()})).into_response();
     response.headers_mut().insert(
@@ -864,6 +867,7 @@ mod tests {
             .await
             .unwrap();
         assert!(response.headers().get("set-cookie").is_none());
+        assert_eq!(body(response).await["pending"]["code"], code);
         state
             .core
             .inner

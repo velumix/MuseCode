@@ -76,9 +76,10 @@ export default function RemoteApp() {
     let timer: number;
     const poll = async () => {
       try {
-        const value = await api<{ status: string; device?: Device }>("/pair/finish", { claim });
+        const value = await api<{ status: string; device?: Device; pending?: Pending }>("/pair/finish", { claim });
         if (disposed) return;
         if (value.device) { setDevice(value.device); setInvitation(""); setPending(null); setClaim(""); saveClaim(""); setError(""); return; }
+        if (value.pending) setPending(value.pending);
       } catch (e) {
         if (disposed) return;
         setError(String(e instanceof Error ? e.message : e));
