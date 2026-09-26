@@ -80,6 +80,13 @@ the phone. It removes its own route on exit. For the installed bundle use
 `node scripts/remote-smoke.mjs --installed`. This test is intentionally not run in CI because
 it needs a signed-in tailnet; Rust HTTP tests cover the access boundary without a network.
 
+For USB without a physical phone or tailnet, run
+`node scripts/remote-smoke.mjs --release --usb-fixture` after a release build. It compiles a
+small ADB fixture in `.qa`, then exercises the real loopback server, browser cookies,
+desktop approval, tray control, disconnect/reconnect, stop, and revocation. It never invokes
+real ADB. Android unit tests cover USB launch intents and strict loopback URL validation;
+a connected Android phone is still needed to verify the physical cable and WebView.
+
 Run `npm run build` before testing the phone interface in a debug native build. Tauri's asset
 resolver serves the built `dist/remote.html` and assets; Vite hot reload is desktop-only.
 See [remote access](remote-access.md) for permissions, lifecycle, limits, and setup.
@@ -135,6 +142,7 @@ those workflows. YOLO changes approval/sandbox behavior; it does not add interac
 - `src-tauri/src/remote_auth.rs` — one-use pairing and revocable device credentials
 - `src-tauri/src/session_log.rs` — backend event replay independent of the desktop WebView
 - `src-tauri/src/tailscale.rs` — client discovery, connection status, and owned Serve lifecycle
+- `src-tauri/src/usb.rs` — ADB discovery, USB forwarding, and Android app launch
 - `src-tauri/nsis/` — installer hooks + custom bitmaps
 - `scripts/` — `install.ps1`, `make-assets.ps1`
 - `docs/rich-agent-ui.md` — rich-agent-UI design + CLI probe findings

@@ -2,7 +2,7 @@
 
 The Android companion is an installable APK with MuseCode's icon, an offline-capable QR
 scanner, and a private WebView for the desktop's existing phone interface. It supports
-Android 8 and newer, including Pixel 9. The desktop runs Muse; the APK does not run a local
+Android 8 and newer, including Pixel 7 Pro and Pixel 9. The desktop runs Muse; the APK does not run a local
 agent or replace the Tailscale VPN app.
 
 ## Install on a Pixel
@@ -10,7 +10,7 @@ agent or replace the Tailscale VPN app.
 1. Transfer `MuseCode-0.2.0.apk` to the phone using Bluetooth, Quick Share, or USB.
 2. Open the received APK in Files. Allow **Install unknown apps** for the app opening it
    if Android asks, then install MuseCode. You can turn that permission off afterward.
-3. Install the official Tailscale Android app and connect it to the desktop's tailnet.
+3. For wireless access, install the official Tailscale Android app and connect it to the desktop's tailnet. For USB, use the steps below instead.
 4. Open **Connect phone** in desktop MuseCode, enable remote access, and show a fresh QR.
 5. Open the MuseCode Android app, tap **Scan desktop QR**, and allow camera access.
 6. Name the phone and approve the matching six-digit code on the desktop.
@@ -25,7 +25,23 @@ The entry screen explains how to reconnect when the desktop or Tailscale is unav
 The same [remote access limits](remote-access.md) apply, including no Android push
 notifications yet. Android can reclaim a background app, which loses an unsent draft.
 
-## Build
+## Connect over USB without Tailscale
+
+1. Install the APK on the phone and [Android SDK Platform-Tools](https://developer.android.com/tools/releases/platform-tools) on Windows. MuseCode finds ADB in the standard Android SDK location, `ANDROID_HOME`, `ANDROID_SDK_ROOT`, or `PATH`.
+2. On the Pixel, open **Settings → About phone**, tap **Build number** seven times, then enable **Settings → System → Developer options → USB debugging**.
+3. Plug in a USB data cable, unlock the phone, and allow USB debugging for this computer.
+4. In desktop MuseCode, open **Connect phone → USB cable**, then choose **Connect** beside the phone. The Android app opens automatically.
+5. Name the phone, tap **Pair with desktop**, and approve the matching code on the desktop.
+
+The cable carries the same live conversations, send, and stop controls. Wi-Fi and Tailscale
+are unnecessary. The desktop can stay in its tray. After unplugging, restarting ADB, or
+restarting MuseCode, reconnect the cable and choose **Reconnect** (or **Connect**) in the
+desktop panel. A paired phone keeps its login; USB and Tailscale logins are separate.
+Choose **Disconnect USB** to stop the cable connection, or revoke its paired device to
+remove its saved access. USB debugging authorizes this computer for Android development
+commands; only allow computers you trust.
+
+## Build from source
 
 Use JDK 17 and Android SDK platform 36 / build-tools 35.0.0. Point `JAVA_HOME` and
 `ANDROID_HOME` at those installations. The checked-in Gradle 8.13 wrapper verifies its

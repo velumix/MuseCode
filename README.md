@@ -36,7 +36,7 @@ So I made it. **MuseCode is my desktop app around the Muse CLI**, with chat, an 
 | :-- | :-- |
 | **Close it. Keep working.** | Closing the window sends MuseCode to the tray. Running tasks, terminals, tabs, and drafts stay alive. |
 | **Real Windows notifications.** | Background Agent turns notify you when they finish or fail. Open the notification to return to its conversation. |
-| **Take the conversation with you.** | Pair your phone with a QR code, follow live Agent activity, send messages, and stop tasks through your private Tailscale connection. |
+| **Take the conversation with you.** | Follow live Agent activity, send messages, and stop tasks over private Tailscale or a USB cable. Pairing needs your desktop approval. |
 | **A quieter workspace.** | Charcoal surfaces, blue accents, readable conversations, and motion that respects reduced-motion preferences. |
 | **See what the agent is doing.** | Streaming responses, Markdown and code blocks, tool activity, task lists, and visible errors. |
 | **Chat and terminal, together.** | Every tab has an Agent view and an embedded terminal. Switching views preserves both. |
@@ -96,6 +96,11 @@ including while the desktop window is closed to the tray.
 3. Choose **Show pairing code**, then scan it using **Scan desktop QR** in the Android app or your phone camera for the web version.
 4. Name the phone and confirm its matching code on your desktop. You can grant control or view-only access.
 5. The Android app remembers your connection. For the web version, add MuseCode to your home screen from the browser menu.
+
+**Prefer a cable?** Install the Android APK, enable USB debugging on the phone, and choose
+**Connect phone → USB cable → Connect** on the desktop. MuseCode opens on the phone;
+approve its matching code to start. Tailscale is optional for USB. See the
+[USB setup guide](docs/android.md#connect-over-usb-without-tailscale).
 
 The QR expires after two minutes and can be claimed by one phone. Paired devices appear in
 **Connected devices**, where you can disconnect them. Phone logins expire after 90 days.

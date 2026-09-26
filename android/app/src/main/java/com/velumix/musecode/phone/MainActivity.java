@@ -84,6 +84,7 @@ public final class MainActivity extends AppCompatActivity {
         findViewById(R.id.primary).setOnClickListener(v -> scan());
         findViewById(R.id.paste_link).setOnClickListener(v -> enterAddress());
         findViewById(R.id.tailscale).setOnClickListener(v -> openTailscale());
+        findViewById(R.id.usb).setOnClickListener(v -> connectUsb());
         findViewById(R.id.connection_menu).setOnClickListener(this::showMenu);
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override public void handleOnBackPressed() {
@@ -91,11 +92,36 @@ public final class MainActivity extends AppCompatActivity {
                 moveTaskToBack(true);
             }
         });
+        if (acceptUsbIntent(getIntent())) return;
         String saved = preferences.getString("origin", null);
         if (saved != null) {
             try { connect(DesktopAddress.parse(saved)); }
             catch (IllegalArgumentException e) { preferences.edit().remove("origin").apply(); }
         }
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        acceptUsbIntent(intent);
+    }
+
+    private boolean acceptUsbIntent(Intent intent) {
+        String value = intent.getStringExtra("muse_usb_url");
+        intent.removeExtra("muse_usb_url");
+        if (value == null) return false;
+        try {
+            DesktopAddress address = DesktopAddress.parse(value);
+            if (!address.usb) return false;
+            acceptAddress(value);
+            return true;
+        } catch (IllegalArgumentException e) { return false; }
+    }
+
+    private void connectUsb() {
+        new AlertDialog.Builder(this).setTitle(R.string.usb_title).setMessage(R.string.usb_help)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.connect, (dialog, which) -> acceptAddress(DesktopAddress.USB_ORIGIN)).show();
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -214,7 +240,7 @@ public final class MainActivity extends AppCompatActivity {
             // Persist only the origin. The one-use QR invitation stays in memory.
             preferences.edit().putString("origin", address.origin).apply();
             findViewById(R.id.connection_bar).setVisibility(View.VISIBLE);
-            ((TextView) findViewById(R.id.desktop_name)).setText(address.hostname);
+            ((TextView) findViewById(R.id.desktop_name)).setText(address.usb ? getString(R.string.usb_connected) : address.hostname);
             loadConnection();
         };
         if (address.url.contains("#pair=") && address.contains(web.getUrl())) {
@@ -243,7 +269,7 @@ public final class MainActivity extends AppCompatActivity {
         web.setVisibility(View.GONE);
         welcome.setVisibility(View.VISIBLE);
         ((TextView) findViewById(R.id.welcome_title)).setText(R.string.offline_title);
-        ((TextView) findViewById(R.id.welcome_description)).setText(message);
+        ((TextView) findViewById(R.id.welcome_description)).setText(desktop != null && desktop.usb && message == R.string.offline_description ? R.string.usb_offline : message);
         Button primary = findViewById(R.id.primary);
         primary.setText(R.string.retry);
         primary.setOnClickListener(v -> loadConnection());
@@ -278,6 +304,7 @@ public final class MainActivity extends AppCompatActivity {
         menu.getMenu().add(R.string.reload).setOnMenuItemClickListener(item -> { loadConnection(); return true; });
         menu.getMenu().add(R.string.scan_another).setOnMenuItemClickListener(item -> { scan(); return true; });
         menu.getMenu().add(R.string.paste_link).setOnMenuItemClickListener(item -> { enterAddress(); return true; });
+        menu.getMenu().add(R.string.usb_title).setOnMenuItemClickListener(item -> { connectUsb(); return true; });
         menu.getMenu().add(R.string.open_tailscale).setOnMenuItemClickListener(item -> { openTailscale(); return true; });
         menu.getMenu().add(R.string.forget).setOnMenuItemClickListener(item -> {
             new AlertDialog.Builder(this).setTitle(R.string.forget).setMessage(R.string.forget_message)

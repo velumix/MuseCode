@@ -1,10 +1,10 @@
-//! Private HTTPS is terminated by Tailscale Serve; this listener binds loopback only.
+//! Tailscale HTTPS and authorized USB forwarding use separate loopback listeners.
 //! HTTP clients have a deliberately small API and never receive Tauri IPC access.
 use crate::{
     remote_auth::{self, Auth, Device, Pending, Saved},
     runner,
     session_log::SessionLog,
-    tailscale,
+    tailscale, usb,
 };
 use axum::{
     body::Body,
@@ -30,6 +30,12 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{oneshot, watch};
 
 const COOKIE: &str = "__Host-muse";
+const USB_COOKIE: &str = "muse-usb";
+
+struct UsbLink {
+    device: usb::Device,
+    _stop: oneshot::Sender<()>,
+}
 
 struct Inner {
     auth: Auth,
@@ -38,6 +44,7 @@ struct Inner {
     serve: Option<tokio::process::Child>,
     tailscale: tailscale::Status,
     error: Option<String>,
+    usb: Option<UsbLink>,
 }
 
 pub struct Core {
@@ -52,6 +59,25 @@ pub struct RemoteState(Arc<Core>);
 struct WebState {
     core: Arc<Core>,
     app: Option<AppHandle>,
+    usb: bool,
+}
+
+impl WebState {
+    fn origin(&self, inner: &Inner) -> Option<String> {
+        if self.usb {
+            inner.usb.as_ref().map(|_| usb::ORIGIN.into())
+        } else {
+            inner.origin.clone()
+        }
+    }
+    fn cookie(&self, token: &str, age: u64) -> String {
+        let (name, secure) = if self.usb {
+            (USB_COOKIE, "")
+        } else {
+            (COOKIE, " Secure;")
+        };
+        format!("{name}={token}; Path=/; HttpOnly;{secure} SameSite=Strict; Max-Age={age}")
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -62,6 +88,7 @@ pub struct Status {
     devices: Vec<Device>,
     pending: Option<Pending>,
     error: Option<String>,
+    usb: Option<usb::Device>,
 }
 
 type ApiResult = Result<Json<Value>, ApiError>;
@@ -97,6 +124,7 @@ fn status(core: &Core) -> Status {
             .collect(),
         pending: inner.auth.pending(remote_auth::now()),
         error: inner.error.clone(),
+        usb: inner.usb.as_ref().map(|link| link.device.clone()),
     }
 }
 
@@ -139,6 +167,7 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             serve: None,
             tailscale: tailscale::Status::default(),
             error: None,
+            usb: None,
         }),
         changes,
         operation: tokio::sync::Mutex::new(()),
@@ -170,7 +199,7 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 .as_mut()
                 .is_some_and(|child| child.try_wait().map_or(true, |exit| exit.is_some()));
             if stopped {
-                shutdown(&handle);
+                shutdown_tailscale(&handle);
                 core.inner.lock().unwrap().error = Some("Tailscale disconnected. Check its connection, then enable remote access again.".into());
                 let _ = remote_check_tailscale(handle.clone()).await;
             }
@@ -189,11 +218,13 @@ fn publish(app: &AppHandle, core: &Core) {
     let _ = app.emit("remote-status", status(core));
 }
 
-pub fn shutdown(app: &AppHandle) {
+fn shutdown_tailscale(app: &AppHandle) {
     if let Some(state) = app.try_state::<RemoteState>() {
         let mut inner = state.0.inner.lock().unwrap();
         inner.origin = None;
-        inner.auth.pairing = None;
+        if inner.auth.pairing.as_ref().is_some_and(|pair| !pair.usb) {
+            inner.auth.pairing = None;
+        }
         if let Some(server) = inner.server.take() {
             let _ = server.send(());
         }
@@ -202,6 +233,108 @@ pub fn shutdown(app: &AppHandle) {
         }
         state.0.notify();
     }
+}
+
+fn take_usb(core: &Core) -> Option<usb::Device> {
+    let mut inner = core.inner.lock().unwrap();
+    if inner.auth.pairing.as_ref().is_some_and(|pair| pair.usb) {
+        inner.auth.pairing = None;
+    }
+    inner.usb.take().map(|link| link.device)
+}
+
+pub fn shutdown(app: &AppHandle) {
+    shutdown_tailscale(app);
+    if let Some(state) = app.try_state::<RemoteState>() {
+        if let Some(device) = take_usb(&state.0) {
+            tauri::async_runtime::spawn(async move {
+                usb::disconnect(&device.serial).await;
+            });
+        }
+        state.0.notify();
+    }
+}
+
+#[tauri::command]
+pub async fn remote_usb_devices() -> Result<Vec<usb::Device>, String> {
+    usb::devices().await
+}
+
+#[tauri::command]
+pub async fn remote_usb_disconnect(app: AppHandle) -> Status {
+    let core = app.state::<RemoteState>().0.clone();
+    let _operation = core.operation.lock().await;
+    if let Some(device) = take_usb(&core) {
+        usb::disconnect(&device.serial).await;
+    }
+    publish(&app, &core);
+    status(&core)
+}
+
+#[tauri::command]
+pub async fn remote_usb_connect(app: AppHandle, serial: String) -> Result<Status, String> {
+    let core = app.state::<RemoteState>().0.clone();
+    let _operation = core.operation.lock().await;
+    let (device, package) = usb::require_phone(&serial).await?;
+    let current = core
+        .inner
+        .lock()
+        .unwrap()
+        .usb
+        .as_ref()
+        .map(|link| link.device.serial.clone());
+    if current.as_ref().is_some_and(|s| s != &serial) {
+        return Err("Disconnect the current USB phone before connecting another.".into());
+    }
+    if current.is_none() {
+        if app.asset_resolver().get("remote.html".into()).is_none() {
+            return Err("Build the phone interface and restart MuseCode.".into());
+        }
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, usb::PORT))
+            .await
+            .map_err(|_| {
+                "USB port 43827 is in use. Close the other app using that port and try again."
+            })?;
+        usb::connect(&serial).await?;
+        let (stop, stopped) = oneshot::channel();
+        core.inner.lock().unwrap().usb = Some(UsbLink {
+            device,
+            _stop: stop,
+        });
+        let web = WebState {
+            core: core.clone(),
+            app: Some(app.clone()),
+            usb: true,
+        };
+        let handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            if axum::serve(listener, router(web))
+                .with_graceful_shutdown(async {
+                    let _ = stopped.await;
+                })
+                .await
+                .is_err()
+            {
+                let _ = remote_usb_disconnect(handle).await;
+            }
+        });
+    } else {
+        usb::connect(&serial).await?;
+    }
+    let url = {
+        let mut inner = core.inner.lock().unwrap();
+        let (token, _) = inner.auth.invite(remote_auth::now());
+        inner.auth.pairing.as_mut().unwrap().usb = true;
+        format!("{}/#pair={token}", usb::ORIGIN)
+    };
+    if let Err(error) = usb::open(&serial, package, &url).await {
+        take_usb(&core);
+        usb::disconnect(&serial).await;
+        publish(&app, &core);
+        return Err(error);
+    }
+    publish(&app, &core);
+    Ok(status(&core))
 }
 
 #[tauri::command]
@@ -223,7 +356,7 @@ pub async fn remote_enable(app: AppHandle, enabled: bool) -> Result<Status, Stri
     let core = app.state::<RemoteState>().0.clone();
     let _operation = core.operation.lock().await;
     if !enabled {
-        shutdown(&app);
+        shutdown_tailscale(&app);
         let mut inner = core.inner.lock().unwrap();
         inner.auth.saved.enabled = false;
         inner.error = None;
@@ -286,6 +419,7 @@ async fn start(app: &AppHandle, core: &Arc<Core>) -> Result<(), String> {
     let web = WebState {
         core: core.clone(),
         app: Some(app.clone()),
+        usb: false,
     };
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -296,7 +430,7 @@ async fn start(app: &AppHandle, core: &Arc<Core>) -> Result<(), String> {
             .await
         {
             let core = &handle.state::<RemoteState>().0;
-            shutdown(&handle);
+            shutdown_tailscale(&handle);
             core.inner.lock().unwrap().error = Some(format!("Remote access stopped: {error}"));
             publish(&handle, core);
         }
@@ -400,13 +534,13 @@ async fn boundary(
     request: axum::extract::Request,
     next: Next,
 ) -> Response {
-    let origin = state.core.inner.lock().unwrap().origin.clone();
+    let origin = state.origin(&state.core.inner.lock().unwrap());
     let Some(origin) = origin else {
         return (StatusCode::SERVICE_UNAVAILABLE, "Remote access is off.").into_response();
     };
     let headers = request.headers();
     let host = headers.get("host").and_then(|h| h.to_str().ok());
-    if host != origin.strip_prefix("https://") {
+    if host != origin.split_once("://").map(|(_, host)| host) {
         return (StatusCode::FORBIDDEN, "Unrecognized host.").into_response();
     }
     let supplied_origin = headers.get("origin").and_then(|h| h.to_str().ok());
@@ -430,7 +564,7 @@ async fn boundary(
     response
 }
 
-fn credential(headers: &HeaderMap) -> Option<&str> {
+fn credential(headers: &HeaderMap, usb: bool) -> Option<&str> {
     headers
         .get("cookie")?
         .to_str()
@@ -438,17 +572,21 @@ fn credential(headers: &HeaderMap) -> Option<&str> {
         .split(';')
         .find_map(|part| {
             let (name, value) = part.trim().split_once('=')?;
-            (name == COOKIE).then_some(value)
+            (name == if usb { USB_COOKIE } else { COOKIE }).then_some(value)
         })
 }
 fn authenticate(state: &WebState, headers: &HeaderMap, control: bool) -> Result<Device, ApiError> {
     let inner = state.core.inner.lock().unwrap();
-    if inner.origin.is_none() {
+    if state.origin(&inner).is_none() {
         return Err(unauthorized());
     }
     let device = inner
         .auth
-        .authenticate(credential(headers).unwrap_or_default(), remote_auth::now())
+        .authenticate(
+            credential(headers, state.usb).unwrap_or_default(),
+            remote_auth::now(),
+        )
+        .filter(|device| device.usb == state.usb)
         .ok_or_else(unauthorized)?;
     if control && !device.control {
         return Err(ApiError(
@@ -473,6 +611,20 @@ struct Claim {
     name: String,
 }
 async fn claim(State(state): State<WebState>, Json(body): Json<Claim>) -> ApiResult {
+    if !state
+        .core
+        .inner
+        .lock()
+        .unwrap()
+        .auth
+        .pairing
+        .as_ref()
+        .is_some_and(|pair| pair.usb == state.usb)
+    {
+        return Err(bad(
+            "Start pairing again using this connection on your desktop.",
+        ));
+    }
     let pending = state
         .core
         .inner
@@ -501,6 +653,16 @@ async fn finish(
     Json(body): Json<Finish>,
 ) -> Result<Response, ApiError> {
     let inner = state.core.inner.lock().unwrap();
+    if !inner
+        .auth
+        .pairing
+        .as_ref()
+        .is_some_and(|pair| pair.usb == state.usb)
+    {
+        return Err(bad(
+            "Start pairing again using this connection on your desktop.",
+        ));
+    }
     let paired = inner
         .auth
         .finish(&body.claim, remote_auth::now())
@@ -514,10 +676,9 @@ async fn finish(
     let mut response = Json(json!({"status": "paired", "device": device.public()})).into_response();
     response.headers_mut().insert(
         "set-cookie",
-        HeaderValue::from_str(&format!(
-            "{COOKIE}={token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age={}",
-            device.expires_at.saturating_sub(remote_auth::now())
-        ))
+        HeaderValue::from_str(
+            &state.cookie(token, device.expires_at.saturating_sub(remote_auth::now())),
+        )
         .map_err(|_| bad("Invalid login."))?,
     );
     Ok(response)
@@ -536,9 +697,7 @@ async fn logout(State(state): State<WebState>, headers: HeaderMap) -> Result<Res
     let mut response = Json(json!({"ok":true})).into_response();
     response.headers_mut().insert(
         "set-cookie",
-        HeaderValue::from_static(
-            "__Host-muse=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0",
-        ),
+        HeaderValue::from_str(&state.cookie("", 0)).map_err(|_| bad("Invalid login."))?,
     );
     Ok(response)
 }
@@ -694,6 +853,7 @@ mod tests {
                 id: "phone".into(),
                 name: "Test phone".into(),
                 control,
+                usb: false,
                 credential_hash: remote_auth::hash(&token),
                 created_at: remote_auth::now(),
                 expires_at: remote_auth::now() + 60,
@@ -708,13 +868,21 @@ mod tests {
                 serve: None,
                 tailscale: tailscale::Status::default(),
                 error: None,
+                usb: None,
             }),
             changes,
             operation: tokio::sync::Mutex::new(()),
             path: std::env::temp_dir()
                 .join(format!("muse-remote-test-{}.json", uuid::Uuid::new_v4())),
         });
-        (WebState { core, app: None }, token)
+        (
+            WebState {
+                core,
+                app: None,
+                usb: false,
+            },
+            token,
+        )
     }
     fn request(path: &str, token: Option<&str>, body: Option<Value>) -> Request<Body> {
         let mut request = Request::builder()
@@ -939,6 +1107,160 @@ mod tests {
         assert_eq!(
             router(state)
                 .oneshot(request("/api/me", Some(&token), None))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+
+    fn usb_request(path: &str, token: Option<&str>, body: Option<Value>) -> Request<Body> {
+        let mut req = request(path, None, body);
+        req.headers_mut()
+            .insert("host", HeaderValue::from_static("127.0.0.1:43827"));
+        if req.method() == Method::POST {
+            req.headers_mut()
+                .insert("origin", HeaderValue::from_static(usb::ORIGIN));
+        }
+        if let Some(token) = token {
+            req.headers_mut().insert(
+                "cookie",
+                HeaderValue::from_str(&format!("{USB_COOKIE}={token}")).unwrap(),
+            );
+        }
+        req
+    }
+
+    #[tokio::test]
+    async fn usb_pairing_requires_approval_and_credentials_cannot_cross_transports() {
+        let (tailnet, tail_token) = fixture(true);
+        let mut cable = tailnet.clone();
+        cable.usb = true;
+        let (stop, _stopped) = oneshot::channel();
+        let claim_token = remote_auth::secret();
+        let (invitation, code) = {
+            let mut inner = cable.core.inner.lock().unwrap();
+            inner.usb = Some(UsbLink {
+                device: usb::Device {
+                    serial: "TEST".into(),
+                    name: "Test USB phone".into(),
+                    authorized: true,
+                },
+                _stop: stop,
+            });
+            let invitation = inner.auth.invite(remote_auth::now());
+            inner.auth.pairing.as_mut().unwrap().usb = true;
+            invitation
+        };
+        let claim_body =
+            json!({"invitation": invitation, "claim": claim_token, "name": "USB phone"});
+        assert_eq!(
+            router(tailnet.clone())
+                .oneshot(request("/api/pair/claim", None, Some(claim_body.clone())))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            router(cable.clone())
+                .oneshot(usb_request("/api/pair/claim", None, Some(claim_body)))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+        let pending = router(cable.clone())
+            .oneshot(usb_request(
+                "/api/pair/finish",
+                None,
+                Some(json!({"claim": claim_token})),
+            ))
+            .await
+            .unwrap();
+        assert!(pending.headers().get("set-cookie").is_none());
+        assert_eq!(body(pending).await["pending"]["code"], code);
+        cable
+            .core
+            .inner
+            .lock()
+            .unwrap()
+            .auth
+            .approve(&code, true, remote_auth::now())
+            .unwrap();
+        let paired = router(cable.clone())
+            .oneshot(usb_request(
+                "/api/pair/finish",
+                None,
+                Some(json!({"claim": claim_token})),
+            ))
+            .await
+            .unwrap();
+        let cookie = paired.headers()["set-cookie"].to_str().unwrap();
+        assert!(cookie.starts_with("muse-usb="));
+        assert!(cookie.contains("HttpOnly; SameSite=Strict"));
+        assert!(!cookie.contains("Secure")); // HTTP exists only inside authorized ADB forwarding.
+        let usb_token = cookie.split(';').next().unwrap().split_once('=').unwrap().1;
+        assert_eq!(
+            router(cable.clone())
+                .oneshot(usb_request("/api/me", Some(usb_token), None))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            router(tailnet.clone())
+                .oneshot(request("/api/me", Some(usb_token), None))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            router(cable.clone())
+                .oneshot(usb_request("/api/me", Some(&tail_token), None))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let mut attack = usb_request("/api/logout", Some(usb_token), Some(json!({})));
+        attack.headers_mut().insert(
+            "origin",
+            HeaderValue::from_static("http://attacker.example"),
+        );
+        assert_eq!(
+            router(cable.clone())
+                .oneshot(attack)
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        let mut attack = usb_request("/api/logout", Some(usb_token), Some(json!({})));
+        attack.headers_mut().remove("x-muse-request");
+        assert_eq!(
+            router(cable.clone())
+                .oneshot(attack)
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        cable.core.inner.lock().unwrap().origin = None;
+        assert_eq!(
+            router(cable.clone())
+                .oneshot(usb_request("/api/me", Some(usb_token), None))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+        take_usb(&cable.core);
+        assert_eq!(
+            router(cable)
+                .oneshot(usb_request("/api/me", Some(usb_token), None))
                 .await
                 .unwrap()
                 .status(),

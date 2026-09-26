@@ -6,6 +6,7 @@ mod remote_auth;
 mod runner;
 mod session_log;
 mod tailscale;
+mod usb;
 
 use pty::PtyState;
 use runner::AgentState;
@@ -37,6 +38,9 @@ pub fn run() {
             runner::agent_stop,
             runner::agent_destroy,
             remote::remote_status,
+            remote::remote_usb_devices,
+            remote::remote_usb_connect,
+            remote::remote_usb_disconnect,
             remote::remote_check_tailscale,
             remote::remote_enable,
             remote::remote_pair,

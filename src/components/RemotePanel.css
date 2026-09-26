@@ -42,6 +42,12 @@
 .remote-pair-request { padding: 22px; background: #25364a; border: 1px solid #405f83; border-radius: 13px; margin: 18px 0; }
 .remote-pair-request h3 { margin: 10px 0; font-size: 18px; }
 .remote-pair-request p { font-size: 12px; color: #c6d3e6; }
+.remote-pair-request .section-label { color: #b4c4da; }
 .remote-code { letter-spacing: 7px; font-size: 32px; font-weight: 600; margin: 20px 0; font-variant-numeric: tabular-nums; }
 .remote-control { display: flex; gap: 9px; align-items: center; font-size: 12px; color: #d2dcec; }
 .remote-control input { accent-color: #7db4ff; width: 16px; height: 16px; }
+.remote-transport { display: flex; gap: 4px; padding: 4px; margin-bottom: 16px; background: #171a1e; border-radius: 11px; }
+.remote-transport button { flex: 1; border-color: transparent; background: transparent; color: #aeb8c7; }
+.remote-transport button[aria-pressed="true"] { background: #333c49; color: #edf4ff; border-color: #465365; }
+.remote-usb { margin-bottom: 22px; }
+.remote-usb-steps { padding-left: 18px; margin: 18px 0; color: #bbc4d0; font-size: 12px; line-height: 1.9; }

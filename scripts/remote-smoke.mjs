@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { chromium, expect } from "@playwright/test";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const usb = process.argv.includes("--usb-fixture");
 const installed = process.argv.includes("--installed");
 const release = installed || process.argv.includes("--release");
 const count = execFileSync("powershell.exe", ["-NoProfile", "-Command", "@(Get-Process muse-code-app -ErrorAction SilentlyContinue).Count"], { encoding: "utf8", windowsHide: true }).trim();
@@ -17,6 +18,12 @@ const run = path.join(root, ".qa", `remote-${Date.now()}`);
 mkdirSync(run, { recursive: true });
 const log = path.join(run, "children.jsonl");
 writeFileSync(log, "");
+const sdk = path.join(run, "sdk");
+if (usb) {
+  mkdirSync(path.join(sdk, "platform-tools"), { recursive: true });
+  const compiler = path.join(process.env.WINDIR || "C:/Windows", "Microsoft.NET/Framework64/v4.0.30319/csc.exe");
+  execFileSync(compiler, ["/nologo", "/target:exe", `/out:${path.join(sdk, "platform-tools/adb.exe")}`, path.join(root, "tests/fixtures/adb.cs")], { windowsHide: true });
+}
 writeFileSync(path.join(run, "muse.cmd"), `@echo off\r\n"${process.execPath}" "${path.join(root, "tests/fixtures/muse-cli.cjs")}" %*\r\n`);
 let vite, app, native, phoneBrowser, phone, desktop;
 const errors = [];
@@ -30,6 +37,7 @@ try {
   const executable = installed ? path.join(process.env.LOCALAPPDATA, "Muse Code/muse-code-app.exe") : path.join(root, `src-tauri/target/${release ? "release" : "debug"}/muse-code-app.exe`);
   app = spawn(executable, [], { cwd: root, windowsHide: true, stdio: "ignore", env: { ...process.env,
     PATH: `${run};${process.env.PATH}`, MUSE_QA_LOG: log, MUSE_CODE_CONFIG_DIR: path.join(run, "settings"),
+    ...(usb ? { ANDROID_HOME: sdk, MUSE_QA_ADB_DIR: run } : {}),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--remote-debugging-port=19423", WEBVIEW2_USER_DATA_FOLDER: path.join(run, "webview"),
   } });
   for (let i = 0; i < 120; i++) {
@@ -44,11 +52,23 @@ try {
   await desktop.locator("textarea").fill("Desktop fixture");
   await desktop.locator("textarea").press("Enter");
   await expect(desktop.locator(".status-text")).toContainText("Done");
-  const status = await invoke("remote_enable", { enabled: true });
-  assert(status.enabled && status.url.startsWith("https://"));
-  console.log("PASS: app-owned Tailscale Serve route provides private HTTPS");
-  const invitation = await invoke("remote_pair");
-  assert(invitation.svg.includes("<svg"));
+  let invitation;
+  if (usb) {
+    const devices = await invoke("remote_usb_devices");
+    assert.equal(devices[0].serial, "USB_FIXTURE");
+    const status = await invoke("remote_usb_connect", { serial: devices[0].serial });
+    assert.equal(status.enabled, false);
+    assert.equal(status.usb.serial, "USB_FIXTURE");
+    invitation = { url: readFileSync(path.join(run, "invitation.txt"), "utf8") };
+    assert(invitation.url.startsWith("http://127.0.0.1:43827/#pair="));
+    console.log("PASS: USB listener starts independently of Tailscale; fixture ADB receives the app launch");
+  } else {
+    const status = await invoke("remote_enable", { enabled: true });
+    assert(status.enabled && status.url.startsWith("https://"));
+    console.log("PASS: app-owned Tailscale Serve route provides private HTTPS");
+    invitation = await invoke("remote_pair");
+    assert(invitation.svg.includes("<svg"));
+  }
   phoneBrowser = await chromium.launch({ executablePath: process.env.BROWSER_PATH || ["C:/Program Files/Google/Chrome/Application/chrome.exe", "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"].find(existsSync), headless: true });
   const context = await phoneBrowser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   phone = await context.newPage();
@@ -58,15 +78,15 @@ try {
   assert(!phone.url().includes("pair="), "Pairing token stayed in the browser address");
   await phone.getByLabel("Name this phone").fill("QA phone");
   await phone.getByRole("button", { name: "Pair with desktop" }).click();
-  await expect(phone.getByLabel("Pairing code")).toHaveText(invitation.code);
+  await expect(phone.getByLabel("Pairing code")).toHaveText(invitation.code || /^\d{6}$/);
   await desktop.getByRole("button", { name: "Connect phone", exact: true }).click();
   await expect(desktop.getByRole("region", { name: "Confirm phone pairing" })).toContainText("QA phone");
   await desktop.getByRole("dialog").getByRole("button", { name: "Connect phone", exact: true }).click();
   await expect(phone.locator(".phone-online")).toBeVisible();
   await expect(phone.getByText("Reply: Desktop fixture", { exact: true })).toBeVisible();
   const cookies = await context.cookies();
-  const cookie = cookies.find((c) => c.name === "__Host-muse");
-  assert(cookie?.httpOnly && cookie.secure && cookie.sameSite === "Strict");
+  const cookie = cookies.find((c) => c.name === (usb ? "muse-usb" : "__Host-muse"));
+  assert(cookie?.httpOnly && cookie.secure === !usb && cookie.sameSite === "Strict");
   assert(!readFileSync(path.join(run, "settings/remote.json"), "utf8").includes(cookie.value));
   console.log("PASS: QR pairing requires desktop confirmation; phone replays desktop history; credentials are hashed at rest");
   await desktop.getByRole("button", { name: "Close remote access" }).click();
@@ -81,6 +101,15 @@ try {
   await expect(phone.getByText("Reply: From phone in tray", { exact: true })).toBeVisible();
   await expect(phone.locator(".phone-message.user")).toHaveCount(2);
   console.log("PASS: phone controls the actual background runner; desktop stays hidden; reload restores the conversation");
+  if (usb) {
+    await invoke("remote_usb_disconnect");
+    await expect(phone.getByLabel("Message your desktop agent")).toHaveCount(0);
+    assert.equal(existsSync(path.join(run, "route.txt")), false);
+    await invoke("remote_usb_connect", { serial: "USB_FIXTURE" });
+    await phone.goto("http://127.0.0.1:43827/");
+    await expect(phone.getByText("Reply: From phone in tray", { exact: true })).toBeVisible();
+    console.log("PASS: USB disconnect closes access and removes its mapping; reconnect preserves the paired login");
+  }
   await phone.getByLabel("Message your desktop agent").fill("HOLD");
   await phone.getByRole("button", { name: "Send message" }).click();
   await expect(phone.getByRole("button", { name: "Stop task" })).toBeVisible();
@@ -99,7 +128,7 @@ try {
   await invoke("remote_revoke", { id: devices[0].id });
   await expect(phone.getByLabel("Message your desktop agent")).toHaveCount(0);
   await expect(phone.locator(".phone-message")).toHaveCount(0);
-  await invoke("remote_enable", { enabled: false });
+  await invoke(usb ? "remote_usb_disconnect" : "remote_enable", { enabled: false });
   assert.equal((await invoke("remote_status")).enabled, false);
   assert.deepEqual(errors, []);
   console.log("PASS: revocation clears the phone and disables control immediately; turning access off closes its listener");
@@ -108,7 +137,7 @@ try {
   await desktop?.screenshot({ path: path.join(run, "desktop-failure.png") }).catch(() => {});
   throw error;
 } finally {
-  if (desktop && !desktop.isClosed()) { await invoke("remote_enable", { enabled: false }).catch(() => {}); await invoke("desktop_quit").catch(() => {}); }
+  if (desktop && !desktop.isClosed()) { await invoke(usb ? "remote_usb_disconnect" : "remote_enable", { enabled: false }).catch(() => {}); await invoke("desktop_quit").catch(() => {}); }
   await phoneBrowser?.close();
   await native?.close().catch(() => {});
   if (app && app.exitCode === null) { await sleep(500); if (app.exitCode === null) app.kill(); }

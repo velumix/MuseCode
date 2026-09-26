@@ -6,6 +6,7 @@ import { transcript, type Replay, type Session } from "./transcript";
 interface Device { id: string; name: string; control: boolean }
 interface Pending { name: string; code: string; expires_at: number }
 interface InstallEvent extends Event { prompt(): Promise<void>; userChoice: Promise<{ outcome: string }> }
+const usb = location.origin === "http://127.0.0.1:43827";
 class ApiError extends Error { constructor(message: string, public status: number) { super(message); } }
 
 async function api<T>(path: string, body?: unknown): Promise<T> {
@@ -63,7 +64,7 @@ export default function RemoteApp() {
     let disposed = false;
     api<{ device: Device; computer: string }>("/me").then((value) => {
       if (!disposed) { setDevice(value.device); setInvitation(""); setComputer(value.computer || "Your desktop"); saveClaim(""); setClaim(""); }
-    }).catch((e) => { if (!disposed && !(e instanceof ApiError && e.status === 401)) setError("Your desktop is unavailable. Connect Tailscale and make sure MuseCode is running."); })
+    }).catch((e) => { if (!disposed && !(e instanceof ApiError && e.status === 401)) setError(usb ? "Check the USB cable and choose Reconnect in Connect phone on your desktop." : "Your desktop is unavailable. Connect Tailscale and make sure MuseCode is running."); })
       .finally(() => { if (!disposed) setLoading(false); });
     const installable = (event: Event) => { event.preventDefault(); setInstall(event as InstallEvent); };
     window.addEventListener("beforeinstallprompt", installable);
@@ -132,7 +133,7 @@ export default function RemoteApp() {
     void refresh();
     const source = new EventSource("/api/events");
     source.addEventListener("change", () => { clearTimeout(debounce); debounce = window.setTimeout(() => void refresh(), 100); });
-    source.addEventListener("revoked", () => { if (!disposed) { forget(); setError("This phone was disconnected. Scan a new QR code."); } });
+    source.addEventListener("revoked", () => { if (!disposed) { forget(); setError(usb ? "This phone was disconnected. Choose Connect phone → USB cable on your desktop to reconnect." : "This phone was disconnected. Scan a new QR code."); } });
     source.onerror = () => { if (!disposed) setConnected(false); };
     const wake = () => { if (document.visibilityState === "visible") void refresh(); };
     document.addEventListener("visibilitychange", wake);
@@ -189,13 +190,13 @@ export default function RemoteApp() {
     <div className="phone-entry-card">
       <div className="phone-eyebrow"><Icon name="shield" size={15} />Your private workspace</div>
       <h1>{loading ? "Finding your desktop…" : claim ? "One last check." : invitation ? "Meet your desktop, here." : "Your desktop. In your pocket."}</h1>
-      <p>{claim ? "Confirm this connection in MuseCode on your desktop. Keep this screen open." : invitation ? "Pair this phone to follow your agent and keep work moving, wherever you are." : "Open MuseCode on your desktop, choose Connect phone, and scan its QR code."}</p>
+      <p>{claim ? "Confirm this connection in MuseCode on your desktop. Keep this screen open." : invitation ? "Pair this phone to follow your agent and keep work moving, wherever you are." : usb ? "Open Connect phone on your desktop, choose USB cable, and connect this phone." : "Open MuseCode on your desktop, choose Connect phone, and scan its QR code."}</p>
       {error && <div className="phone-error" role="alert">{error}</div>}
       {claim ? <><div className="phone-pair-code" aria-label="Pairing code">{pending?.code || "Waiting…"}</div><div className="phone-wait"><span className="phone-pulse" />Waiting for desktop confirmation</div></> : !loading && invitation ? <form onSubmit={(e) => { e.preventDefault(); void pair(); }}>
         <label htmlFor="phone-name">Name this phone</label><input id="phone-name" value={name} maxLength={64} onChange={(e) => setName(e.target.value)} autoComplete="off" />
         <button className="phone-primary" disabled={busy || !name.trim()}>{busy ? "Connecting…" : "Pair with desktop"}<Icon name="arrow" size={18} /></button>
       </form> : null}
-      <div className="phone-entry-note"><Icon name="shield" size={16} /><span>Connect Tailscale on both devices.<br />Your conversations stay on your private connection.</span></div>
+      <div className="phone-entry-note"><Icon name="shield" size={16} /><span>{usb ? "Connected through your USB cable." : "Connect Tailscale on both devices."}<br />Your conversations stay on your private connection.</span></div>
     </div>
     <p className="phone-entry-footer">Made for the moments away from your desk.</p>
   </main>;
@@ -211,7 +212,7 @@ export default function RemoteApp() {
     </section>}
     <button className="phone-session-select" aria-expanded={listOpen} aria-controls="phone-sessions" onClick={() => setListOpen((value) => !value)}><span><span className="phone-eyebrow">Conversation</span><strong>{current?.title || "Your conversations"}</strong></span><Icon name="down" size={18} /></button>
     {listOpen && <nav className="phone-sessions" id="phone-sessions" aria-label="Conversations">{sessions.map((session) => <button key={session.id} aria-current={session.id === selected ? "true" : undefined} onClick={() => { setSelected(session.id); setReplay(cache.current.get(session.id) || null); setListOpen(false); follow.current = true; setError(""); }}><Icon name="chat" size={18} /><span><strong>{session.title}</strong><small>{session.workspace.split(/[\\/]/).filter(Boolean).pop()}</small></span><i className={session.running ? "working" : ""}>{session.running ? "Working" : session.status === "completed" ? "Done" : "Ready"}</i></button>)}</nav>}
-    {!connected && <div className="phone-reconnect" role="status">Reconnect Tailscale and keep your desktop awake. Your draft is safe.<button onClick={() => void refreshRef.current()}>Retry</button></div>}
+    {!connected && <div className="phone-reconnect" role="status">{usb ? "Check your USB cable and keep your desktop awake." : "Reconnect Tailscale and keep your desktop awake."} Your draft is safe.<button onClick={() => void refreshRef.current()}>Retry</button></div>}
     <div className="phone-transcript" ref={scroll} onScroll={() => { const el = scroll.current; if (el) { follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; setLatest(!follow.current); } }}>
       {!sessions.length ? <div className="phone-empty"><Icon name="chat" size={32} /><h2>No conversations yet</h2><p>Open an Agent conversation on your desktop. It will appear here automatically.</p></div> : !view.blocks.length ? <div className="phone-empty"><MuseMark size={64} /><h2>What’s next?</h2><p>Send a message to your desktop agent. Your files and tools stay on your computer.</p></div> : null}
       {replay?.truncated && <p className="phone-history-note">Showing recent activity. Earlier messages remain in the desktop conversation.</p>}

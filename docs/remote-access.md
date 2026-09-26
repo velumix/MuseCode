@@ -69,6 +69,28 @@ sessions are not restored after an app exit or reload.
 
 ## Troubleshooting
 
+### USB cable
+
+The [Android APK](android.md#connect-over-usb-without-tailscale) also connects over an
+authorized ADB USB connection. Choose **Connect phone → USB cable** on the desktop.
+This mode binds only `127.0.0.1:43827` and uses ADB reverse forwarding from the same
+loopback address on the phone. It does not depend on Tailscale, Wi-Fi, or a public listener.
+
+USB uses a separate HttpOnly, SameSite=Strict cookie without the HTTPS-only Secure flag.
+The Android app allows HTTP only for this exact loopback endpoint; Tailscale still requires
+HTTPS and its Secure cookie. Pairing invitations and device credentials are scoped to their
+transport. Both modes require matching-code approval, hash credentials on disk, enforce
+the same request checks, and support immediate revocation.
+
+MuseCode refuses to replace a conflicting ADB forwarding rule. Disconnecting removes only
+its own mapping and closes the listener. Quit closes the listener and attempts mapping
+cleanup; an interrupted cleanup can leave an inert mapping that is reused on reconnect.
+USB is enabled explicitly after each desktop launch. After unplugging, reconnect the cable
+and choose **Reconnect**. An unauthorized phone must accept its USB debugging prompt;
+an undetected phone may need a data-capable cable or its Windows USB driver.
+
+### Tailscale and pairing
+
 | Symptom | Check |
 | --- | --- |
 | Tailscale not installed / disconnected | Install the Windows client, sign in, then click Refresh. |

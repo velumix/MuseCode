@@ -18,6 +18,24 @@ import java.util.Map;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 35)
 public class MainActivityTest {
+    @Test public void usbLaunchOpensPairingAndDiscardsTheIntentSecret() {
+        android.content.Intent intent = new android.content.Intent().putExtra("muse_usb_url", DesktopAddress.USB_ORIGIN + "/#pair=" + "d".repeat(64));
+        try (ActivityController<MainActivity> controller = Robolectric.buildActivity(MainActivity.class, intent).setup()) {
+            MainActivity activity = controller.get();
+            assertTrue(shadowOf((WebView) activity.findViewById(R.id.web)).getLastLoadedUrl().endsWith("#pair=" + "d".repeat(64)));
+            assertFalse(activity.getIntent().hasExtra("muse_usb_url"));
+            assertEquals(DesktopAddress.USB_ORIGIN, activity.getSharedPreferences("desktop", 0).getString("origin", null));
+            controller.newIntent(new android.content.Intent().putExtra("muse_usb_url", DesktopAddress.USB_ORIGIN + "/#pair=" + "e".repeat(64)));
+            assertFalse(activity.getIntent().hasExtra("muse_usb_url"));
+        }
+    }
+    @Test public void launchExtrasCannotOpenAnArbitraryNetworkAddress() {
+        android.content.Intent intent = new android.content.Intent().putExtra("muse_usb_url", "http://192.168.1.1:43827/");
+        try (ActivityController<MainActivity> controller = Robolectric.buildActivity(MainActivity.class, intent).setup()) {
+            assertNull(shadowOf((WebView) controller.get().findViewById(R.id.web)).getLastLoadedUrl());
+            assertNull(controller.get().getSharedPreferences("desktop", 0).getString("origin", null));
+        }
+    }
     @Test public void startsWithScannerAndProtectsTheWebView() {
         try (ActivityController<MainActivity> controller = Robolectric.buildActivity(MainActivity.class).setup()) {
             MainActivity activity = controller.get();

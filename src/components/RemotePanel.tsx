@@ -12,7 +12,9 @@ interface RemoteStatus {
   tailscale: { installed: boolean; connected: boolean; hostname: string | null; message: string };
   devices: Device[];
   pending: { name: string; code: string; expires_at: number } | null;
+  usb: UsbDevice | null;
 }
+interface UsbDevice { serial: string; name: string; authorized: boolean }
 interface Invitation { url: string; svg: string; code: string; expires_at: number }
 
 export default function RemotePanel({ onClose }: { onClose: () => void }) {
@@ -25,6 +27,10 @@ export default function RemotePanel({ onClose }: { onClose: () => void }) {
   const [control, setControl] = useState(true);
   const [time, setTime] = useState(Date.now());
   const [copied, setCopied] = useState(false);
+  const [transport, setTransport] = useState<"tailscale" | "usb">("tailscale");
+  const [usbDevices, setUsbDevices] = useState<UsbDevice[]>([]);
+  const [usbChecked, setUsbChecked] = useState(false);
+  const refreshUsb = async () => { setUsbDevices(await invoke<UsbDevice[]>("remote_usb_devices")); setUsbChecked(true); };
 
   useEffect(() => {
     if (!returnFocus.current) returnFocus.current = document.activeElement as HTMLElement | null;
@@ -64,8 +70,19 @@ export default function RemotePanel({ onClose }: { onClose: () => void }) {
       <button className="remote-icon-button" aria-label="Close remote access" onClick={onClose}><Icon name="close" /></button>
     </header>
     <p className="remote-intro">Your desktop does the work. Your phone keeps you in the conversation.</p>
-    {(error || status?.error) && <div className="remote-error" role="alert">{error || status?.error}{setupLink && <div className="remote-actions"><button onClick={() => void openUrl(setupLink).catch((e) => setError(String(e)))}>Enable HTTPS in Tailscale<Icon name="arrow" size={15} /></button></div>}</div>}
-    <section className="remote-network" aria-label="Private network">
+    <div className="remote-transport" role="group" aria-label="Connection method">
+      <button aria-pressed={transport === "tailscale"} onClick={() => { setTransport("tailscale"); setError(""); }}>Tailscale</button>
+      <button aria-pressed={transport === "usb"} onClick={() => { setTransport("usb"); void action(refreshUsb); }}>USB cable</button>
+    </div>
+    {(error || (transport === "tailscale" && status?.error)) && <div className="remote-error" role="alert">{error || status?.error}{transport === "tailscale" && setupLink && <div className="remote-actions"><button onClick={() => void openUrl(setupLink).catch((e) => setError(String(e)))}>Enable HTTPS in Tailscale<Icon name="arrow" size={15} /></button></div>}</div>}
+    {transport === "usb" ? <section className="remote-network remote-usb" aria-label="USB connection">
+      <div className="remote-network-label"><Icon name="phone" size={20} /><div><strong>One cable. Same conversation.</strong><span>Connect directly to your computer. No Tailscale or Wi-Fi needed.</span></div></div>
+      <ol className="remote-usb-steps"><li>Install the MuseCode APK on your phone.</li><li>Use a USB data cable, enable USB debugging, and allow this computer.</li><li>Connect below, then approve the matching code.</li></ol>
+      <div className="remote-actions"><button disabled={busy} onClick={() => void action(refreshUsb)}><Icon name="reset" size={16} />Find USB phones</button>{status?.usb && <button disabled={busy} onClick={() => void action(() => invoke("remote_usb_disconnect"))}>Disconnect USB</button>}</div>
+      {usbChecked && !usbDevices.length && <p className="remote-muted">No phone detected. Unlock your phone and check its USB debugging prompt, then refresh.</p>}
+      {usbDevices.map((device) => <div className="remote-device" key={device.serial}><Icon name="phone" /><div><strong>{device.name}</strong><span>{device.authorized ? status?.usb?.serial === device.serial ? "USB link enabled" : "Ready to connect" : "Allow USB debugging on this phone"}</span></div><button className="remote-primary" disabled={busy || !device.authorized || (!!status?.usb && status.usb.serial !== device.serial)} onClick={() => void action(async () => { await invoke("remote_usb_connect", { serial: device.serial }); setInvitation(null); })}>{status?.usb?.serial === device.serial ? "Reconnect" : "Connect"}</button></div>)}
+      {status?.usb && <p className="remote-muted">Open MuseCode on {status.usb.name}. If you unplug the cable, reconnect it and choose Reconnect here.</p>}
+    </section> : <section className="remote-network" aria-label="Private network">
       <div className="remote-network-label"><Icon name="shield" size={20} /><div><strong>Private with Tailscale</strong><span>{status?.tailscale.message || "Checking your connection…"}</span></div></div>
       <div className="remote-actions">
         {status && !status.tailscale.installed && <button onClick={() => void openUrl("https://tailscale.com/download/windows").catch((e) => setError(String(e)))}>Get Tailscale <Icon name="arrow" size={15} /></button>}
@@ -74,15 +91,15 @@ export default function RemotePanel({ onClose }: { onClose: () => void }) {
           await invoke("remote_enable", { enabled: !status?.enabled }); setInvitation(null);
         })}>{busy ? "Please wait…" : status?.enabled ? "Turn off" : "Enable remote access"}</button>
       </div>
-    </section>
-    {status?.enabled ? <>
-      <div className="remote-address"><span className="remote-live-dot" /><span title={status.url ?? ""}>{status.url}</span><button className="remote-icon-button" aria-label="Copy private address" onClick={() => void copyText(status.url ?? "").then((ok) => { setCopied(ok); setTimeout(() => setCopied(false), 1500); })}><Icon name={copied ? "check" : "copy"} size={16} /></button></div>
-      {pending ? <section className="remote-pair-request" aria-label="Confirm phone pairing">
+    </section>}
+    {pending ? <section className="remote-pair-request" aria-label="Confirm phone pairing">
         <span className="section-label">A phone wants to connect</span><h3>{pending.name}</h3>
         <p>Check that this code matches the one on your phone.</p><div className="remote-code">{pending.code}</div>
         <label className="remote-control"><input type="checkbox" checked={control} onChange={(e) => setControl(e.target.checked)} />Allow sending messages and stopping tasks</label>
         <div className="remote-actions"><button disabled={busy} onClick={() => void action(async () => { await invoke("remote_cancel_pairing"); setInvitation(null); })}>Decline</button><button disabled={busy} className="remote-primary" onClick={() => void action(async () => { await invoke("remote_approve", { code: pending.code, control }); setInvitation(null); })}>Connect phone</button></div>
-      </section> : <section className="remote-pair-layout">
+      </section> : transport === "tailscale" && (status?.enabled ? <>
+      <div className="remote-address"><span className="remote-live-dot" /><span title={status.url ?? ""}>{status.url}</span><button className="remote-icon-button" aria-label="Copy private address" onClick={() => void copyText(status.url ?? "").then((ok) => { setCopied(ok); setTimeout(() => setCopied(false), 1500); })}><Icon name={copied ? "check" : "copy"} size={16} /></button></div>
+      <section className="remote-pair-layout">
         <div className="remote-qr">
           {invitation && !expired ? <img src={`data:image/svg+xml,${encodeURIComponent(invitation.svg)}`} alt="Scan this QR code with your phone camera to pair with MuseCode" /> : <div className="remote-qr-empty"><Icon name="phone" size={42} /><span>{expired ? "QR code expired" : "Ready when you are"}</span></div>}
         </div>
@@ -90,8 +107,8 @@ export default function RemotePanel({ onClose }: { onClose: () => void }) {
           <button className="remote-primary" disabled={busy} onClick={() => void action(async () => { setInvitation(await invoke<Invitation>("remote_pair")); setTime(Date.now()); setControl(true); })}>{invitation ? "Generate new QR code" : "Show pairing code"}</button>
           {invitation && !expired && <span className="remote-expiry">Expires in {seconds}s · single use</span>}
         </div>
-      </section>}
-    </> : <div className="remote-off"><Icon name="phone" size={34} /><div><h3>A little more freedom.</h3><p>Read live responses, send a follow-up, and stop a task from your phone. MuseCode keeps working in the tray.</p></div></div>}
+      </section>
+    </> : <div className="remote-off"><Icon name="phone" size={34} /><div><h3>A little more freedom.</h3><p>Read live responses, send a follow-up, and stop a task from your phone. MuseCode keeps working in the tray.</p></div></div>)}
     <section className="remote-devices" aria-label="Connected devices"><div className="remote-devices-heading"><h3>Connected devices</h3><span>{status?.devices.length ?? 0}</span></div>
       {!status?.devices.length && <p className="remote-muted">Your paired phones will appear here. You can disconnect them at any time.</p>}
       {status?.devices.map((device) => <div className="remote-device" key={device.id}><Icon name="phone" /><div><strong>{device.name}</strong><span>{device.control ? "Can view and control" : "View only"} · paired {new Date(device.created_at * 1000).toLocaleDateString()}</span></div><button disabled={busy} onClick={() => void action(() => invoke("remote_revoke", { id: device.id }))}>Disconnect</button></div>)}

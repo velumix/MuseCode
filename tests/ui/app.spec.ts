@@ -11,7 +11,7 @@ async function boot(page: Page, delay = 0) {
     const listeners = new Map();
     let serial = 0;
     const api = w.qa = { calls: [] as any[], sessions: new Map(), failSend: false,
-      remote: { enabled: false, url: null as string | null, error: null, devices: [] as any[], pending: null as any,
+      remote: { enabled: false, url: null as string | null, error: null, devices: [] as any[], pending: null as any, usb: null as any,
         tailscale: { installed: true, connected: true, hostname: "desktop.tail.ts.net", message: "Connected to your private network." } },
       desktop: { notifications_enabled: true, last_error: null }, pendingNavigation: null as string | null,
       emit(event: string, payload: unknown) {
@@ -32,6 +32,9 @@ async function boot(page: Page, delay = 0) {
       async invoke(cmd: string, args: any = {}) {
         api.calls.push({ cmd, args });
         if (cmd === "remote_status" || cmd === "remote_check_tailscale") return { ...api.remote };
+        if (cmd === "remote_usb_devices") return [{ serial: "PIXEL_TEST", name: "Pixel 7 Pro", authorized: true }, { serial: "LOCKED", name: "Android phone", authorized: false }];
+        if (cmd === "remote_usb_connect") { api.remote.usb = { serial: args.serial, name: "Pixel 7 Pro", authorized: true }; return { ...api.remote }; }
+        if (cmd === "remote_usb_disconnect") { api.remote.usb = null; return { ...api.remote }; }
         if (cmd === "remote_enable") { api.remote.enabled = args.enabled; api.remote.url = args.enabled ? "https://desktop.tail.ts.net:8443" : null; return { ...api.remote }; }
         if (cmd === "remote_pair") return { url: "https://desktop.tail.ts.net:8443/#pair=test", code: "482196", expires_at: Math.floor(Date.now() / 1000) + 120, svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="white"/></svg>' };
         if (cmd === "remote_approve") { api.remote.devices.push({ id: "phone", name: api.remote.pending.name, control: args.control, created_at: Math.floor(Date.now() / 1000) }); api.remote.pending = null; return; }
@@ -76,6 +79,30 @@ async function boot(page: Page, delay = 0) {
 }
 
 const composer = (page: Page) => page.locator(".chat-wrap:not(.hidden) textarea");
+
+test("USB pairing works with Tailscale disabled and requires desktop approval", async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => { (window as any).qa.remote.tailscale.connected = false; });
+  await page.getByRole("button", { name: "Connect phone", exact: true }).click();
+  const panel = page.getByRole("dialog", { name: "Connect your phone" });
+  await panel.getByRole("button", { name: "USB cable", exact: true }).click();
+  await expect(panel.getByText("Pixel 7 Pro", { exact: true })).toBeVisible();
+  await expect(panel.locator(".remote-device").filter({ hasText: "Allow USB debugging" }).getByRole("button")).toBeDisabled();
+  await panel.getByRole("button", { name: "Connect", exact: true }).first().click();
+  await expect(panel.getByRole("button", { name: "Reconnect", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => (window as any).qa.remote.enabled)).toBe(false);
+  await page.evaluate(() => {
+    const qa = (window as any).qa;
+    qa.remote.pending = { name: "Cable phone", code: "129483", expires_at: Math.floor(Date.now() / 1000) + 120 };
+    qa.emit("remote-status", { ...qa.remote });
+  });
+  await expect(panel.getByRole("region", { name: "Confirm phone pairing" })).toContainText("129483");
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await panel.getByRole("button", { name: "Connect phone", exact: true }).click();
+  await expect(panel.getByText("Cable phone", { exact: true })).toBeVisible();
+  await panel.getByRole("button", { name: "Disconnect USB", exact: true }).click();
+  await expect(panel.getByRole("button", { name: "Disconnect USB", exact: true })).toHaveCount(0);
+});
 
 test("desktop pairing offers QR, matching-code approval, view-only access and revocation", async ({ page }) => {
   await boot(page);

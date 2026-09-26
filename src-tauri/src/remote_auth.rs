@@ -30,6 +30,8 @@ pub struct Device {
     pub created_at: u64,
     pub expires_at: u64,
     pub control: bool,
+    #[serde(default)]
+    pub usb: bool,
     #[serde(skip_serializing_if = "String::is_empty", default)]
     pub credential_hash: String,
 }
@@ -43,6 +45,7 @@ impl Device {
 }
 
 pub struct Pairing {
+    pub usb: bool,
     pub invitation_hash: String,
     pub expires_at: u64,
     pub code: String,
@@ -84,6 +87,7 @@ impl Auth {
         let invitation = secret();
         let code = format!("{:06}", uuid::Uuid::new_v4().as_u128() % 1_000_000);
         self.pairing = Some(Pairing {
+            usb: false,
             invitation_hash: hash(&invitation),
             expires_at: time + PAIR_SECONDS,
             code: code.clone(),
@@ -179,6 +183,7 @@ impl Auth {
             created_at: time,
             expires_at: time + DEVICE_SECONDS,
             control,
+            usb: pair.usb,
             credential_hash: hash(&pair.credential),
         };
         self.saved.devices.push(device.clone());

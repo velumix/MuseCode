@@ -4,6 +4,16 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class DesktopAddressTest {
+    @Test public void usbAllowsOnlyTheExactLoopbackEndpoint() {
+        DesktopAddress usb = DesktopAddress.parse(DesktopAddress.USB_ORIGIN + "/#pair=" + "d".repeat(64));
+        assertTrue(usb.usb);
+        assertTrue(usb.contains(DesktopAddress.USB_ORIGIN + "/api/sessions"));
+        assertFalse(usb.contains("http://127.0.0.1:8080/api/me"));
+        assertFalse(usb.contains("https://desktop.tail123.ts.net:8443/api/me"));
+        for (String address : new String[] {"http://192.168.1.1:43827/", "http://localhost:43827/", "http://127.0.0.1:8080/", "http://attacker@127.0.0.1:43827/", "http://127.0.0.1.evil.com:43827/", "http://2130706433:43827/"}) {
+            assertThrows(IllegalArgumentException.class, () -> DesktopAddress.parse(address));
+        }
+    }
     private static final String ORIGIN = "https://desktop.tail123.ts.net:8443";
     @Test public void acceptsDesktopQrButNeverStoresItsSecretInOrigin() {
         String qr = ORIGIN + "/#pair=" + "a".repeat(64);

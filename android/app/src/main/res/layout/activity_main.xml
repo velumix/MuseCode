@@ -28,6 +28,8 @@
                     android:layout_marginTop="8dp" android:text="@string/paste_link" />
                 <Button android:id="@+id/tailscale" style="@style/MuseButton" android:layout_width="match_parent" android:layout_height="52dp"
                     android:text="@string/open_tailscale" android:textColor="@color/muse_muted" />
+                <Button android:id="@+id/usb" style="@style/MuseButton" android:layout_width="match_parent" android:layout_height="52dp"
+                    android:text="@string/usb_title" />
                 <TextView android:id="@+id/welcome_hint" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="24dp"
                     android:text="@string/home_hint" android:textColor="@color/muse_muted" android:textSize="13sp" android:lineSpacingExtra="4dp" />
             </LinearLayout>
