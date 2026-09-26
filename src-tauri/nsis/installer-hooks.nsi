@@ -18,6 +18,14 @@ BrandingText "Muse Code Setup"
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
+  ; Native toast identity and COM activation, including Notification Center.
+  ; NSIS runs as a 32-bit process; the COM server is the 64-bit app.
+  SetRegView 64
+  WriteRegStr HKCU "Software\Classes\AppUserModelId\com.velumix.musecode" "DisplayName" "Muse Code"
+  WriteRegStr HKCU "Software\Classes\AppUserModelId\com.velumix.musecode" "IconUri" "$INSTDIR\muse-notification.png"
+  WriteRegStr HKCU "Software\Classes\AppUserModelId\com.velumix.musecode" "CustomActivator" "{31C4BDC3-41CE-4B6E-99AB-502F4549295F}"
+  WriteRegStr HKCU "Software\Classes\CLSID\{31C4BDC3-41CE-4B6E-99AB-502F4549295F}\LocalServer32" "" '$\"$INSTDIR\${MAINBINARYNAME}.exe$\" --toast-activated'
+  SetRegView lastused
   ; Muse Code v1 hosts the `muse` CLI inside its terminal view, so flag a
   ; missing CLI right after install. /SD IDOK keeps this safe under /S.
   nsExec::ExecToStack 'cmd /c where muse'
@@ -33,5 +41,8 @@ BrandingText "Muse Code Setup"
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
-  ; No custom cleanup beyond the generated uninstaller.
+  SetRegView 64
+  DeleteRegKey HKCU "Software\Classes\AppUserModelId\com.velumix.musecode"
+  DeleteRegKey HKCU "Software\Classes\CLSID\{31C4BDC3-41CE-4B6E-99AB-502F4549295F}"
+  SetRegView lastused
 !macroend

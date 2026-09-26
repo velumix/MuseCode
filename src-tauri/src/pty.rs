@@ -2,22 +2,47 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 const READ_CHUNK: usize = 8192;
 const EXIT_POLL_ATTEMPTS: u32 = 20;
 const EXIT_POLL_INTERVAL_MS: u64 = 50;
+type PtyChild = Arc<Mutex<Option<Box<dyn Child + Send + Sync>>>>;
 
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Mutex<Box<dyn std::io::Write + Send>>,
-    child: Mutex<Option<Box<dyn Child + Send + Sync>>>,
+    child: PtyChild,
 }
 
 #[derive(Default)]
 pub struct PtyState {
     sessions: Mutex<HashMap<String, PtySession>>,
+}
+
+impl PtyState {
+    pub fn shutdown(&self) {
+        if let Ok(mut sessions) = self.sessions.lock() {
+            for (_, session) in sessions.drain() {
+                stop_child(&session.child);
+            }
+        }
+    }
+}
+
+fn stop_child(handle: &PtyChild) {
+    let child = handle.lock().ok().and_then(|mut child| child.take());
+    if let Some(mut child) = child {
+        if child.try_wait().ok().flatten().is_none() {
+            #[cfg(windows)]
+            if let Some(pid) = child.process_id() {
+                crate::runner::terminate_tree(pid);
+            }
+            let _ = child.kill();
+        }
+        let _ = child.wait();
+    }
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -28,7 +53,7 @@ pub struct SpawnInfo {
 
 /// Locate the `muse` CLI on PATH, honouring PATHEXT on Windows so shims
 /// like `muse.cmd` resolve to a real file.
-fn resolve_muse() -> Option<PathBuf> {
+pub(crate) fn resolve_muse() -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     #[cfg(windows)]
     let exts: Vec<String> = std::env::var("PATHEXT")
@@ -80,16 +105,24 @@ fn build_command(muse_path: &Path) -> CommandBuilder {
             cmd
         }
         Some("cmd" | "bat") => {
-            let mut cmd = CommandBuilder::new("cmd");
-            cmd.arg("/c");
-            cmd.arg(muse_path);
+            // ConPTY's builder does not apply Rust's special batch-file
+            // quoting. Pass the path as data so spaces, &, and % cannot
+            // become shell syntax or environment-variable expansions.
+            let mut cmd = CommandBuilder::new("powershell");
+            cmd.args([
+                "-NoLogo",
+                "-NoProfile",
+                "-Command",
+                "& $env:MUSE_CODE_CLI; exit $LASTEXITCODE",
+            ]);
+            cmd.env("MUSE_CODE_CLI", muse_path);
             cmd
         }
         _ => CommandBuilder::new(muse_path),
     }
 }
 
-fn home_dir() -> PathBuf {
+pub(crate) fn home_dir() -> PathBuf {
     std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
         .map(PathBuf::from)
@@ -118,6 +151,21 @@ fn split_valid_utf8(buf: &[u8]) -> (String, usize) {
     }
 }
 
+fn drain_valid_utf8(pending: &mut Vec<u8>) -> String {
+    let mut output = String::new();
+    let mut total = 0;
+    loop {
+        let (text, consumed) = split_valid_utf8(&pending[total..]);
+        if consumed == 0 {
+            break;
+        }
+        output.push_str(&text);
+        total += consumed;
+    }
+    pending.drain(..total);
+    output
+}
+
 fn kill_session(state: &State<PtyState>, id: &str) {
     let session = state
         .sessions
@@ -125,43 +173,44 @@ fn kill_session(state: &State<PtyState>, id: &str) {
         .ok()
         .and_then(|mut sessions| sessions.remove(id));
     if let Some(session) = session {
-        if let Ok(mut child) = session.child.lock() {
-            if let Some(mut child) = child.take() {
-                let _ = child.kill();
-            }
-        }
+        stop_child(&session.child);
     }
 }
 
 /// Poll for the child exit code after EOF, then report it. `try_wait` is
 /// used instead of blocking `wait` so a wedged child cannot deadlock the
 /// reader thread against `pty_kill`.
-fn report_exit_code(app: &AppHandle, id: &str) {
+fn report_exit_code(app: &AppHandle, id: &str, child: &PtyChild) {
     let mut code: Option<u32> = None;
     for _ in 0..EXIT_POLL_ATTEMPTS {
-        let found = app
-            .state::<PtyState>()
-            .sessions
+        let found = child
             .lock()
             .ok()
-            .and_then(|sessions| {
-                sessions.get(id).and_then(|s| {
-                    s.child
-                        .lock()
-                        .ok()
-                        .and_then(|mut child| child.as_mut().and_then(|c| c.try_wait().ok().flatten()))
-                })
-            });
+            .and_then(|mut child| child.as_mut().and_then(|c| c.try_wait().ok().flatten()));
         if let Some(status) = found {
             code = Some(status.exit_code());
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(EXIT_POLL_INTERVAL_MS));
     }
-    let _ = app.emit("pty-exit", serde_json::json!({ "id": id, "code": code }));
+    let state = app.state::<PtyState>();
+    let session = state.sessions.lock().ok().and_then(|mut sessions| {
+        if sessions
+            .get(id)
+            .is_some_and(|s| Arc::ptr_eq(&s.child, child))
+        {
+            sessions.remove(id)
+        } else {
+            None
+        }
+    });
+    if let Some(session) = session {
+        stop_child(&session.child);
+        let _ = app.emit("pty-exit", serde_json::json!({ "id": id, "code": code }));
+    }
 }
 
-fn spawn_reader(app: AppHandle, id: String, mut reader: Box<dyn Read + Send>) {
+fn spawn_reader(app: AppHandle, id: String, child: PtyChild, mut reader: Box<dyn Read + Send>) {
     std::thread::spawn(move || {
         let mut pending: Vec<u8> = Vec::new();
         let mut buf = [0u8; READ_CHUNK];
@@ -170,11 +219,10 @@ fn spawn_reader(app: AppHandle, id: String, mut reader: Box<dyn Read + Send>) {
                 Ok(0) => break,
                 Ok(n) => {
                     pending.extend_from_slice(&buf[..n]);
-                    let (text, consumed) = split_valid_utf8(&pending);
+                    let text = drain_valid_utf8(&mut pending);
                     if !text.is_empty() {
                         let _ = app.emit("pty-data", serde_json::json!({ "id": id, "data": text }));
                     }
-                    pending.drain(..consumed);
                 }
                 Err(_) => break,
             }
@@ -185,7 +233,7 @@ fn spawn_reader(app: AppHandle, id: String, mut reader: Box<dyn Read + Send>) {
                 let _ = app.emit("pty-data", serde_json::json!({ "id": id, "data": text }));
             }
         }
-        report_exit_code(&app, &id);
+        report_exit_code(&app, &id, &child);
     });
 }
 
@@ -198,7 +246,9 @@ pub fn pty_spawn(
     id: String,
     cols: u16,
     rows: u16,
+    workspace: Option<String>,
 ) -> Result<SpawnInfo, String> {
+    let workspace = crate::runner::resolve_workspace(workspace)?;
     kill_session(&state, &id);
     let muse_path = resolve_muse().ok_or_else(|| {
         "Could not find the `muse` CLI on PATH. Install the Muse CLI and make sure `muse` works in a terminal, then restart the session.".to_string()
@@ -213,11 +263,7 @@ pub fn pty_spawn(
         })
         .map_err(|e| format!("failed to open terminal: {e}"))?;
     let mut cmd = build_command(&muse_path);
-    cmd.cwd(home_dir());
-    let child = pair
-        .slave
-        .spawn_command(cmd)
-        .map_err(|e| format!("failed to launch `{}`: {e}", muse_path.display()))?;
+    cmd.cwd(&workspace);
     let writer = pair
         .master
         .take_writer()
@@ -226,19 +272,24 @@ pub fn pty_spawn(
         .master
         .try_clone_reader()
         .map_err(|e| format!("failed to attach terminal output: {e}"))?;
-    state
+    let mut sessions = state
         .sessions
         .lock()
-        .map_err(|_| "terminal state is unavailable".to_string())?
-        .insert(
-            id.clone(),
-            PtySession {
-                master: pair.master,
-                writer: Mutex::new(writer),
-                child: Mutex::new(Some(child)),
-            },
-        );
-    spawn_reader(app, id.clone(), reader);
+        .map_err(|_| "terminal state is unavailable".to_string())?;
+    let child =
+        Arc::new(Mutex::new(Some(pair.slave.spawn_command(cmd).map_err(
+            |e| format!("failed to launch `{}`: {e}", muse_path.display()),
+        )?)));
+    sessions.insert(
+        id.clone(),
+        PtySession {
+            master: pair.master,
+            writer: Mutex::new(writer),
+            child: Arc::clone(&child),
+        },
+    );
+    drop(sessions);
+    spawn_reader(app, id.clone(), child, reader);
     Ok(SpawnInfo {
         id,
         backend: muse_path.display().to_string(),
@@ -252,7 +303,9 @@ pub fn pty_write(state: State<PtyState>, id: String, data: String) -> Result<(),
         .sessions
         .lock()
         .map_err(|_| "terminal state is unavailable".to_string())?;
-    let session = sessions.get(&id).ok_or_else(|| "session not found".to_string())?;
+    let session = sessions
+        .get(&id)
+        .ok_or_else(|| "session not found".to_string())?;
     let mut writer = session
         .writer
         .lock()
@@ -261,7 +314,9 @@ pub fn pty_write(state: State<PtyState>, id: String, data: String) -> Result<(),
     writer
         .write_all(data.as_bytes())
         .map_err(|e| format!("failed to write to terminal: {e}"))?;
-    writer.flush().map_err(|e| format!("failed to flush terminal: {e}"))?;
+    writer
+        .flush()
+        .map_err(|e| format!("failed to flush terminal: {e}"))?;
     Ok(())
 }
 
@@ -272,7 +327,9 @@ pub fn pty_resize(state: State<PtyState>, id: String, cols: u16, rows: u16) -> R
         .sessions
         .lock()
         .map_err(|_| "terminal state is unavailable".to_string())?;
-    let session = sessions.get(&id).ok_or_else(|| "session not found".to_string())?;
+    let session = sessions
+        .get(&id)
+        .ok_or_else(|| "session not found".to_string())?;
     session
         .master
         .resize(PtySize {
@@ -294,7 +351,24 @@ pub fn pty_kill(state: State<PtyState>, id: String) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::split_valid_utf8;
+    use super::{drain_valid_utf8, split_valid_utf8};
+
+    #[test]
+    fn invalid_bytes_do_not_delay_valid_tail_until_another_read() {
+        let mut pending = b"a\xffb\xfec".to_vec();
+        assert_eq!(drain_valid_utf8(&mut pending), "a\u{fffd}b\u{fffd}c");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn drain_keeps_only_incomplete_utf8_for_the_next_read() {
+        let mut pending = vec![b'a', 0xff, 0xe2, 0x94];
+        assert_eq!(drain_valid_utf8(&mut pending), "a\u{fffd}");
+        assert_eq!(pending, vec![0xe2, 0x94]);
+        pending.extend_from_slice(&[0x80, b'b']);
+        assert_eq!(drain_valid_utf8(&mut pending), "─b");
+        assert!(pending.is_empty());
+    }
 
     #[test]
     fn valid_ascii_consumes_everything() {

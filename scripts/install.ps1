@@ -31,7 +31,7 @@ $exe = Join-Path $installDir 'muse-code-app.exe'
 if ($Uninstall) {
   $un = Join-Path $installDir 'uninstall.exe'
   if (-not (Test-Path $un)) { throw "Uninstaller not found: $un (is $product installed?)" }
-  $p = Start-Process -FilePath $un -ArgumentList '/S' -Wait -PassThru
+  $p = Start-Process -FilePath $un -ArgumentList '/S' -Wait -PassThru -WindowStyle Hidden
   if ($p.ExitCode -ne 0) { throw "Uninstaller exited with code $($p.ExitCode)" }
   Start-Sleep -Seconds 2
   if (Test-Path $installDir) { throw "Uninstall verification failed: $installDir still exists" }
@@ -42,12 +42,21 @@ if ($Uninstall) {
 if ($Build -or -not (Test-Path $installer)) {
   $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';' + [System.Environment]::GetEnvironmentVariable('PATH', 'User')
   Set-Location $root
-  npx tauri build --bundles nsis
-  if ($LASTEXITCODE -ne 0) { throw "tauri build failed with code $LASTEXITCODE" }
+  # tauri/cargo log progress to stderr; under $ErrorActionPreference='Stop' that
+  # is fatal when the caller merges stderr (2>&1). Relax it for this one call;
+  # the LASTEXITCODE check below still gates failure.
+  $prevEap = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    npx.cmd tauri build --bundles nsis
+    if ($LASTEXITCODE -ne 0) { throw "tauri build failed with code $LASTEXITCODE" }
+  } finally {
+    $ErrorActionPreference = $prevEap
+  }
 }
 if (-not (Test-Path $installer)) { throw "Installer not found: $installer" }
 
-$proc = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru
+$proc = Start-Process -FilePath $installer -ArgumentList '/S' -Wait -PassThru -WindowStyle Hidden
 if ($proc.ExitCode -ne 0) { throw "Installer exited with code $($proc.ExitCode)" }
 if (-not (Test-Path $exe)) { throw "Install verification failed: $exe missing" }
 Write-Output "Installed $product $version -> $exe"

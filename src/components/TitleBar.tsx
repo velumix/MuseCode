@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
+import Icon, { MuseMark } from "./Icon";
 
 function MinimizeIcon() {
   return (
@@ -35,32 +36,24 @@ function CloseIcon() {
   );
 }
 
-function BrandMark() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <rect x="1" y="1" width="14" height="14" rx="3" fill="#d9a648" />
-      <path d="M5 6l2.5 2L5 10" stroke="#0c0f13" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M8.5 10.5H11" stroke="#0c0f13" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-export default function TitleBar() {
+export default function TitleBar({ onCommands }: { onCommands: () => void }) {
   const [maximized, setMaximized] = useState(false);
   const win = getCurrentWindow();
 
   useEffect(() => {
     const w = getCurrentWindow();
+    let disposed = false;
     w.isMaximized().then(setMaximized).catch(() => {});
     let unlisten: (() => void) | undefined;
     listen("tauri://resize", () => {
       w.isMaximized().then(setMaximized).catch(() => {});
     })
       .then((u) => {
-        unlisten = u;
+        if (disposed) u();
+        else unlisten = u;
       })
       .catch(() => {});
-    return () => unlisten?.();
+    return () => { disposed = true; unlisten?.(); };
   }, []);
 
   return (
@@ -78,9 +71,15 @@ export default function TitleBar() {
       }}
     >
       <div className="titlebar-brand">
-        <BrandMark />
-        <span>Muse Code</span>
+        <MuseMark />
+        <span>muse<span className="brand-suffix">code</span></span>
       </div>
+      <button type="button" className="global-search" onClick={onCommands} aria-label="Search commands and conversations">
+        <Icon name="search" size={17} />
+        <span>Search Muse</span>
+        <kbd>Ctrl K</kbd>
+      </button>
+      <div className="titlebar-drag-space" />
       <div className="titlebar-controls">
         <button type="button" aria-label="Minimize" onClick={() => void win.minimize()}>
           <MinimizeIcon />
@@ -88,7 +87,7 @@ export default function TitleBar() {
         <button type="button" aria-label={maximized ? "Restore" : "Maximize"} onClick={() => void win.toggleMaximize()}>
           {maximized ? <RestoreIcon /> : <MaximizeIcon />}
         </button>
-        <button type="button" aria-label="Close" className="close" onClick={() => void win.close()}>
+        <button type="button" aria-label="Close" title="Hide to system tray — Muse keeps running" className="close" onClick={() => void win.close()}>
           <CloseIcon />
         </button>
       </div>

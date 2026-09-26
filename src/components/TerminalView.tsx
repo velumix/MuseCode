@@ -15,6 +15,7 @@ export type PtyStatus =
   | { kind: "error"; message: string };
 
 export interface TerminalHandles {
+  id: string;
   term: Terminal;
   fit: FitAddon;
   search: SearchAddon;
@@ -25,23 +26,30 @@ interface TerminalViewProps {
   active: boolean;
   /** Bump to tear down the session and spawn a fresh one. */
   sessionKey: number;
+  workspace?: string;
   onStatus: (sessionId: string, status: PtyStatus) => void;
   onHandles: (sessionId: string, handles: TerminalHandles | null) => void;
 }
 
-export default function TerminalView({ sessionId, active, sessionKey, onStatus, onHandles }: TerminalViewProps) {
+export default function TerminalView({ sessionId, active, sessionKey, workspace, onStatus, onHandles }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const liveRef = useRef<{ term: Terminal; fit: FitAddon } | null>(null);
+  const liveRef = useRef<{ id: string; term: Terminal; fit: FitAddon } | null>(null);
   const statusRef = useRef(onStatus);
   statusRef.current = onStatus;
   const handlesRef = useRef(onHandles);
   handlesRef.current = onHandles;
+  // Latest teardown promise; the next mount awaits it so a restart's
+  // kill always lands before its replacement spawn.
+  const killRef = useRef<Promise<unknown>>(Promise.resolve());
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
     let disposed = false;
+    let spawned = false;
+    let exited = false;
+    const nativeId = `${sessionId}-terminal-${crypto.randomUUID()}`;
     const term = new Terminal({
       cursorBlink: true,
       cursorStyle: "bar",
@@ -50,11 +58,11 @@ export default function TerminalView({ sessionId, active, sessionKey, onStatus, 
       lineHeight: 1.2,
       scrollback: 5000,
       theme: {
-        background: "#0b0e11",
-        foreground: "#d6dde6",
-        cursor: "#d9a648",
-        selectionBackground: "#2c3a4a",
-        black: "#0b0e11",
+        background: "#18191b",
+        foreground: "#e8eaed",
+        cursor: "#84baff",
+        selectionBackground: "#344962",
+        black: "#18191b",
         red: "#e06c5b",
         green: "#8fc87a",
         yellow: "#d9a648",
@@ -84,8 +92,8 @@ export default function TerminalView({ sessionId, active, sessionKey, onStatus, 
     );
     term.open(el);
     fit.fit();
-    liveRef.current = { term, fit };
-    handlesRef.current(sessionId, { term, fit, search });
+    liveRef.current = { id: nativeId, term, fit };
+    handlesRef.current(sessionId, { id: nativeId, term, fit, search });
 
     const unlistens: Array<() => void> = [];
     const setStatus = (s: PtyStatus) => {
@@ -94,24 +102,33 @@ export default function TerminalView({ sessionId, active, sessionKey, onStatus, 
     setStatus({ kind: "starting" });
 
     // Attach listeners before spawning so early output can't be missed.
-    (async () => {
+    const setup = (async () => {
       try {
+        await killRef.current;
+        if (disposed) return;
         unlistens.push(
           await listen<{ id: string; data: string }>("pty-data", (e) => {
-            if (!disposed && e.payload.id === sessionId) term.write(e.payload.data);
+            if (!disposed && e.payload.id === nativeId) term.write(e.payload.data);
           }),
         );
+        if (disposed) return;
         unlistens.push(
           await listen<{ id: string; code: number | null }>("pty-exit", (e) => {
-            if (e.payload.id === sessionId) setStatus({ kind: "exited", code: e.payload.code });
+            if (e.payload.id === nativeId) {
+              exited = true;
+              setStatus({ kind: "exited", code: e.payload.code });
+            }
           }),
         );
+        if (disposed) return;
         const info = await invoke<{ id: string; backend: string }>("pty_spawn", {
-          id: sessionId,
+          id: nativeId,
+          workspace,
           cols: Math.max(1, term.cols),
           rows: Math.max(1, term.rows),
         });
-        setStatus({ kind: "running", backend: info.backend });
+        spawned = true;
+        if (!exited) setStatus({ kind: "running", backend: info.backend });
       } catch (err) {
         setStatus({
           kind: "error",
@@ -121,15 +138,15 @@ export default function TerminalView({ sessionId, active, sessionKey, onStatus, 
     })();
 
     term.onData((data) => {
-      invoke("pty_write", { id: sessionId, data }).catch(() => {});
+      if (spawned && !disposed && !exited) invoke("pty_write", { id: nativeId, data }).catch(() => {});
     });
 
     const ro = new ResizeObserver(() => {
-      if (disposed) return;
+      if (disposed || !spawned || !el.clientWidth || !el.clientHeight) return;
       try {
         fit.fit();
         invoke("pty_resize", {
-          id: sessionId,
+          id: nativeId,
           cols: Math.max(1, term.cols),
           rows: Math.max(1, term.rows),
         }).catch(() => {});
@@ -146,9 +163,12 @@ export default function TerminalView({ sessionId, active, sessionKey, onStatus, 
       liveRef.current = null;
       handlesRef.current(sessionId, null);
       term.dispose();
-      invoke("pty_kill", { id: sessionId }).catch(() => {});
+      killRef.current = setup.then(async () => {
+        for (const unlisten of unlistens) unlisten();
+        await invoke("pty_kill", { id: nativeId });
+      }).catch(() => {});
     };
-  }, [sessionId, sessionKey]);
+  }, [sessionId, sessionKey, workspace]);
 
   // Hidden tabs have no layout box; refit once this tab becomes visible.
   useEffect(() => {
@@ -159,13 +179,14 @@ export default function TerminalView({ sessionId, active, sessionKey, onStatus, 
       try {
         live.fit.fit();
         invoke("pty_resize", {
-          id: sessionId,
+          id: live.id,
           cols: Math.max(1, live.term.cols),
           rows: Math.max(1, live.term.rows),
         }).catch(() => {});
       } catch {
         // Tearing down; safe to ignore.
       }
+      live.term.focus();
     });
     return () => cancelAnimationFrame(frame);
   }, [active, sessionId]);
