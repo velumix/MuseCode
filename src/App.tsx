@@ -15,6 +15,8 @@ const RemotePanel = lazy(() => import("./components/RemotePanel"));
 import type { PaletteAction } from "./components/CommandPalette";
 import "./App.css";
 import ProviderPicker from "./components/ProviderPicker";
+const MemoryPanel = lazy(() => import("./components/MemoryPanel"));
+import type { MemoryView } from "./memory";
 import { preferredProvider, preferredOptions, saveOptions, providerNames, type Provider, type RunOptions } from "./providers";
 
 type TabMode = "agent" | "terminal";
@@ -73,6 +75,7 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [remoteOpen, setRemoteOpen] = useState(false);
+  const [memory, setMemory] = useState<{workspace:string;seed?:string}|null>(null);
   const [desktop, setDesktop] = useState<DesktopStatus>({ notifications_enabled: true, last_error: null });
   const [desktopMessage, setDesktopMessage] = useState<{ text: string; error: boolean } | null>(null);
 
@@ -283,6 +286,7 @@ export default function App() {
   // Global shortcuts in the capture phase so the terminal never sees them.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (document.querySelector('[aria-modal="true"]')) return;
       if (!e.ctrlKey || e.altKey || e.metaKey) return;
       const actions = actionsRef.current;
       if (e.key === "=" || e.key === "+") {
@@ -357,6 +361,7 @@ export default function App() {
   const failed = activeTab && (tabStatus(activeTab).kind === "error" || tabStatus(activeTab).kind === "exited");
 
   const paletteActions: PaletteAction[] = [
+    { id:"cmd-memory", title:"Open project memory vault", run:()=>{ if(activeTab?.workspace)setMemory({workspace:activeTab.workspace}); } },
     { id: "cmd-remote", title: "Connect your phone with Tailscale or USB", run: () => setRemoteOpen(true) },
     { id: "cmd-new", title: "New agent tab", hint: "Ctrl+T", run: newTab },
     { id: "cmd-focus", title: "Focus message input", hint: "Ctrl+L", run: focusComposer },
@@ -423,6 +428,7 @@ export default function App() {
           </div>
         )}
         {activeTab?.mode === "terminal" && <button type="button" className="status-btn" onClick={clearActive}>Clear</button>}
+        <button type="button" className="status-btn" disabled={!activeTab?.workspace} onClick={()=>{if(activeTab?.workspace)setMemory({workspace:activeTab.workspace});}}><Icon name="memory" size={17}/>Memory</button>
         <button type="button" className={`restart-btn${failed ? " primary" : ""}`} onClick={restartActive} aria-label="Restart" title="Restart this session">
           <Icon name="reset" size={17} />
         </button>
@@ -436,6 +442,7 @@ export default function App() {
               provider={t.provider}
               options={t.options}
               initialWorkspace={t.workspace}
+              onRemember={(seed)=>{if(t.workspace)setMemory({workspace:t.workspace,seed});}}
               active={t.id === activeTab?.id && t.mode === "agent"}
               sessionKey={t.agentKey}
               onStatus={handleAgentStatus}
@@ -478,6 +485,7 @@ export default function App() {
       </div>
       {paletteOpen && <CommandPalette actions={paletteActions} onClose={() => setPaletteOpen(false)} />}
       {remoteOpen && <Suspense fallback={null}><RemotePanel onClose={() => setRemoteOpen(false)} /></Suspense>}
+      {memory&&<Suspense fallback={null}><MemoryPanel seed={memory.seed} onClose={()=>setMemory(null)} request={(request)=>invoke<MemoryView>("memory_request",{workspace:memory.workspace,request})} openVault={()=>invoke("memory_open")}/></Suspense>}
     </div>
   );
 }

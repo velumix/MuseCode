@@ -86,7 +86,7 @@ try {
   await phone.goto(invitation.url);
   if (release) {
     await phone.evaluate(() => navigator.serviceWorker.ready.then(() => true));
-    await expect.poll(() => phone.evaluate(() => caches.keys())).toEqual(["velum-phone-v4"]);
+    await expect.poll(() => phone.evaluate(() => caches.keys())).toEqual(["velum-phone-v5"]);
     await context.setOffline(true);
     const offline = await context.newPage();
     await offline.goto(new URL("/", invitation.url).href);
@@ -94,7 +94,7 @@ try {
     assert(!(await offline.locator("body").innerText()).includes("Old phone shell"));
     await offline.close();
     await context.setOffline(false);
-    const cached = await phone.evaluate(async () => (await (await caches.open("velum-phone-v4")).keys()).map((r) => r.url));
+    const cached = await phone.evaluate(async () => (await (await caches.open("velum-phone-v5")).keys()).map((r) => r.url));
     assert(cached.every((url) => !url.includes("/api/") && !url.includes("pair=")), "Phone cache contains private data");
     console.log("PASS: old phone cache migrates, offline launch has current branding, private data stays uncached");
   }
@@ -132,6 +132,22 @@ try {
   await expect(phone.getByText("Reply: From phone in tray", { exact: true })).toBeVisible();
   await expect(phone.locator(".phone-message.user")).toHaveCount(2);
   console.log("PASS: phone controls the actual background runner; desktop stays hidden; reload restores the conversation");
+  await phone.getByLabel("Message your desktop agent").fill("Recover this phone draft");
+  await phone.reload();
+  await expect(phone.getByLabel("Message your desktop agent")).toHaveValue("Recover this phone draft");
+  await phone.getByRole("button", { name: "Memory", exact: true }).click();
+  await phone.getByRole("button", { name: "New note", exact: true }).click();
+  await phone.getByLabel("Memory title", { exact: true }).fill("Phone preference");
+  await phone.getByLabel("Memory note", { exact: true }).fill("Use concise deployment instructions.");
+  await phone.getByRole("button", { name: "Save note", exact: true }).click();
+  await expect(phone.getByRole("button", { name: "Archive", exact: true })).toBeVisible();
+  const sessions = await phone.evaluate(async () => (await (await fetch("/api/sessions")).json()).sessions);
+  const vault = await invoke("memory_request", { workspace: sessions[0].workspace, request: { action: "list" } });
+  assert(vault.notes.some(n => n.title === "Phone preference"));
+  await phone.screenshot({ path: path.join(run, "memory-phone.png") });
+  await phone.getByRole("button", { name: "Close memory" }).click();
+  await expect(phone.getByLabel("Message your desktop agent")).toHaveValue("Recover this phone draft");
+  console.log("PASS: phone drafts survive reload; authenticated phone editor writes the same desktop Markdown vault");
   if (usb) {
     await invoke("remote_usb_disconnect");
     await expect(phone.getByLabel("Message your desktop agent")).toHaveCount(0);

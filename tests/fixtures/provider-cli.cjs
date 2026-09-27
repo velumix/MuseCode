@@ -41,9 +41,10 @@ if (provider === "codex" && args[0] === "app-server") {
   setInterval(() => {}, 1000);
 } else {
   const input = fs.readFileSync(0, "utf8");
-  const prompt = provider === "antigravity" ? JSON.parse(input).message.content : input;
+  const raw = provider === "antigravity" ? JSON.parse(input).message.content : input;
+  const prompt = raw.includes("Current request:\n") ? raw.split("Current request:\n").at(-1) : raw;
   const id = provider === "codex" ? "62c2d305-9dd5-4c94-b4c0-667eb612f401" : "ae283c22-1851-4d5c-a5c5-d14d53c23b72";
-  log({ kind: "provider-turn", prompt, args, cwd: process.cwd() });
+  log({ kind: "provider-turn", prompt, input: raw, args, cwd: process.cwd() });
   const emit = (value) => console.log(JSON.stringify(value));
   emit(provider === "codex" ? { type: "thread.started", thread_id: id } : { event: "init", conversation_id: id });
   if (prompt === "HOLD") {

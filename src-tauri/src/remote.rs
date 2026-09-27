@@ -523,6 +523,7 @@ fn router(state: WebState) -> Router {
         .route("/api/sessions/{id}/send", post(send))
         .route("/api/sessions/{id}/stop", post(stop))
         .route("/api/sessions/{id}/options", post(configure))
+        .route("/api/sessions/{id}/memory", post(memory_request))
         .route("/api/providers/{provider}/models", get(models))
         .route("/api/events", get(events))
         .fallback(asset)
@@ -811,6 +812,35 @@ async fn configure(
     Ok(Json(json!({"ok":true})))
 }
 
+async fn memory_request(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<crate::memory::Request>,
+) -> ApiResult {
+    let writing = !matches!(request, crate::memory::Request::List { .. });
+    authenticate(&state, &headers, writing)?;
+    let app = state.app.ok_or_else(|| bad("Desktop unavailable."))?;
+    let workspace = app
+        .state::<SessionLog>()
+        .summaries()
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or(ApiError(
+            StatusCode::NOT_FOUND,
+            "This conversation is closed.".into(),
+        ))?
+        .workspace;
+    let result = app
+        .state::<crate::memory::Store>()
+        .request(&workspace, request)
+        .map_err(|e| ApiError(StatusCode::CONFLICT, e))?;
+    if writing {
+        crate::memory::changed(&app);
+    }
+    Ok(Json(json!(result)))
+}
+
 async fn stop(
     State(state): State<WebState>,
     headers: HeaderMap,
@@ -1077,6 +1107,37 @@ mod tests {
                 .status(),
             StatusCode::UNPROCESSABLE_ENTITY
         );
+    }
+    #[tokio::test]
+    async fn memory_api_requires_pairing_control_and_fixed_workspace() {
+        let (state, token) = fixture(false);
+        for (body, auth, expected) in [
+            (json!({"action":"list"}), None, StatusCode::UNAUTHORIZED),
+            (
+                json!({"action":"delete","id":"test","revision":"r1"}),
+                Some(token.as_str()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                json!({"action":"configure","settings":{"enabled":false,"capture":"manual","budget_bytes":1000}}),
+                Some(token.as_str()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                json!({"action":"list","workspace":"C:\\elsewhere"}),
+                Some(token.as_str()),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+        ] {
+            assert_eq!(
+                router(state.clone())
+                    .oneshot(request("/api/sessions/one/memory", auth, Some(body)))
+                    .await
+                    .unwrap()
+                    .status(),
+                expected
+            );
+        }
     }
     #[tokio::test]
     async fn pairing_cookie_needs_desktop_approval_and_revocation_is_immediate() {

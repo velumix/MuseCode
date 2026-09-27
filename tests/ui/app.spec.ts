@@ -32,6 +32,18 @@ async function boot(page: Page, delay = 0) {
       unregisterCallback(id: number) { callbacks.delete(id); },
       async invoke(cmd: string, args: any = {}) {
         api.calls.push({ cmd, args });
+        if (cmd === "memory_request") {
+          api.memory ||= { root: "C:\\Documents\\Velum Code\\Memory", settings: { enabled:true,capture:"review",budget_bytes:3000 }, notes:[], warning:null };
+          const q=args.request, m=api.memory;
+          if(q.action==="configure")m.settings=q.settings;
+          if(q.action==="delete")m.notes=m.notes.filter((n:any)=>n.id!==q.id);
+          if(q.action==="save"){
+            if(api.memoryConflict)throw "This note changed elsewhere. Refresh to load the latest copy before saving.";
+            const note={...q,id:q.id||`note-${++serial}`,revision:`r-${serial}`,source:"Saved by you",created_at:1,updated_at:1};
+            m.notes=[...m.notes.filter((n:any)=>n.id!==note.id),note];
+          }
+          return structuredClone(m);
+        }
         if (cmd === "provider_models") return api.failModels ? { models: [], notice: "Sign in to load models." } : { models: [
           { id: `${args.provider}-deep`, label: "Deep model", description: "Complex work", efforts: ["low", "high", "max"], default_effort: "high" },
           { id: `${args.provider}-fast`, label: "Fast model", description: "Quick work", efforts: ["low"], default_effort: "low" },
@@ -90,6 +102,37 @@ async function boot(page: Page, delay = 0) {
 
 const composer = (page: Page) => page.locator(".chat-wrap:not(.hidden) textarea");
 
+test("memory supports editing, archive, restore and keyboard-confirmed deletion",async({page})=>{
+  await boot(page);await composer(page).fill("Keep my chat draft");
+  await page.getByRole("button",{name:"Memory",exact:true}).click();
+  await page.getByRole("button",{name:"New note",exact:true}).click();
+  await page.getByLabel("Memory title",{exact:true}).fill("Database decision");await page.getByLabel("Memory note",{exact:true}).fill("Use SQLite with WAL mode.");
+  await page.getByLabel("Memory scope").selectOption("shared");
+  await page.getByRole("button",{name:"Save note",exact:true}).click();
+  await expect(page.locator(".memory-list")).toContainText("Database decision");
+  await page.getByRole("button",{name:"Archive",exact:true}).click();await expect(page.getByRole("button",{name:"Restore",exact:true})).toBeVisible();
+  await page.getByRole("button",{name:"Restore",exact:true}).click();
+  await page.getByRole("button",{name:"Delete",exact:true}).click();await expect(page.getByRole("button",{name:"Keep editing",exact:true})).toBeFocused();
+  await page.keyboard.press("Shift+Tab");await expect(page.getByRole("button",{name:"Delete permanently"})).toBeFocused();
+  await page.keyboard.press("Enter");await expect(page.locator(".memory-list button")).toHaveCount(0);
+  await page.getByRole("button",{name:"Close memory"}).click();await expect(composer(page)).toHaveValue("Keep my chat draft");
+});
+
+test("memory review, settings and conflicts preserve the unsaved note",async({page})=>{
+  await boot(page);await page.evaluate(()=>{(window as any).qa.memory={root:"C:\\Vault",settings:{enabled:true,capture:"review",budget_bytes:3000},warning:null,notes:[{id:"pending",revision:"r1",title:"Build system",body:"Use npm for scripts.",tags:[],scope:"project",status:"pending",pinned:false,source:"Codex conversation",created_at:1,updated_at:1}]};});
+  await page.getByRole("button",{name:"Memory",exact:true}).click();await page.getByRole("button",{name:/^Review/}).click();await page.locator(".memory-list button").click();
+  await expect(page.getByText("This suggestion is not used until you save it.")).toBeVisible();await page.getByRole("button",{name:"Approve & save"}).click();
+  await page.getByRole("button",{name:"Memory settings",exact:true}).click();await page.getByLabel("Memory learning").selectOption("manual");await page.getByLabel("Memory context limit").selectOption("1000");
+  expect(await page.evaluate(()=>(window as any).qa.memory.settings)).toEqual({enabled:true,capture:"manual",budget_bytes:1000});
+  await page.getByRole("button",{name:"Memory settings",exact:true}).click();await page.getByLabel("Memory note",{exact:true}).fill("My unsaved changes");
+  await page.evaluate(()=>{(window as any).qa.memoryConflict=true;});await page.getByRole("button",{name:"Save note",exact:true}).click();
+  await expect(page.getByRole("alert")).toContainText("changed elsewhere");await expect(page.getByLabel("Memory note",{exact:true})).toHaveValue("My unsaved changes");
+  await page.getByRole("button",{name:"Close memory"}).click();await expect(page.getByRole("alertdialog")).toBeVisible();await page.keyboard.press("Escape");
+  await expect(page.getByLabel("Memory note",{exact:true})).toHaveValue("My unsaved changes");
+  await page.screenshot({path:".qa/memory-desktop.png",animations:"disabled"});
+  const results=await new AxeBuilder({page}).include(".memory-panel").withTags(["wcag2a","wcag2aa","wcag21aa"]).analyze();expect(results.violations).toEqual([]);
+});
+
 test("model and reasoning changes preserve the conversation and persist per provider", async ({ page }) => {
   await boot(page);
   await composer(page).fill("First message"); await composer(page).press("Enter");
@@ -120,6 +163,15 @@ test("model and reasoning changes preserve the conversation and persist per prov
   await page.reload();
   await expect(page.getByRole("button", { name: "Model: Fast model", exact: true })).toBeVisible();
   expect(await page.evaluate(() => (window as any).qa.calls.findLast((c: any) => c.cmd === "agent_new").args.options)).toEqual({ model: "muse-fast", reasoning: "" });
+});
+
+test("Remember opens an editable note and bounds long Unicode messages",async({page})=>{
+  await boot(page);await composer(page).fill("Remember my deployment preference");await composer(page).press("Enter");
+  await page.evaluate(()=>(window as any).qa.agent({kind:"turn_end",status:"completed",text:"資料🦀".repeat(1500)}));
+  await page.getByRole("button",{name:"Remember this answer"}).click();
+  const text=await page.getByLabel("Memory note",{exact:true}).inputValue();expect(Buffer.byteLength(text)).toBeLessThanOrEqual(6000);expect(text).not.toContain("�");
+  await expect(page.getByText(/This message was shortened/)).toBeVisible();await page.getByLabel("Memory title",{exact:true}).fill("Deployment preference");
+  await page.getByRole("button",{name:"Save note",exact:true}).click();await expect(page.getByRole("button",{name:"Archive",exact:true})).toBeVisible();
 });
 
 test("model menus are accessible and disable edits during a response", async ({ page }) => {

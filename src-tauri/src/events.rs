@@ -32,6 +32,11 @@ pub struct TodoItem {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AgentEvent {
+    MemoryContext {
+        titles: Vec<String>,
+        bytes: usize,
+        budget_bytes: usize,
+    },
     TurnStart {
         prompt: String,
         remote: bool,

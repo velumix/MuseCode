@@ -4,6 +4,7 @@ import AxeBuilder from "@axe-core/playwright";
 async function boot(page: Page, paired = true, control = true, provider = "muse") {
   const remote = {
     paired, control, pending: false, failSend: false, revoked: false, sends: [] as string[],
+    memory: {root:"C:\\Vault",settings:{enabled:true,capture:"review",budget_bytes:3000},notes:[] as any[],warning:null},
     sessions: [{ provider, options: { model: "", reasoning: "" }, id: "session-one", title: "Review the project", workspace: "C:\\Projects\\VelumCode", running: false, status: "completed", revision: 3 }],
     entries: [
       { seq: 1, event: { kind: "turn_start", prompt: "Review the project", remote: false } },
@@ -32,6 +33,12 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
     if (!remote.paired || remote.revoked) return answer({ error: "Pair again" }, 401);
     if (url.pathname === "/api/me") return answer({ device: { id: "phone", name: "My phone", control }, computer: "desktop.tail.ts.net" });
     if (url.pathname === "/api/sessions") return answer({ sessions: remote.sessions });
+    if(url.pathname.endsWith("/memory")) {
+      expect(request.headers()["x-muse-request"]).toBe("1");
+      if(body.action!=="list"&&!control)return answer({error:"View only"},403);
+      if(body.action==="save")remote.memory.notes=[{...body,id:"phone-note",revision:"r1",source:"Saved by you",created_at:1,updated_at:1}];
+      return answer(remote.memory);
+    }
     if (url.pathname.endsWith("/models")) return answer({ models: [{ id: "phone-model", label: "Phone model", efforts: ["low", "high"], default_effort: "low", description: "Available on your desktop" }], notice: null });
     if (url.pathname.endsWith("/options")) {
       expect(request.headers()["x-muse-request"]).toBe("1");
@@ -74,6 +81,43 @@ test("phone model choices update the session without losing the draft", async ({
   await page.screenshot({ path: ".qa/phone-model-controls.png", animations: "disabled" });
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByRole("button", { name: "Model: Phone model", exact: true })).toBeDisabled();
+});
+
+test("phone memory editor fits the viewport and leaves the conversation intact",async({page})=>{
+  const remote=await boot(page);await expect(page.locator(".phone-online")).toBeVisible();
+  await page.getByLabel("Message your desktop agent").fill("My draft");await page.getByRole("button",{name:"Memory",exact:true}).click();
+  await page.getByRole("button",{name:"New note",exact:true}).click();await page.getByLabel("Memory title",{exact:true}).fill("Deployment");await page.getByLabel("Memory note",{exact:true}).fill("Use the staging branch for previews.");
+  await page.getByRole("button",{name:"Save note",exact:true}).click();expect(remote.memory.notes[0].body).toContain("staging");
+  await page.screenshot({path:".qa/memory-phone.png",animations:"disabled"});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  const axe=await new AxeBuilder({page}).include(".memory-panel").withTags(["wcag2a","wcag2aa","wcag21aa"]).analyze();expect(axe.violations).toEqual([]);
+  await page.setViewportSize({width:390,height:440});await expect(page.getByRole("button",{name:"Close memory"})).toBeInViewport();
+  await page.getByRole("button",{name:"Close memory"}).click();await expect(page.getByLabel("Message your desktop agent")).toHaveValue("My draft");
+});
+
+test("phone drafts survive reload and are removed when access is revoked",async({page})=>{
+  const remote=await boot(page);await expect(page.locator(".phone-online")).toBeVisible();
+  await page.getByLabel("Message your desktop agent").fill("Recover after Android restart\nSecond line");
+  const saved=await page.evaluate(()=>localStorage.getItem("velum-phone-drafts-v1"));await page.reload();
+  await expect(page.getByLabel("Message your desktop agent")).toHaveValue("Recover after Android restart\nSecond line");
+  expect(await page.evaluate(()=>localStorage.getItem("velum-phone-drafts-v1"))).toBe(saved);
+  remote.revoked=true;await page.evaluate(()=>(window as any).remoteEvent());await expect(page.locator(".phone-message")).toHaveCount(0);
+  await expect.poll(()=>page.evaluate(()=>localStorage.getItem("velum-phone-drafts-v1"))).toBeNull();
+  await page.reload();await expect(page.getByLabel("Message your desktop agent")).toHaveCount(0);
+});
+
+test("view-only phone memory cannot be edited",async({page})=>{
+  await boot(page,true,false);await expect(page.locator(".phone-online")).toBeVisible();await page.getByRole("button",{name:"Memory",exact:true}).click();
+  await expect(page.getByRole("button",{name:"New note",exact:true})).toBeDisabled();await page.getByRole("button",{name:"Memory settings",exact:true}).click();await expect(page.getByLabel("Memory learning")).toBeDisabled();
+});
+
+test("phone Remember creates a reviewable note from an answer",async({page})=>{
+  await boot(page);await expect(page.locator(".phone-online")).toBeVisible();
+  await page.locator(".phone-message.assistant").getByRole("button",{name:"Remember this message"}).click();
+  await expect(page.getByLabel("Memory note",{exact:true})).toContainText("Review complete.");
+  await expect(page.getByRole("button",{name:"Save note",exact:true})).toBeDisabled();
+  await page.getByLabel("Memory title",{exact:true}).fill("Review result");await page.getByRole("button",{name:"Save note",exact:true}).click();
+  await expect(page.getByRole("button",{name:"Archive",exact:true})).toBeVisible();
 });
 
 test("view-only phones cannot edit model settings", async ({ page }) => {

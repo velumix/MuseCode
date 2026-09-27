@@ -22,6 +22,7 @@ pub struct AgentSession {
     session_id: Mutex<String>,
     provider: Provider,
     options: Mutex<RunOptions>,
+    memory: Mutex<crate::memory::Session>,
     workspace: std::path::PathBuf,
     child: Mutex<Option<Child>>,
     running: Mutex<bool>,
@@ -218,6 +219,7 @@ fn spawn_reader(
     prompt: StagedPrompt,
     stdout: std::process::ChildStdout,
     stderr: Option<std::process::ChildStderr>,
+    memory_mode: crate::memory::Capture,
 ) {
     // Drain stderr on a side thread so verbose children can never block on
     // a full pipe; the tail is only surfaced when the turn dies silently.
@@ -241,12 +243,32 @@ fn spawn_reader(
         let state = app.state::<AgentState>();
         let mut fold = Stream::new(session.provider);
         let mut terminal = None;
+        let mut memory_filter = crate::memory::Filter::default();
+        let mut final_proposal = None;
+        let mut invalid_proposal = false;
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             let events = fold.fold_line(&line);
             if let Some(id) = &fold.session_id {
                 *session.session_id.lock().unwrap() = id.clone();
             }
-            for event in events {
+            for mut event in events {
+                if memory_mode != crate::memory::Capture::Manual {
+                    if let AgentEvent::AssistantDelta { text } = &mut event {
+                        *text = memory_filter.push(text);
+                        if text.is_empty() {
+                            continue;
+                        }
+                    }
+                    if let AgentEvent::TurnEnd {
+                        text: Some(text), ..
+                    } = &mut event
+                    {
+                        let (clean, proposal, invalid) = crate::memory::clean_final(text);
+                        *text = clean;
+                        final_proposal = proposal;
+                        invalid_proposal |= invalid;
+                    }
+                }
                 if matches!(event, AgentEvent::TurnEnd { .. }) {
                     terminal = Some(event);
                 } else if state.sessions.lock().ok().is_some_and(|sessions| {
@@ -332,6 +354,48 @@ fn spawn_reader(
         *session.running.lock().unwrap() = false;
         let mut outcome = None;
         if current {
+            let tail = memory_filter.finish();
+            if !tail.is_empty() {
+                emit(&app, &id, AgentEvent::AssistantDelta { text: tail });
+            }
+            if !matches!(&terminal,Some(AgentEvent::TurnEnd{status,..}) if status=="completed") {
+                // A failed CLI may never have accepted its input. Re-send
+                // relevant context next time rather than trusting its history.
+                *session.memory.lock().unwrap() = crate::memory::Session::default();
+            }
+            if matches!(&terminal,Some(AgentEvent::TurnEnd{status,..}) if status=="completed") {
+                if memory_filter.invalid || invalid_proposal {
+                    emit(
+                        &app,
+                        &id,
+                        AgentEvent::Notice {
+                            text: "An incomplete or oversized memory suggestion was skipped."
+                                .into(),
+                        },
+                    );
+                }
+                if let Some(proposal) = memory_filter.proposal.or(final_proposal) {
+                    match app.state::<crate::memory::Store>().capture(
+                        &session.workspace.display().to_string(),
+                        &proposal,
+                        memory_mode,
+                        session.provider.label(),
+                    ) {
+                        Ok(count) if count > 0 => {
+                            crate::memory::changed(&app);
+                            emit(&app,&id,AgentEvent::Notice{text:format!("{count} memory note(s) added to the vault. Open Memory to view them.")});
+                        }
+                        Err(error) => emit(
+                            &app,
+                            &id,
+                            AgentEvent::Notice {
+                                text: format!("Memory: {error}"),
+                            },
+                        ),
+                        _ => {}
+                    }
+                }
+            }
             if let Some(event) = terminal {
                 emit(&app, &id, event.clone());
                 if let AgentEvent::TurnEnd { status, .. } = event {
@@ -380,6 +444,7 @@ pub fn agent_new(
                 session_id: Mutex::new(session_id.clone()),
                 provider,
                 options: Mutex::new(options.clone()),
+                memory: Mutex::new(crate::memory::Session::default()),
                 workspace: workspace.clone(),
                 child: Mutex::new(None),
                 running: Mutex::new(false),
@@ -485,7 +550,29 @@ pub fn agent_send(
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("failed to stage prompt: {e}"))?;
     }
-    std::fs::write(file, provider.input(&prompt))
+    let mut next_memory = session.memory.lock().unwrap().clone();
+    let (prepared, memory_usage, memory_mode) = match app.state::<crate::memory::Store>().prepare(
+        &workspace.display().to_string(),
+        &prompt,
+        &mut next_memory,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            emit(
+                &app,
+                &id,
+                AgentEvent::Notice {
+                    text: format!("Memory unavailable: {error}. Sending without memory."),
+                },
+            );
+            (
+                prompt.clone(),
+                crate::memory::Usage::default(),
+                crate::memory::Capture::Manual,
+            )
+        }
+    };
+    std::fs::write(file, provider.input(&prepared))
         .map_err(|e| format!("failed to stage prompt: {e}"))?;
 
     let options = session.options.lock().unwrap().clone();
@@ -503,6 +590,7 @@ pub fn agent_send(
         .map_err(|e| format!("failed to launch `{}`: {e}", cli_path.display()))?;
 
     let mut child = child;
+    *session.memory.lock().unwrap() = next_memory;
     let stdout = child.stdout.take().ok_or_else(|| {
         let _ = child.kill();
         "could not capture agent output".to_string()
@@ -533,7 +621,24 @@ pub fn agent_send(
             remote: remote.unwrap_or(false),
         },
     );
-    spawn_reader(app, id.clone(), session, staged, stdout, stderr);
+    emit(
+        &app,
+        &id,
+        AgentEvent::MemoryContext {
+            titles: memory_usage.titles,
+            bytes: memory_usage.bytes,
+            budget_bytes: memory_usage.budget_bytes,
+        },
+    );
+    spawn_reader(
+        app,
+        id.clone(),
+        session,
+        staged,
+        stdout,
+        stderr,
+        memory_mode,
+    );
     Ok(TurnInfo { id, turn_id })
 }
 

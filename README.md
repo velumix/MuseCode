@@ -38,6 +38,7 @@ So I made it. **Velum Code is the app I built around that idea.** It started as 
 | **Real Windows notifications.** | Background Agent turns notify you when they finish or fail. Open the notification to return to its conversation. |
 | **Take the conversation with you.** | Follow live Agent activity, send messages, and stop tasks over private Tailscale or a USB cable. Pairing needs your desktop approval. |
 | **Choose the model and depth.** | Model catalogs from your CLIs, reasoning levels for each model, and preferences that carry into new conversations. |
+| **Keep what matters.** | A local Markdown memory vault, shared preferences, project notes, and selective recall with a strict context budget. Edit the same notes on desktop, phone, or in Obsidian. |
 | **A quieter workspace.** | Charcoal surfaces, blue accents, readable conversations, and motion that respects reduced-motion preferences. |
 | **See what the agent is doing.** | Streaming responses, Markdown and code blocks, tool activity, task lists, and visible errors. |
 | **Chat and terminal, together.** | Every tab has an Agent view and an embedded terminal. Switching views preserves both. |
@@ -63,7 +64,7 @@ So I made it. **Velum Code is the app I built around that idea.** It started as 
 
 1. Open [Windows CI](https://github.com/velumix/VelumCode/actions/workflows/windows.yml) and choose the latest successful run.
 2. Download **VelumCode-windows-x64** from **Artifacts** and extract the ZIP.
-3. Run **Velum Code_0.3.2_x64-setup.exe**, then launch **Velum Code** from your desktop or Start menu.
+3. Run **Velum Code_0.4.0_x64-setup.exe**, then launch **Velum Code** from your desktop or Start menu.
 
 CI artifacts require a GitHub sign-in and are retained for 14 days. These are unsigned development builds. Install the bundle so Windows can register the app's notification identity and click handler.
 
@@ -156,6 +157,22 @@ phone push notifications, and creating workspaces from the phone are not include
 Reconnecting or refreshing the phone replays recent activity; quitting the desktop still
 ends its sessions. See [remote access details](docs/remote-access.md) for setup and troubleshooting.
 
+## Memory that stays useful
+
+Click **Memory** on desktop or phone to save project decisions, working conventions, and preferences. **Remember** on a message opens an editable note. The vault lives in **Documents → Velum Code → Memory**, using ordinary Markdown files that also work in Obsidian.
+
+- **Project notes** stay with their workspace; **shared notes** are available across projects.
+- Suggested memories wait in **Review** by default. Settings also offer automatic saving or manual notes only.
+- Relevant excerpts are selected locally. The default limit is **3,000 bytes per turn**, including memory instructions; choose 1 KB or 8 KB if needed. Up to four excerpts are added, with unchanged excerpts normally refreshed only after eight turns.
+- No embedding service, separate summarization call, or full transcript dump. Notes survive quitting the app and restarting Windows.
+- Search, edit, pin, archive, restore, or delete notes from either device. A phone with view-only access cannot change them.
+
+Memory works with **Muse, Codex, and Antigravity in Agent mode**. Automatic suggestions depend on the CLI following the note format; manually saving a note always works. Selected excerpts become context for your chosen provider. [How memory works](docs/memory.md).
+
+<p align="center"><a href="docs/images/memory-desktop.png"><img src="docs/images/memory-desktop.png" alt="Velum Code memory editor with project notes and shared preferences" width="900" /></a><br /><sub>Desktop editor with sample notes. <a href="docs/images/memory-phone.png">See the phone editor.</a></sub></p>
+
+The Android app also restores unsent drafts after reloads and process restarts, retries failed connections when brought back to the foreground, and recovers when Android reclaims its WebView renderer. Draft storage is bounded and cleared when the phone disconnects or its access is revoked. The desktop must remain running to keep a conversation available.
+
 ## A few shortcuts worth knowing
 
 | Shortcut | Action |
@@ -188,7 +205,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Build
 
 The app uses **Tauri 2 + Rust**, **React 19 + TypeScript**, and **xterm.js over Windows ConPTY**. Chat translates each CLI’s structured output into shared messages, tool cards and turn status. Tray lifetime and notification delivery run in the native backend.
 
-See the [development guide](docs/development.md) for tests, native smoke checks, installer commands, and the project layout. The [0.3.2 QA report](docs/qa-0.3.2.md) records the verified behavior and remaining work; the [brand notes](docs/brand.md) cover the logo and assets.
+See the [development guide](docs/development.md) for tests, native smoke checks, installer commands, and the project layout. The [0.4.0 QA report](docs/qa-0.4.0.md) records the verified behavior and remaining work; the [brand notes](docs/brand.md) cover the logo and assets.
 
 ## Where it stands
 
@@ -200,7 +217,7 @@ installed Tailscale connection; see the [development guide](docs/development.md)
 
 There are still a few things I want to improve:
 
-- **Save and restore sessions.** Tabs and drafts survive closing to the tray, but are still held in memory. Explicit Quit, crashes, and Windows restarts do not restore them yet.
+- **Save and restore desktop sessions.** Desktop tabs and drafts survive closing to the tray, but explicit Quit, crashes, and Windows restarts do not restore them yet. The memory vault is persistent; phone drafts are saved locally.
 - **Interactive approvals in chat.** Chat cannot answer interactive approval prompts; each provider follows the policy described above. The terminal is available for interactive workflows.
 - **Easier project switching.** A folder picker, recent workspaces, and clearer project navigation are on the list.
 

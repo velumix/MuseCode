@@ -47,6 +47,7 @@ interface NewInfo {
 }
 
 interface ChatViewProps {
+  onRemember: (text:string)=>void;
   initialWorkspace?: string;
   provider: Provider;
   options: RunOptions;
@@ -236,7 +237,7 @@ function ToolBlock({ block }: { block: Extract<Block, { kind: "tool" }> }) {
   );
 }
 
-export default function ChatView({ provider, options, initialWorkspace, sessionId, active, sessionKey, onStatus, onWorkspace, onTitle }: ChatViewProps) {
+export default function ChatView({ provider, options, initialWorkspace, sessionId, active, sessionKey, onStatus, onWorkspace, onTitle, onRemember }: ChatViewProps) {
   const optionsRef = useRef(options); optionsRef.current = options;
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [todos, setTodos] = useState<TodoEntry[]>([]);
@@ -260,6 +261,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
   const [applying, setApplying] = useState(false);
   const [workspaceError, setWorkspaceError] = useState("");
   const [showLatest, setShowLatest] = useState(false);
+  const [memoryUsage,setMemoryUsage]=useState<{titles:string[];bytes:number}|null>(null);
 
   const idRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -307,6 +309,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
     setHistIdx(null);
     stickRef.current = true;
     setShowLatest(false);
+    setMemoryUsage(null);
     titleAssignedRef.current = false;
     setActivity("");
     setReady(false);
@@ -316,6 +319,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
       if (disposed || envelope.id !== nativeId) return;
       const e = envelope.event;
       switch (e.kind) {
+        case "memory_context": setMemoryUsage({titles:Array.isArray(e.titles)?e.titles as string[]:[],bytes:typeof e.bytes==="number"?e.bytes:0}); break;
         case "turn_start": {
           if (!e.remote) break;
           const prompt = asString(e.prompt) ?? "";
@@ -695,6 +699,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
                     <span className="message-avatar user-avatar">Y</span>
                     <div className="message-author"><strong>You</strong></div>
                     <CopyButton text={b.text} />
+                    <button type="button" className="memory-usage" aria-label="Remember this message" onClick={()=>onRemember(b.text)}><Icon name="memory" size={15}/></button>
                   </div>
                   <pre>{b.text}</pre>
                 </div>
@@ -706,6 +711,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
                     <span className="message-avatar muse-avatar"><VelumMark size={38} /></span>
                     <div className="message-author"><strong>{providerNames[provider]}<span className="assistant-badge">AI</span></strong></div>
                     <CopyButton text={b.text} />
+                    <button type="button" className="memory-usage" aria-label="Remember this answer" onClick={()=>onRemember(b.text)}><Icon name="memory" size={15}/></button>
                   </div>
                   <Markdown text={b.text} />
                 </div>
@@ -743,6 +749,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
         )}
       </div>
       <div className="composer-dock">
+      {memoryUsage&&memoryUsage.bytes>0&&<p className="memory-usage" title={memoryUsage.titles.join(" · ")}>Memory · {memoryUsage.titles.length?`${memoryUsage.titles.length} note${memoryUsage.titles.length===1?"":"s"} recalled`:"Learning enabled"}<span>{memoryUsage.bytes.toLocaleString()} bytes added · ~{Math.ceil(memoryUsage.bytes/4)} tokens</span></p>}
       {showLatest && <div className="latest-wrap"><button type="button" className="latest-btn" onClick={jumpToLatest}><Icon name="down" size={14} />Back to latest</button></div>}
       {todos.length > 0 && (
         <div className="todos">

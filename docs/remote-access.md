@@ -105,3 +105,19 @@ an undetected phone may need a data-capable cable or its Windows USB driver.
 Useful upstream references: [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve),
 [Serve command](https://tailscale.com/docs/reference/tailscale-cli/serve), and
 [access control grants](https://tailscale.com/docs/features/access-control/grants).
+
+### Draft recovery and memory
+
+The phone keeps up to 20 nonempty drafts locally, limited to 16,000 characters each. They
+survive a page reload or Android process restart and expire after seven days without a
+draft update. Successful sends clear that conversation's draft; logout and detected
+revocation clear stored drafts and the selected session. Drafts cannot revive a session
+after the desktop quits. If storage is unavailable, the current in-memory draft still works.
+
+The Android app retries a failed connection on foreground resume, ignores stale errors
+from a previously selected desktop, and recreates the activity after a reclaimed WebView
+renderer. Connection labels distinguish connecting, connected, and disconnected states.
+
+The header's **Memory** button opens the desktop's [Markdown vault](memory.md) for the
+current workspace. Control-enabled phones can edit notes and settings. View-only phones
+can read them. Offline controls are disabled; a save error leaves the editor draft intact.

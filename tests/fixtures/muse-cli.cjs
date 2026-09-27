@@ -21,12 +21,18 @@ if (args[0] === "serve") {
   setInterval(() => {}, 1000);
 } else {
   const file = args[args.indexOf("--prompt-file") + 1];
-  const prompt = fs.readFileSync(file, "utf8");
-  log({ kind: "turn", cwd: process.cwd(), prompt, file, args });
+  const input = fs.readFileSync(file, "utf8");
+  const prompt = input.includes("Current request:\n") ? input.split("Current request:\n").at(-1) : input;
+  log({ kind: "turn", cwd: process.cwd(), prompt, input, file, args });
   if (prompt === "HOLD") {
     record("task.lifecycle.proposed", { task_id: "hold", event: { task_kind: "tool.powershell" } });
     spawn(process.execPath, [__filename, "--descendant"], { stdio: "inherit", windowsHide: true });
     setInterval(() => {}, 1000);
+  } else if (prompt === "MEMORY_PROPOSAL" || prompt === "MEMORY_FAIL") {
+    const answer = 'Saved idea.\n```velum-memory\n[{"title":"Database choice","body":"The project uses SQLite with WAL mode.","tags":["database"]}]\n```';
+    for (const text of answer) record("run.output.delta", { text });
+    record("run.terminal.completed", { terminal: "completed", text: answer });
+    if (prompt === "MEMORY_FAIL") process.exitCode = 7;
   } else if (prompt === "FAIL") {
     console.error("QA fixture failed deliberately");
     process.exitCode = 7;

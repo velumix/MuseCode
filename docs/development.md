@@ -118,9 +118,12 @@ terminal in that directory. Invalid workspace paths preserve the current convers
 Restart resets only the currently selected mode. Closing a tab stops its processes; closing
 the window preserves them. Explicit Quit stops every owned agent and terminal process.
 
-Transcripts and drafts live in memory. They survive hiding to the tray, but are not restored
+Desktop transcripts and drafts live in memory. They survive hiding to the tray, but are not restored
 after explicit Quit, a crash, or a Windows restart.
 The CLI keeps its own session logs, but this UI has no history browser or restore operation yet.
+The separate [memory vault](memory.md) is persistent. Phone drafts use bounded local storage
+for reload/process recovery; they are cleared on logout or detected revocation and expire
+after seven days without a draft update. They do not restore a desktop session that has ended.
 Headless chat displays approval notices and auto-cancels `request_user_input`; it cannot
 collect interactive approval/question responses. Use a separate Terminal conversation for
 those workflows. YOLO changes approval/sandbox behavior; it does not add interactive responses.
@@ -134,6 +137,8 @@ those workflows. YOLO changes approval/sandbox behavior; it does not add interac
 - `src-tauri/src/pty.rs` — multi-session PTY manager
   (`pty_spawn/write/resize/kill`, `pty-data` / `pty-exit` events)
 - `src-tauri/src/desktop.rs` — tray lifetime, single-instance restoration, notification settings
+- `src-tauri/src/memory.rs` — Markdown vault, scoped retrieval, bounded context, suggestion capture
+- `src/components/MemoryPanel.tsx` — shared desktop/phone memory editor and review controls
 - `src-tauri/src/windows_notifications.rs` — Windows toasts and COM conversation activation
 - `src/remote/` — mobile interface, reconnects, and transcript rendering
 - `src/components/RemotePanel.tsx` — desktop pairing and device management

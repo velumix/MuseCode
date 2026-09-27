@@ -19,6 +19,12 @@ body { background: var(--phone-bg); }
 .phone-app { height: 100dvh; max-width: 760px; margin: auto; display: flex; flex-direction: column; position: relative; background: var(--phone-bg); padding-top: env(safe-area-inset-top); }
 .phone-header { display: flex; gap: 11px; align-items: center; padding: 15px 19px; flex: 0 0 auto; border-bottom: 1px solid #303640; }
 .phone-header > div { display: flex; flex-direction: column; gap: 5px; }
+.phone-header .phone-memory-button { margin-left:auto; }
+.phone-remember { display:flex; align-items:center; gap:6px; min-height:44px; padding:8px 0; border:0; background:transparent; color:#a6bddb; font:inherit; font-size:11px; cursor:pointer; }.phone-remember:disabled { opacity:.5; cursor:default; }
+.phone-header .phone-memory-button + .phone-icon-button { margin-left:0; }
+.phone-models .models-refresh { min-width:44px; min-height:44px; }
+.phone-icon-button:disabled { opacity:.5; }
+@media(max-height:560px) { .phone-header { padding:8px 16px!important; }.phone-session-select { padding:8px 16px!important; }.phone-transcript { padding-top:12px!important; }.phone-composer-note { display:none; } }
 .phone-header h1 { font-size: 19px; letter-spacing: -.6px; font-weight: 600; margin: 0; }
 .phone-header > div > span { display: flex; align-items: center; gap: 6px; font-size: 10px; }
 .phone-online { color: #a7d5ba; }

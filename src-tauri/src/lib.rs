@@ -1,5 +1,6 @@
 mod desktop;
 mod events;
+mod memory;
 mod provider_auth;
 mod provider_events;
 mod provider_models;
@@ -28,11 +29,14 @@ pub fn run() {
         .manage(AgentState::default())
         .manage(session_log::SessionLog::default())
         .setup(|app| {
+            memory::setup(app.handle());
             desktop::setup(app)?;
             remote::setup(app)
         })
         .on_window_event(desktop::close_to_tray)
         .invoke_handler(tauri::generate_handler![
+            memory::memory_request,
+            memory::memory_open,
             pty::pty_spawn,
             providers::provider_status,
             provider_models::provider_models,

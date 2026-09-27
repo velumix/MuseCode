@@ -12,6 +12,8 @@
     <string name="usb_help">Connect a USB data cable and allow USB debugging on this phone. In the desktop app, open Connect phone → USB cable → Connect. Tailscale is not needed.</string>
     <string name="usb_offline">Check the USB cable and allow USB debugging. Keep Velum Code open on your computer, then choose Connect phone → USB cable → Reconnect.</string>
     <string name="private_connection">Private with Tailscale</string>
+    <string name="connecting">Connecting to your desktop…</string>
+    <string name="connection_offline">Desktop disconnected</string>
     <string name="connection_options">Connection options</string>
     <string name="menu_symbol">•••</string>
     <string name="reload">Reload connection</string>

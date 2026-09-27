@@ -129,12 +129,37 @@ try {
   assert.equal(new Set(museTurns.map((r) => r.args[r.args.indexOf("--session-id") + 1])).size, 1);
   console.log("PASS: native model catalog, reasoning argv, workspace validation, consecutive turns, final-only answers");
 
+  // Exercise memory through the actual Rust store and streaming CLI bridge.
+  const memory = (request) => invoke("memory_request", { workspace: runDir, request });
+  await send("MEMORY_FAIL");
+  await page.locator(".notice.error").last().waitFor();
+  assert.equal((await memory({ action: "list" })).notes.length, 0, "Failed turn saved a memory");
+  await send("MEMORY_PROPOSAL"); await done();
+  assert(!(await page.locator(".msg.assistant").last().innerText()).includes("velum-memory"));
+  let vault = await memory({ action: "list" });
+  assert.equal(vault.notes.length, 1); assert.equal(vault.notes[0].status, "pending");
+  const note = vault.notes[0];
+  vault = await memory({ action: "save", id: note.id, revision: note.revision, title: note.title, body: note.body, tags: note.tags, scope: "project", status: "active", pinned: true });
+  assert.equal(vault.notes[0].status, "active");
+  await send("Recall database"); await done();
+  assert(records().find(r => r.prompt === "Recall database").input.includes("SQLite with WAL"));
+  await send("Recall database again"); await done();
+  assert(!records().find(r => r.prompt === "Recall database again").input.includes("SQLite with WAL"));
+  await send("MEMORY_PROPOSAL"); await done();
+  assert.equal((await memory({ action: "list" })).notes.length, 1, "Duplicate proposal saved twice");
+  await memory({ action: "configure", settings: { enabled: true, capture: "manual", budget_bytes: 3000 } });
+  await send("Manual capture check"); await done();
+  assert(!records().find(r => r.prompt === "Manual capture check").input.includes("Velum memory:"));
+  await memory({ action: "configure", settings: { enabled: true, capture: "review", budget_bytes: 3000 } });
+  console.log("PASS: failed turns cannot save memory; streamed suggestions stay hidden; approval, retrieval, reuse and deduplication work");
+
   await send("FAIL");
   await page.locator(".notice.error").filter({ hasText: "QA fixture failed deliberately" }).waitFor();
   await page.getByRole("button", { name: "YOLO mode" }).click();
   await send("YOLO fixture");
   await done();
   assert(records().find((r) => r.prompt === "YOLO fixture").args.includes("--yolo"));
+  assert(records().find(r => r.prompt === "YOLO fixture").input.includes("SQLite with WAL"), "Failed turn did not reset memory reuse");
   for (const r of records().filter((r) => r.kind === "turn")) assert(!existsSync(r.file), "prompt staging file leaked");
   console.log("PASS: stderr failures, recovery, YOLO argv, prompt cleanup");
 
@@ -257,6 +282,8 @@ try {
     }
     const turns = records().filter((r) => r.kind === "provider-turn" && r.provider === provider);
     assert.equal(turns.length, 2);
+    assert(turns[0].input.includes("SQLite with WAL"), "New provider conversation did not recall project memory");
+    assert(!turns[1].input.includes("SQLite with WAL"), "Unchanged memory was injected again");
     for (const turn of turns) {
       assert(turn.args.includes(provider === "codex" ? "fixture-codex" : "fixture-agy-high"));
       assert(turn.args.includes(provider === "codex" ? "model_reasoning_effort='high'" : "high"));

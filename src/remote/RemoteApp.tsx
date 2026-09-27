@@ -1,4 +1,7 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { clearDrafts, loadDrafts, saveDrafts, loadSelection, saveSelection } from "./drafts";
+import type { MemoryView } from "../memory";
+const MemoryPanel=lazy(()=>import("../components/MemoryPanel"));
 import { providerNames, defaultOptions, type ModelCatalog } from "../providers";
 import Icon, { VelumMark } from "../components/Icon";
 import Markdown from "../components/Markdown";
@@ -43,9 +46,11 @@ export default function RemoteApp() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState(loadSelection);
   const [replay, setReplay] = useState<Replay | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [drafts, setDrafts] = useState<Record<string, string>>(loadDrafts);
+  const [memorySession,setMemorySession]=useState("");
+  const [memorySeed,setMemorySeed]=useState<string>();
   const [listOpen, setListOpen] = useState(false);
   const [connected, setConnected] = useState(false);
   const [latest, setLatest] = useState(false);
@@ -59,15 +64,18 @@ export default function RemoteApp() {
   const input = drafts[selected] || "";
   const current = sessions.find((s) => s.id === selected);
   const view = useMemo(() => transcript(replay?.events || []), [replay]);
+  const memoryUsage = useMemo(()=>{const events=replay?.events||[];for(let i=events.length-1;i>=0;i--){if(events[i].event.kind==="memory_context")return events[i].event;}},[replay]);
 
-  const forget = () => { setDevice(null); setSessions([]); setReplay(null); cache.current.clear(); setConnected(false); setDrafts({}); saveClaim(""); setClaim(""); };
+  const forget = () => { setDevice(null); setSessions([]); setReplay(null); cache.current.clear(); setConnected(false); setDrafts({}); clearDrafts();setMemorySession("");setMemorySeed(undefined); saveClaim(""); setClaim(""); };
+  useEffect(()=>{if(device)saveDrafts(drafts);},[drafts,device]);
+  useEffect(()=>{if(device&&selected)saveSelection(selected);},[selected,device]);
 
   useEffect(() => {
     if (location.hash) history.replaceState(null, "", location.pathname);
     let disposed = false;
     api<{ device: Device; computer: string }>("/me").then((value) => {
       if (!disposed) { setDevice(value.device); setInvitation(""); setComputer(value.computer || "Your desktop"); saveClaim(""); setClaim(""); }
-    }).catch((e) => { if (!disposed && !(e instanceof ApiError && e.status === 401)) setError(usb ? "Check the USB cable and choose Reconnect in Connect phone on your desktop." : "Your desktop is unavailable. Connect Tailscale and make sure Velum Code is running."); })
+    }).catch((e) => { if(disposed)return; if(e instanceof ApiError&&e.status===401){setDrafts({});clearDrafts();}else setError(usb ? "Check the USB cable and choose Reconnect in Connect phone on your desktop." : "Your desktop is unavailable. Connect Tailscale and make sure Velum Code is running."); })
       .finally(() => { if (!disposed) setLoading(false); });
     const installable = (event: Event) => { event.preventDefault(); setInstall(event as InstallEvent); };
     window.addEventListener("beforeinstallprompt", installable);
@@ -206,6 +214,7 @@ export default function RemoteApp() {
 
   return <main className="phone-app">
     <header className="phone-header"><VelumMark size={35} /><div><h1>Velum Code</h1><span className={connected ? "phone-online" : "phone-offline"}><i />{connected ? "Desktop connected" : "Reconnecting…"}</span></div>
+      <button className="phone-icon-button phone-memory-button" aria-label="Memory" disabled={!current||!connected} onClick={()=>{setMemorySeed(undefined);setMemorySession(selected);}}><Icon name="memory" size={21}/></button>
       <button className="phone-icon-button" aria-label="Phone settings" onClick={() => setInstallHelp((value) => !value)}><Icon name="phone" size={21} /></button>
     </header>
     {installHelp && <section className="phone-settings" aria-label="Phone settings"><strong>{device.name}</strong><p>{computer || "Your desktop"}</p><p>{device.control ? "View and control · standard agent permissions" : "View-only access"}</p>
@@ -228,7 +237,7 @@ export default function RemoteApp() {
     <div className="phone-transcript" ref={scroll} onScroll={() => { const el = scroll.current; if (el) { follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; setLatest(!follow.current); } }}>
       {!sessions.length ? <div className="phone-empty"><Icon name="chat" size={32} /><h2>No conversations yet</h2><p>Open an Agent conversation on your desktop. It will appear here automatically.</p></div> : !view.blocks.length ? <div className="phone-empty"><VelumMark size={64} /><h2>What’s next?</h2><p>Send a message to your desktop agent. Your files and tools stay on your computer.</p></div> : null}
       {replay?.truncated && <p className="phone-history-note">Showing recent activity. Earlier messages remain in the desktop conversation.</p>}
-      {view.blocks.map((block) => block.kind === "tool" ? <details className="phone-tool" key={block.id}><summary><Icon name="code" size={15} /><strong>{block.name}</strong><span>{block.status}</span></summary><pre>{block.text || "Waiting for output…"}</pre></details> : block.kind === "notice" ? <div className="phone-notice" key={block.id}>{block.text}</div> : <article className={`phone-message ${block.kind}`} key={block.id}><div className="phone-message-label">{block.kind === "user" ? "You" : <><VelumMark size={20} />{providerNames[current?.provider || "muse"]}</>}</div>{block.kind === "user" ? <p>{block.text}</p> : <Markdown text={block.text} />}</article>)}
+      {view.blocks.map((block) => block.kind === "tool" ? <details className="phone-tool" key={block.id}><summary><Icon name="code" size={15} /><strong>{block.name}</strong><span>{block.status}</span></summary><pre>{block.text || "Waiting for output…"}</pre></details> : block.kind === "notice" ? <div className="phone-notice" key={block.id}>{block.text}</div> : <article className={`phone-message ${block.kind}`} key={block.id}><div className="phone-message-label">{block.kind === "user" ? "You" : <><VelumMark size={20} />{providerNames[current?.provider || "muse"]}</>}</div>{block.kind === "user" ? <p>{block.text}</p> : <Markdown text={block.text} />}{device.control&&<button type="button" className="phone-remember" aria-label="Remember this message" disabled={!connected||!!current?.running} onClick={()=>{setMemorySeed(block.text);setMemorySession(selected);}}><Icon name="memory" size={14}/>Remember</button>}</article>)}
       {view.todos.length > 0 && <details className="phone-todos"><summary>Task checklist <span>{view.todos.filter((todo) => todo.status === "completed").length}/{view.todos.length}</span></summary>{view.todos.map((todo, index) => <p key={index}><Icon name={todo.status === "completed" ? "check" : "code"} size={14} />{todo.text}</p>)}</details>}
       {current?.running && <div className="phone-working" role="status"><span className="phone-pulse" />{view.activity || `${providerNames[current?.provider || "muse"]} is working…`}</div>}
     </div>
@@ -238,7 +247,8 @@ export default function RemoteApp() {
       {device.control ? <form onSubmit={(e) => { e.preventDefault(); void send(); }}><textarea aria-label="Message your desktop agent" placeholder={current?.running ? "Write your next thought…" : "Message your desktop agent…"} value={input} maxLength={16_000} rows={2} disabled={!selected} onChange={(e) => setDrafts((drafts) => ({ ...drafts, [selected]: e.target.value }))} onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} />
         {current?.running ? <button type="button" className="phone-stop" disabled={busy || !connected} onClick={() => void stop()} aria-label="Stop task"><span />Stop</button> : <button className="phone-send" aria-label="Send message" disabled={busy || !connected || !input.trim() || !selected}><Icon name="arrow" size={21} /></button>}
       </form> : <p className="phone-view-only"><Icon name="shield" size={15} />View-only access</p>}
-      <span className="phone-composer-note">{current?.workspace.split(/[\\/]/).filter(Boolean).pop() || "Velum Code"} · runs on your desktop</span>
+      <span className="phone-composer-note">{current?.workspace.split(/[\\/]/).filter(Boolean).pop() || "Velum Code"} · runs on your desktop{typeof memoryUsage?.bytes==="number"&&memoryUsage.bytes>0?` · Memory ${memoryUsage.bytes.toLocaleString()} B`:""}</span>
     </footer>
+    {memorySession&&<Suspense fallback={null}><MemoryPanel seed={memorySeed} readOnly={!device.control||!connected} request={request=>api<MemoryView>(`/sessions/${encodeURIComponent(memorySession)}/memory`,request)} onClose={()=>{setMemorySession("");setMemorySeed(undefined);}}/></Suspense>}
   </main>;
 }

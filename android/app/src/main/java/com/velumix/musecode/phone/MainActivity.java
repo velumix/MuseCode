@@ -13,6 +13,7 @@ import android.os.Looper;
 import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.PermissionRequest;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -157,6 +158,7 @@ public final class MainActivity extends AppCompatActivity {
                 return null;
             }
             @Override public void onPageStarted(WebView view, String url, Bitmap icon) {
+                if (view != web) return;
                 if (desktop != null && desktop.contains(url)) {
                     loadFailed = false;
                     progress.setVisibility(View.VISIBLE);
@@ -165,6 +167,7 @@ public final class MainActivity extends AppCompatActivity {
                 }
             }
             @Override public void onPageFinished(WebView view, String url) {
+                if (view != web || desktop == null || !desktop.contains(url)) return;
                 handler.removeCallbacks(connectionTimeout);
                 progress.setVisibility(View.GONE);
                 if (!loadFailed && desktop != null && desktop.contains(url)) {
@@ -173,17 +176,28 @@ public final class MainActivity extends AppCompatActivity {
                     connectionUrl = desktop.origin + "/";
                     web.clearHistory();
                     CookieManager.getInstance().flush();
+                    ((TextView) findViewById(R.id.desktop_name)).setText(desktop.usb ? getString(R.string.usb_connected) : desktop.hostname);
                 }
             }
             @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                if (request.isForMainFrame()) showOffline(R.string.offline_description);
+                if (request.isForMainFrame() && desktop != null && desktop.contains(request.getUrl().toString())) showOffline(R.string.offline_description);
             }
             @Override public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
-                if (request.isForMainFrame()) showOffline(R.string.offline_description);
+                if (request.isForMainFrame() && desktop != null && desktop.contains(request.getUrl().toString())) showOffline(R.string.offline_description);
             }
             @Override public void onReceivedSslError(WebView view, SslErrorHandler callback, SslError error) {
                 callback.cancel();
                 showOffline(R.string.tls_error);
+            }
+            @Override public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                // Android may reclaim the renderer in the background. The phone
+                // UI persists unsent drafts and reconnects from the saved origin.
+                handler.removeCallbacks(connectionTimeout);
+                if (view.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) view.getParent()).removeView(view);
+                view.destroy();
+                web = null;
+                handler.post(() -> { if (!isFinishing() && !isDestroyed()) recreate(); });
+                return true;
             }
         });
         web.setWebChromeClient(new WebChromeClient() {
@@ -243,14 +257,15 @@ public final class MainActivity extends AppCompatActivity {
             ((TextView) findViewById(R.id.desktop_name)).setText(address.usb ? getString(R.string.usb_connected) : address.hostname);
             loadConnection();
         };
-        if (address.url.contains("#pair=") && address.contains(web.getUrl())) {
+        if (address.url.contains("#pair=") && web != null && address.contains(web.getUrl())) {
             // A fresh scan replaces any expired or declined pending claim.
             web.evaluateJavascript("sessionStorage.removeItem('muse-pair-claim')", ignored -> load.run());
         } else load.run();
     }
 
     private void loadConnection() {
-        if (connectionUrl == null) return;
+        if (connectionUrl == null || web == null) return;
+        ((TextView) findViewById(R.id.desktop_name)).setText(R.string.connecting);
         loadFailed = false;
         welcome.setVisibility(View.GONE);
         web.setVisibility(View.VISIBLE);
@@ -261,13 +276,14 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void showOffline(int message) {
-        if (isFinishing() || isDestroyed()) return;
+        if (isFinishing() || isDestroyed() || web == null) return;
         loadFailed = true;
         handler.removeCallbacks(connectionTimeout);
         web.stopLoading();
         progress.setVisibility(View.GONE);
         web.setVisibility(View.GONE);
         welcome.setVisibility(View.VISIBLE);
+        ((TextView) findViewById(R.id.desktop_name)).setText(R.string.connection_offline);
         ((TextView) findViewById(R.id.welcome_title)).setText(R.string.offline_title);
         ((TextView) findViewById(R.id.welcome_description)).setText(desktop != null && desktop.usb && message == R.string.offline_description ? R.string.usb_offline : message);
         Button primary = findViewById(R.id.primary);
@@ -340,7 +356,7 @@ public final class MainActivity extends AppCompatActivity {
         catch (ActivityNotFoundException e) { Toast.makeText(this, R.string.no_browser, Toast.LENGTH_LONG).show(); }
     }
 
-    @Override protected void onResume() { super.onResume(); if (web != null) web.onResume(); }
+    @Override protected void onResume() { super.onResume(); if (web != null) { web.onResume(); if (loadFailed && desktop != null) loadConnection(); } }
     @Override protected void onPause() { if (web != null) web.onPause(); super.onPause(); }
     @Override protected void onStop() { CookieManager.getInstance().flush(); super.onStop(); }
     @Override protected void onDestroy() {

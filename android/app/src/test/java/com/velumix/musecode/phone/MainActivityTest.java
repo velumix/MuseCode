@@ -5,6 +5,8 @@ import android.net.Uri;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.webkit.RenderProcessGoneDetail;
+import android.widget.TextView;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
@@ -94,5 +96,40 @@ public class MainActivityTest {
             public String getMethod() { return "GET"; }
             public Map<String, String> getRequestHeaders() { return Map.of(); }
         };
+    }
+    @Test public void offlineConnectionRetriesOnResumeAndIgnoresStaleOriginErrors() {
+        try (ActivityController<MainActivity> controller = Robolectric.buildActivity(MainActivity.class).setup()) {
+            MainActivity activity = controller.get();
+            activity.acceptAddress(DesktopAddress.USB_ORIGIN);
+            WebView web = activity.findViewById(R.id.web);
+            web.getWebViewClient().onReceivedError(web, request("https://previous.tail123.ts.net:8443/"), null);
+            assertEquals(View.GONE, activity.findViewById(R.id.welcome).getVisibility());
+            web.getWebViewClient().onReceivedError(web, request(DesktopAddress.USB_ORIGIN), null);
+            assertEquals(View.VISIBLE, activity.findViewById(R.id.welcome).getVisibility());
+            assertEquals(activity.getString(R.string.connection_offline), ((TextView)activity.findViewById(R.id.desktop_name)).getText().toString());
+            controller.pause().resume();
+            assertEquals(DesktopAddress.USB_ORIGIN + "/", shadowOf(web).getLastLoadedUrl());
+            assertEquals(activity.getString(R.string.connecting), ((TextView)activity.findViewById(R.id.desktop_name)).getText().toString());
+            web.getWebViewClient().onPageFinished(web, DesktopAddress.USB_ORIGIN + "/");
+            assertEquals(activity.getString(R.string.usb_connected), ((TextView)activity.findViewById(R.id.desktop_name)).getText().toString());
+        }
+    }
+    @Test public void reclaimedRendererIsRemovedAndHandledWithoutCrashing() {
+        try (ActivityController<MainActivity> controller = Robolectric.buildActivity(MainActivity.class).setup()) {
+            MainActivity activity = controller.get();
+            activity.acceptAddress(DesktopAddress.USB_ORIGIN);
+            WebView web = activity.findViewById(R.id.web);
+            android.webkit.WebViewClient client = web.getWebViewClient();
+            boolean handled = client.onRenderProcessGone(web, new RenderProcessGoneDetail() {
+                @Override public boolean didCrash() { return false; }
+                @Override public int rendererPriorityAtExit() { return 0; }
+            });
+            assertTrue(handled);
+            assertNull(web.getParent());
+            client.onPageFinished(web, DesktopAddress.USB_ORIGIN + "/");
+            // Closing during the queued recreation must also remain safe.
+            activity.finish();
+            shadowOf(android.os.Looper.getMainLooper()).idle();
+        }
     }
 }
