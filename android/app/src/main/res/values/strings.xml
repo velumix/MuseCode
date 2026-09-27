@@ -35,4 +35,6 @@
     <string name="switch_title">Connect to another desktop?</string>
     <string name="switch_message">This closes your current phone conversation. The work on your desktop keeps running.</string>
     <string name="no_browser">No browser is available to open this link.</string>
+    <string name="picture_unavailable">The image picker could not be opened. Try again.</string>
+    <string name="picture_invalid">Choose a PNG, JPEG or WebP image.</string>
 </resources>

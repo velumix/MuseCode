@@ -16,6 +16,7 @@ import android.webkit.PermissionRequest;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebChromeClient;
+import android.webkit.ValueCallback;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -31,6 +32,8 @@ import android.widget.Toast;
 
 import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.PickVisualMediaRequest;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.app.AppCompatDelegate;
@@ -53,6 +56,12 @@ public final class MainActivity extends AppCompatActivity {
     private volatile DesktopAddress desktop;
     private String connectionUrl;
     private boolean loadFailed;
+    private ValueCallback<Uri[]> pictureCallback;
+    private String pictureOrigin;
+    private WebView pictureView;
+    private boolean pictureInFlight;
+    private final ActivityResultLauncher<PickVisualMediaRequest> picturePicker = registerForActivityResult(
+            new ActivityResultContracts.PickVisualMedia(), this::finishPicture);
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable connectionTimeout = () -> showOffline(R.string.offline_description);
     private final ActivityResultLauncher<ScanOptions> scanner = registerForActivityResult(new ScanContract(), result -> {
@@ -159,6 +168,7 @@ public final class MainActivity extends AppCompatActivity {
             }
             @Override public void onPageStarted(WebView view, String url, Bitmap icon) {
                 if (view != web) return;
+                cancelPicture();
                 if (desktop != null && desktop.contains(url)) {
                     loadFailed = false;
                     progress.setVisibility(View.VISIBLE);
@@ -190,6 +200,7 @@ public final class MainActivity extends AppCompatActivity {
                 showOffline(R.string.tls_error);
             }
             @Override public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                cancelPicture();
                 // Android may reclaim the renderer in the background. The phone
                 // UI persists unsent drafts and reconnects from the saved origin.
                 handler.removeCallbacks(connectionTimeout);
@@ -201,6 +212,26 @@ public final class MainActivity extends AppCompatActivity {
             }
         });
         web.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                if (view != web || desktop == null || !desktop.contains(view.getUrl())
+                        || params.getMode() != FileChooserParams.MODE_OPEN || pictureInFlight) {
+                    callback.onReceiveValue(null);
+                    return true;
+                }
+                pictureCallback = callback;
+                pictureOrigin = desktop.origin;
+                pictureView = view;
+                pictureInFlight = true;
+                try {
+                    picturePicker.launch(new PickVisualMediaRequest.Builder()
+                            .setMediaType(ActivityResultContracts.PickVisualMedia.ImageOnly.INSTANCE).build());
+                } catch (ActivityNotFoundException | IllegalStateException e) {
+                    pictureInFlight = false;
+                    cancelPicture();
+                    Toast.makeText(MainActivity.this, R.string.picture_unavailable, Toast.LENGTH_LONG).show();
+                }
+                return true;
+            }
             @Override public void onPermissionRequest(PermissionRequest request) { request.deny(); }
             @Override public boolean onCreateWindow(WebView view, boolean dialog, boolean gesture, android.os.Message result) {
                 if (!gesture) return false;
@@ -237,6 +268,37 @@ public final class MainActivity extends AppCompatActivity {
                 .setBarcodeImageEnabled(false).setOrientationLocked(false));
     }
 
+    private void cancelPicture() {
+        ValueCallback<Uri[]> callback = pictureCallback;
+        pictureCallback = null;
+        pictureOrigin = null;
+        pictureView = null;
+        if (callback != null) callback.onReceiveValue(null);
+    }
+
+    // Only the user's selected content URI is returned to the requesting desktop.
+    // General WebView file/content access remains disabled.
+    void finishPicture(Uri uri) {
+        pictureInFlight = false;
+        ValueCallback<Uri[]> callback = pictureCallback;
+        boolean current = pictureView == web && web != null && desktop != null
+                && desktop.origin.equals(pictureOrigin) && desktop.contains(web.getUrl());
+        pictureCallback = null;
+        pictureOrigin = null;
+        pictureView = null;
+        if (callback == null) return;
+        if (uri == null || !current) { callback.onReceiveValue(null); return; }
+        try {
+            String type = "content".equals(uri.getScheme()) ? getContentResolver().getType(uri) : null;
+            if ("image/png".equals(type) || "image/jpeg".equals(type) || "image/webp".equals(type)) {
+                callback.onReceiveValue(new Uri[]{uri});
+                return;
+            }
+        } catch (SecurityException | IllegalArgumentException ignored) { }
+        callback.onReceiveValue(null);
+        Toast.makeText(this, R.string.picture_invalid, Toast.LENGTH_LONG).show();
+    }
+
     void acceptAddress(String input) {
         final DesktopAddress address;
         try { address = DesktopAddress.parse(input); }
@@ -248,6 +310,7 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void connect(DesktopAddress address) {
+        cancelPicture();
         Runnable load = () -> {
             desktop = address;
             connectionUrl = address.navigationUrl();
@@ -265,6 +328,7 @@ public final class MainActivity extends AppCompatActivity {
 
     private void loadConnection() {
         if (connectionUrl == null || web == null) return;
+        cancelPicture();
         ((TextView) findViewById(R.id.desktop_name)).setText(R.string.connecting);
         loadFailed = false;
         welcome.setVisibility(View.GONE);
@@ -331,6 +395,7 @@ public final class MainActivity extends AppCompatActivity {
     }
 
     private void forgetDesktop() {
+        cancelPicture();
         handler.removeCallbacks(connectionTimeout);
         web.stopLoading();
         web.loadUrl("about:blank");
@@ -360,6 +425,7 @@ public final class MainActivity extends AppCompatActivity {
     @Override protected void onPause() { if (web != null) web.onPause(); super.onPause(); }
     @Override protected void onStop() { CookieManager.getInstance().flush(); super.onStop(); }
     @Override protected void onDestroy() {
+        cancelPicture();
         handler.removeCallbacksAndMessages(null);
         if (web != null) { web.stopLoading(); web.destroy(); }
         super.onDestroy();

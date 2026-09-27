@@ -20,6 +20,63 @@ import java.util.Map;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 35)
 public class MainActivityTest {
+    private static android.webkit.WebChromeClient.FileChooserParams pictureParams() {
+        return new android.webkit.WebChromeClient.FileChooserParams() {
+            public int getMode() { return MODE_OPEN; }
+            public String[] getAcceptTypes() { return new String[]{"image/png", "image/jpeg", "image/webp"}; }
+            public boolean isCaptureEnabled() { return false; }
+            public CharSequence getTitle() { return "Bot picture"; }
+            public String getFilenameHint() { return null; }
+            public android.content.Intent createIntent() { return new android.content.Intent(android.content.Intent.ACTION_GET_CONTENT).setType("image/*"); }
+        };
+    }
+    @Test public void avatarPickerLaunchesAndCancellationCompletesItsCallbackOnce() {
+        try (ActivityController<MainActivity> controller = Robolectric.buildActivity(MainActivity.class).setup()) {
+            MainActivity activity=controller.get();activity.acceptAddress(DesktopAddress.USB_ORIGIN);
+            WebView web=activity.findViewById(R.id.web);
+            java.util.List<Uri[]> results=new java.util.ArrayList<>();
+            assertTrue(web.getWebChromeClient().onShowFileChooser(web,results::add,pictureParams()));
+            android.content.Intent launched=shadowOf(activity).getNextStartedActivityForResult().intent;
+            assertEquals("image/*",launched.getType());
+            activity.finishPicture(null);activity.finishPicture(null);
+            assertEquals(1,results.size());assertNull(results.get(0));
+            assertFalse(web.getSettings().getAllowContentAccess());assertFalse(web.getSettings().getAllowFileAccess());
+        }
+    }
+    @Test public void avatarPickerRejectsNonContentUrisAndResultsAfterNavigation() {
+        try (ActivityController<MainActivity> controller = Robolectric.buildActivity(MainActivity.class).setup()) {
+            MainActivity activity=controller.get();activity.acceptAddress(DesktopAddress.USB_ORIGIN);
+            WebView web=activity.findViewById(R.id.web);java.util.List<Uri[]> results=new java.util.ArrayList<>();
+            for(String uri:new String[]{"file:///data/private.png","https://outside.test/image.png"}){
+                web.getWebChromeClient().onShowFileChooser(web,results::add,pictureParams());activity.finishPicture(Uri.parse(uri));
+            }
+            assertEquals(2,results.size());assertNull(results.get(0));assertNull(results.get(1));
+            web.getWebChromeClient().onShowFileChooser(web,results::add,pictureParams());
+            web.getWebViewClient().onPageStarted(web,DesktopAddress.USB_ORIGIN+"/",null);
+            // A replacement request cannot consume the old picker's pending result.
+            web.getWebChromeClient().onShowFileChooser(web,results::add,pictureParams());
+            activity.finishPicture(Uri.parse("content://media/images/1"));
+            assertEquals(4,results.size());assertNull(results.get(2));assertNull(results.get(3));
+        }
+    }
+    @Test public void avatarPickerReturnsOnlyAnImageToTheOriginalDesktop() {
+        android.content.ContentProvider provider=new android.content.ContentProvider(){
+            public boolean onCreate(){return true;}
+            public String getType(Uri uri){return uri.getPath().endsWith("png")?"image/png":"text/plain";}
+            public android.database.Cursor query(Uri u,String[] p,String s,String[] a,String order){return null;}
+            public Uri insert(Uri u,android.content.ContentValues v){return null;}
+            public int delete(Uri u,String s,String[] a){return 0;}
+            public int update(Uri u,android.content.ContentValues v,String s,String[] a){return 0;}
+        };
+        org.robolectric.shadows.ShadowContentResolver.registerProviderInternal("fixture.images",provider);
+        try (ActivityController<MainActivity> controller = Robolectric.buildActivity(MainActivity.class).setup()) {
+            MainActivity activity=controller.get();activity.acceptAddress(DesktopAddress.USB_ORIGIN);
+            WebView web=activity.findViewById(R.id.web);java.util.List<Uri[]> results=new java.util.ArrayList<>();
+            web.getWebChromeClient().onShowFileChooser(web,results::add,pictureParams());activity.finishPicture(Uri.parse("content://fixture.images/photo.png"));
+            assertArrayEquals(new Uri[]{Uri.parse("content://fixture.images/photo.png")},results.get(0));
+            web.getWebChromeClient().onShowFileChooser(web,results::add,pictureParams());activity.finishPicture(Uri.parse("content://fixture.images/not-image.txt"));assertNull(results.get(1));
+        }
+    }
     @Test public void usbLaunchOpensPairingAndDiscardsTheIntentSecret() {
         android.content.Intent intent = new android.content.Intent().putExtra("muse_usb_url", DesktopAddress.USB_ORIGIN + "/#pair=" + "d".repeat(64));
         try (ActivityController<MainActivity> controller = Robolectric.buildActivity(MainActivity.class, intent).setup()) {
