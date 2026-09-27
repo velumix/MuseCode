@@ -90,7 +90,7 @@ pub fn provider_status() -> Vec<Info> {
             installed: id.resolve().is_some(),
             setup_url: match id {
                 Provider::Muse => "https://github.com/velumix/VelumCode#providers",
-                Provider::Codex => "https://learn.chatgpt.com/docs/codex-cli",
+                Provider::Codex => "https://developers.openai.com/codex/cli/",
                 Provider::Antigravity => "https://antigravity.google/docs/getting-started?tab=cli",
             },
         })
