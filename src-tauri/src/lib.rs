@@ -3,6 +3,7 @@ mod events;
 mod history;
 mod kanban;
 mod memory;
+mod plugin_catalog;
 mod plugin_github;
 mod plugins;
 mod provider_auth;
@@ -36,6 +37,7 @@ pub fn run() {
         .setup(|app| {
             memory::setup(app.handle());
             plugins::setup(app.handle());
+            plugin_catalog::setup(app.handle());
             kanban::setup(app.handle());
             history::setup(app.handle());
             desktop::setup(app)?;
@@ -47,6 +49,7 @@ pub fn run() {
             kanban::kanban_request,
             memory::memory_open,
             plugins::plugins_list,
+            plugin_catalog::plugins_catalog,
             plugins::plugins_preview,
             plugins::plugins_install,
             plugins::plugins_enable,

@@ -5,19 +5,33 @@ Plugins add local commands to **Plugins** in the sidebar and to **Ctrl+K**. API 
 ## Try Project tools
 
 1. Open **Plugins** in Velum Code.
-2. Paste `velumix/velum-plugin-project-tools` (or its full GitHub URL) and choose **Review plugin**.
+2. Find **Project tools** in Browse and choose **Install**. You can also use **Install from GitHub** with `velumix/velum-plugin-project-tools`.
 3. Review the publisher details and requested permissions, then **Allow and install**.
 4. Choose **Create project brief** or **Prepare review checklist**, then **Run command**.
 
 The example reads the current workspace's root directory and optional `package.json`. It does not make an AI request. **Add to draft** appends the result to your existing draft; you choose when to send it.
 
-Every plugin must be a **public GitHub repository** with built `velum-plugin.json` and `index.js` at its root on the default branch. Velum resolves that branch to a commit, downloads both files at that commit, and caches the exact package for review. Installation uses those reviewed bytes even if the branch changes afterward. Files are copied into the app configuration directory; installed commands work offline.
+Every plugin must be a **public GitHub repository** with built `velum-plugin.json` and `index.js` at its root. Browse installs the commit listed in the community directory. Direct repository installs and **Check for updates** resolve the default branch to a commit. Velum downloads both files at that commit and caches the exact package for review. Installation uses those reviewed bytes even if the branch changes afterward. Files are copied into the app configuration directory; installed commands work offline.
 
 Use **Check for updates** to fetch the latest default-branch commit. Review the version, source link, and permissions (new permissions are highlighted), then install. Updates preserve private settings and enabled state. A different repository cannot silently replace an installed plugin with the same ID. Remove the old plugin explicitly before changing repositories. Removing a plugin deletes its private settings.
 
-GitHub checks happen only when requested; there is no startup polling. Public repositories require no token. Private repositories, GitHub Enterprise, branch selectors and release archives are not supported in API v1. Each review makes three bounded HTTPS requests with timeouts; GitHub rate limits are reported without affecting installed plugins. Redirected repositories require their current URL. Repository identity and commit pinning are provenance, not a publisher signature or endorsement.
+The directory loads when you open Browse and is cached for one hour, with a Refresh button. If GitHub is unavailable, Velum keeps the saved list or shows its included starter list. There is no startup polling. Public repositories require no token. Private repositories, GitHub Enterprise, branch selectors and release archives are not supported in API v1. Installation review makes two bounded HTTPS requests for a listed commit, or three for a direct repository's current commit. GitHub rate limits are reported without affecting installed plugins. Redirected repositories require their current URL. Repository identity and commit pinning are provenance, not a publisher signature or endorsement.
 
 Previously installed folder plugins are disabled until linked by reviewing and installing their GitHub repository. Their settings remain intact; enable them after migration. Local folder installation has been removed.
+
+## Publish to the directory
+
+1. Open **Plugins → Publish your plugin**.
+2. Paste your public GitHub repository and choose **Check repository**.
+3. Review the detected details, then choose **Continue on GitHub**.
+4. GitHub opens a submission with the repository and exact commit already filled in. Sign in, confirm you maintain the plugin, and submit the form.
+5. A maintainer reviews it and approves publication. GitHub Actions validates the pinned files and generates the directory the app reads.
+
+The app does not collect your GitHub token and does not silently post submissions. Follow progress through **View submissions**. Publish an update through the same flow; existing installations remain pinned until their users review an update. Direct repository updates can be newer than the directory's listed version.
+
+The directory is a separate public repository: [velumix/velum-code-plugins](https://github.com/velumix/velum-code-plugins). Approved snapshots are in `entries/`; `catalog.json` is generated automatically. Only a directory maintainer with write access can approve a submission. The workflow never executes submitted JavaScript, rejects duplicate IDs/repositories and malformed packages, and caps the directory at 500 entries / 1 MB. Removing an entry and regenerating the catalog removes its listing, without deleting users' installed plugins.
+
+Listings mean a version was accepted into the directory; they are not a security audit or a verified publisher badge. Always review the permissions and source before installation.
 
 ## Create your first plugin
 
@@ -39,7 +53,7 @@ git commit -m "Added plugin"
 gh repo create YOUR-USERNAME/my-plugin --public --source . --remote origin --push
 ```
 
-Paste that repository URL into Velum's Plugins screen. For subsequent changes, commit and push, then check for updates in Velum. Choose the license for your own repository before distributing your code.
+Use **Install from GitHub** to try your repository, then **Publish your plugin** to share it in Browse. For subsequent changes, commit and push, then check for updates in Velum and submit the new version to the directory. Choose the license for your own repository before distributing your code.
 
 ```json
 {

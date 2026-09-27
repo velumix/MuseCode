@@ -188,8 +188,10 @@ The board loads only when opened, supports up to 300 cards per workspace, and ma
 
 ## Small plugins, useful tools
 
-Open **Plugins** in the sidebar and paste a public GitHub repository URL. Review its permissions
-and install a pinned commit. **Check for updates** reviews a newer commit while keeping your settings.
+Open **Plugins** to browse and search the community directory. Choose **Install**, review its
+permissions, and install the listed version. **Publish your plugin** checks your GitHub repository
+and opens a prefilled submission for the directory. You can also install a repository directly.
+**Check for updates** reviews a newer commit while keeping your settings.
 Enabled commands also appear in **Ctrl+K**. [**Project tools**](https://github.com/velumix/velum-plugin-project-tools) creates project briefs and
 review checklists; results can be added to your draft without sending an AI request.
 
@@ -199,8 +201,9 @@ Each command gets a fresh worker with a five-second limit. Plugin code stays unl
 
 Want to make one? The [SDK guide](docs/plugins.md) covers the API, starter generator,
 TypeScript builds, distribution, and limits. The SDK and working example are in this repository.
+The [plugin directory](https://github.com/velumix/velum-code-plugins) handles submissions and generates the list shown in the app. No separate account or access token is needed in Velum.
 
-<p align="center"><a href="docs/images/plugins.png"><img src="docs/images/plugins.png" alt="Velum Code running the Project tools plugin with a local project brief" width="720" /></a></p>
+<p align="center"><a href="docs/images/plugin-directory.png"><img src="docs/images/plugin-directory.png" alt="Velum Code plugin directory with search, repository links and a Publish your plugin button" width="860" /></a><br /><sub><a href="docs/images/plugin-publish.png">Publish a plugin.</a> · <a href="docs/images/plugins.png">See Project tools in action.</a></sub></p>
 
 ## Reopen and carry on
 

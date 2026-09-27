@@ -56,8 +56,8 @@ self.VelumPlugin = plugin;
 await writeFile(resolve(root, ".gitignore"), "node_modules/\n.env\n.env.*\n");
 await writeFile(
   resolve(root, "README.md"),
-  `# ${id}\n\nA plugin for [Velum Code](https://github.com/velumix/VelumCode).\n\n## Install\n\nIn Velum Code, open **Plugins**, paste this public GitHub repository URL, and review its permissions.\n\n## Develop\n\nEdit the author and details in \`velum-plugin.json\`, then edit \`index.js\`. Keep both files in this repository's root on its default branch. Publish built JavaScript; Velum does not run build scripts.\n\nPush changes to GitHub, then use **Check for updates** in Velum to review and install the new commit. [SDK guide](https://github.com/velumix/VelumCode/blob/main/docs/plugins.md).\n`,
+  `# ${id}\n\nA plugin for [Velum Code](https://github.com/velumix/VelumCode).\n\n## Install\n\nIn Velum Code, open **Plugins → Install from GitHub**, paste this public GitHub repository URL, and review its permissions.\n\n## Develop\n\nEdit the author and details in \`velum-plugin.json\`, then edit \`index.js\`. Keep both files in this repository's root on its default branch. Publish built JavaScript; Velum does not run build scripts.\n\nPush changes to GitHub, then use **Check for updates** in Velum to review and install the new commit. [SDK guide](https://github.com/velumix/VelumCode/blob/main/docs/plugins.md).\n\n## Share in the directory\n\nOpen **Plugins → Publish your plugin**, paste this repository URL, and choose **Check repository**. Continue on GitHub to submit the prefilled form. After review, the plugin appears in Browse. Use the same flow to submit a new version.\n`,
 );
 console.log(
-  `Created ${root}\nCreate a public GitHub repository and push this folder. In Velum Code, paste its repository URL into Plugins and choose Review plugin.`,
+  `Created ${root}\nCreate a public GitHub repository and push this folder. In Velum Code, use Plugins → Install from GitHub to try it, or Publish your plugin to submit it to the directory.`,
 );

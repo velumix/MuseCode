@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Icon from "./Icon";
+import { PluginDirectory, PublishPlugin } from "./PluginDirectory";
 import {
   permissionLabels,
   type InstalledPlugin,
@@ -32,6 +33,9 @@ export default function PluginPanel({
   onInsert: (text: string) => void;
 }) {
   const [repository, setRepository] = useState("");
+  const [view, setView] = useState<"browse" | "installed" | "add" | "publish">(
+    "browse",
+  );
   const [preview, setPreview] = useState<PluginPreview | null>(null);
   const [notice, setNotice] = useState("");
   const [selected, setSelected] = useState<PluginSelection | undefined>(
@@ -102,12 +106,14 @@ export default function PluginPanel({
         controller.current = null;
       }
     });
-  const review = (repo: string, expectedId?: string) =>
+  const review = (repo: string, expectedId?: string, commit?: string) =>
     void run(async () => {
       setNotice("");
       setPreview(null);
+      setView("add");
       const next = await invoke<PluginPreview>("plugins_preview", {
         repository: repo,
+        ...(commit ? { commit } : {}),
       });
       if (expectedId && next.manifest.id !== expectedId)
         throw new Error(
@@ -179,9 +185,47 @@ export default function PluginPanel({
           </button>
         </div>
         <p className="plugin-intro">
-          Small tools, right where you work. Commands run only when you ask and
-          stop when they finish.
+          Discover useful tools from the community, or share something you made.
         </p>
+        {!selected && (
+          <nav className="plugin-navigation" aria-label="Plugin sections">
+            <div>
+              {(
+                [
+                  ["browse", "Browse"],
+                  ["installed", `Installed (${plugins.length})`],
+                ] as const
+              ).map(([id, title]) => (
+                <button
+                  key={id}
+                  aria-current={view === id ? "page" : undefined}
+                  disabled={busy}
+                  onClick={() => {
+                    setView(id);
+                    setError("");
+                    setNotice("");
+                    setPreview(null);
+                  }}
+                >
+                  {title}
+                </button>
+              ))}
+            </div>
+            <button
+              className="plugin-primary"
+              disabled={busy}
+              aria-current={view === "publish" ? "page" : undefined}
+              onClick={() => {
+                setView("publish");
+                setPreview(null);
+                setError("");
+                setNotice("");
+              }}
+            >
+              Publish your plugin
+            </button>
+          </nav>
+        )}
         {error && (
           <p className="plugin-error" role="alert">
             {error}
@@ -206,267 +250,293 @@ export default function PluginPanel({
             </button>
           ) : (
             <>
-              <section className="plugin-install" aria-label="Install a plugin">
-                <h3>Install from GitHub</h3>
-                <p>
-                  Every plugin is a repository. Paste its public GitHub URL to
-                  review its commands and permissions.
-                </p>
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    review(repository.trim());
-                  }}
+              {view === "browse" && (
+                <PluginDirectory
+                  plugins={plugins}
+                  busy={busy}
+                  onReview={review}
+                  onManage={() => setView("installed")}
+                  onAdd={() => setView("add")}
+                />
+              )}
+              {view === "publish" && <PublishPlugin />}
+              {view === "add" && (
+                <section
+                  className="plugin-install"
+                  aria-label="Install a plugin"
                 >
-                  <input
-                    aria-label="GitHub repository"
-                    placeholder="owner/repository or GitHub URL"
-                    value={repository}
-                    onChange={(e) => {
-                      setRepository(e.target.value);
-                      setPreview(null);
-                      setNotice("");
+                  <h3>Install from GitHub</h3>
+                  <p>
+                    Every plugin is a repository. Paste its public GitHub URL to
+                    review its commands and permissions.
+                  </p>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      review(repository.trim());
                     }}
+                  >
+                    <input
+                      aria-label="GitHub repository"
+                      placeholder="owner/repository or GitHub URL"
+                      value={repository}
+                      onChange={(e) => {
+                        setRepository(e.target.value);
+                        setPreview(null);
+                        setNotice("");
+                      }}
+                      disabled={busy}
+                    />
+                    <button disabled={busy || !repository.trim()}>
+                      {busy ? "Please wait…" : "Review plugin"}
+                    </button>
+                  </form>
+                  <button
+                    className="plugin-example"
                     disabled={busy}
-                  />
-                  <button disabled={busy || !repository.trim()}>
-                    {busy ? "Please wait…" : "Review plugin"}
+                    onClick={() => review("velumix/velum-plugin-project-tools")}
+                  >
+                    Try Project tools by Velumix
                   </button>
-                </form>
-                <button
-                  className="plugin-example"
-                  disabled={busy}
-                  onClick={() => review("velumix/velum-plugin-project-tools")}
-                >
-                  Try Project tools by Velumix
-                </button>
-                {preview && (
-                  <div className="plugin-review">
-                    <div className="plugin-card-heading">
-                      <strong>{preview.manifest.name}</strong>
-                      <span>
-                        v{preview.manifest.version} ·{" "}
-                        {Math.ceil(preview.bytes / 1024)} KB
-                      </span>
-                    </div>
-                    <p>{preview.manifest.description}</p>
-                    <p>By {preview.manifest.author} · Publisher not verified</p>
-                    <p className="plugin-origin">
-                      {preview.origin.repository} · Commit{" "}
-                      {preview.origin.commit.slice(0, 7)}{" "}
-                      <button
-                        disabled={busy}
-                        onClick={() =>
-                          void openUrl(
-                            `https://github.com/${preview.origin.repository}/tree/${preview.origin.commit}`,
-                          ).catch((e) => setError(String(e)))
-                        }
-                      >
-                        View source ↗
-                      </button>
-                    </p>
-                    {plugins.some(
-                      (p) => p.manifest.id === preview.manifest.id,
-                    ) && (
+                  {preview && (
+                    <div className="plugin-review">
+                      <div className="plugin-card-heading">
+                        <strong>{preview.manifest.name}</strong>
+                        <span>
+                          v{preview.manifest.version} ·{" "}
+                          {Math.ceil(preview.bytes / 1024)} KB
+                        </span>
+                      </div>
+                      <p>{preview.manifest.description}</p>
                       <p>
-                        Update from v
-                        {
-                          plugins.find(
-                            (p) => p.manifest.id === preview.manifest.id,
-                          )?.manifest.version
-                        }
-                        . Existing settings and enabled state are kept.
+                        By {preview.manifest.author} · Publisher not verified
                       </p>
-                    )}
-                    <h4>This plugin can</h4>
-                    <ul>
-                      {preview.manifest.permissions.map((p) => (
-                        <li key={p}>
-                          {permissionLabels[p]}
-                          {plugins.some(
-                            (old) =>
-                              old.manifest.id === preview.manifest.id &&
-                              !old.manifest.permissions.includes(p),
-                          ) && (
-                            <strong className="plugin-new-permission">
-                              {" "}
-                              New permission
-                            </strong>
-                          )}
-                        </li>
-                      ))}
-                      {!preview.manifest.permissions.length && (
-                        <li>Process only the text you enter</li>
-                      )}
-                    </ul>
-                    <p>
-                      No network, shell, file writes, or automatic AI requests.
-                    </p>
-                    <div className="plugin-actions">
-                      <button
-                        className="plugin-primary"
-                        disabled={busy}
-                        onClick={() =>
-                          void run(async () => {
-                            await invoke("plugins_install", {
-                              repository: preview.origin.repository,
-                              reviewedDigest: preview.digest,
-                            });
-                            setPreview(null);
-                            setRepository("");
-                            await onRefresh();
-                          })
-                        }
-                      >
-                        Allow and install
-                        {plugins.some(
-                          (p) => p.manifest.id === preview.manifest.id,
-                        )
-                          ? " update"
-                          : ""}
-                      </button>
-                      <button disabled={busy} onClick={() => setPreview(null)}>
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </section>
-              <section aria-label="Installed plugins">
-                <div className="plugin-section-title">
-                  <h3>Installed</h3>
-                  <span>{plugins.length} / 32</span>
-                </div>
-                {!plugins.length && (
-                  <div className="plugin-empty">
-                    <Icon name="code" size={28} />
-                    <strong>A few useful extras.</strong>
-                    <p>
-                      Install a plugin to add commands here and in your command
-                      menu.
-                    </p>
-                  </div>
-                )}
-                {plugins.map((p) => (
-                  <article className="plugin-card" key={p.manifest.id}>
-                    <div className="plugin-card-heading">
-                      <strong>{p.manifest.name}</strong>
-                      <span>v{p.manifest.version}</span>
-                      <button
-                        disabled={busy || !p.origin}
-                        role="switch"
-                        aria-checked={p.enabled}
-                        aria-label={`Enable ${p.manifest.name}`}
-                        onClick={() =>
-                          void run(async () => {
-                            await invoke("plugins_enable", {
-                              id: p.manifest.id,
-                              enabled: !p.enabled,
-                            });
-                            await onRefresh();
-                          })
-                        }
-                      >
-                        {p.enabled ? "Enabled" : "Disabled"}
-                      </button>
-                    </div>
-                    <p>{p.manifest.description}</p>
-                    <small>By {p.manifest.author}</small>
-                    {p.origin ? (
-                      <div className="plugin-origin">
+                      <p className="plugin-origin">
+                        {preview.origin.repository} · Commit{" "}
+                        {preview.origin.commit.slice(0, 7)}{" "}
                         <button
+                          disabled={busy}
                           onClick={() =>
                             void openUrl(
-                              `https://github.com/${p.origin!.repository}/tree/${p.origin!.commit}`,
+                              `https://github.com/${preview.origin.repository}/tree/${preview.origin.commit}`,
                             ).catch((e) => setError(String(e)))
                           }
                         >
-                          {p.origin.repository} ↗
+                          View source ↗
                         </button>
-                        <span>{p.origin.commit.slice(0, 7)}</span>
-                        <button
-                          disabled={busy}
-                          onClick={() =>
-                            review(p.origin!.repository, p.manifest.id)
-                          }
-                        >
-                          Check for updates
-                        </button>
-                      </div>
-                    ) : (
-                      <p className="plugin-legacy">
-                        Link this plugin to its GitHub repository above to
-                        enable it. Saved settings are kept.
                       </p>
-                    )}
-                    <details>
-                      <summary>Permissions</summary>
+                      {plugins.some(
+                        (p) => p.manifest.id === preview.manifest.id,
+                      ) && (
+                        <p>
+                          Update from v
+                          {
+                            plugins.find(
+                              (p) => p.manifest.id === preview.manifest.id,
+                            )?.manifest.version
+                          }
+                          . Existing settings and enabled state are kept.
+                        </p>
+                      )}
+                      <h4>This plugin can</h4>
                       <ul>
-                        {p.manifest.permissions.map((permission) => (
-                          <li key={permission}>
-                            {permissionLabels[permission]}
+                        {preview.manifest.permissions.map((p) => (
+                          <li key={p}>
+                            {permissionLabels[p]}
+                            {plugins.some(
+                              (old) =>
+                                old.manifest.id === preview.manifest.id &&
+                                !old.manifest.permissions.includes(p),
+                            ) && (
+                              <strong className="plugin-new-permission">
+                                {" "}
+                                New permission
+                              </strong>
+                            )}
                           </li>
                         ))}
-                        {!p.manifest.permissions.length && (
-                          <li>No additional permissions</li>
+                        {!preview.manifest.permissions.length && (
+                          <li>Process only the text you enter</li>
                         )}
                       </ul>
-                    </details>
-                    <div className="plugin-commands">
-                      {p.manifest.commands.map((c) => (
+                      <p>
+                        No network, shell, file writes, or automatic AI
+                        requests.
+                      </p>
+                      <div className="plugin-actions">
                         <button
-                          key={c.id}
-                          disabled={busy || !p.enabled}
-                          aria-pressed={
-                            selected?.id === p.manifest.id &&
-                            selected.command === c.id
-                          }
-                          onClick={() => {
-                            setSelected({ id: p.manifest.id, command: c.id });
-                            setResult(null);
-                            setError("");
-                          }}
-                          title={c.description}
-                        >
-                          {c.title}
-                          <span>↗</span>
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      className="plugin-remove"
-                      disabled={busy}
-                      onClick={() => setRemove(p.manifest.id)}
-                    >
-                      Remove
-                    </button>
-                    {remove === p.manifest.id && (
-                      <div className="plugin-remove-confirm">
-                        <span>Remove this plugin and its saved settings?</span>
-                        <button
+                          className="plugin-primary"
                           disabled={busy}
                           onClick={() =>
                             void run(async () => {
-                              await invoke("plugins_remove", {
-                                id: p.manifest.id,
+                              await invoke("plugins_install", {
+                                repository: preview.origin.repository,
+                                reviewedDigest: preview.digest,
                               });
-                              setRemove(null);
-                              if (selected?.id === p.manifest.id) {
-                                setSelected(undefined);
-                                setResult(null);
-                              }
+                              setPreview(null);
+                              setRepository("");
+                              await onRefresh();
+                              setView("installed");
+                            })
+                          }
+                        >
+                          Allow and install
+                          {plugins.some(
+                            (p) => p.manifest.id === preview.manifest.id,
+                          )
+                            ? " update"
+                            : ""}
+                        </button>
+                        <button
+                          disabled={busy}
+                          onClick={() => setPreview(null)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </section>
+              )}
+              {view === "installed" && (
+                <section aria-label="Installed plugins">
+                  <div className="plugin-section-title">
+                    <h3>Installed</h3>
+                    <span>{plugins.length} / 32</span>
+                  </div>
+                  {!plugins.length && (
+                    <div className="plugin-empty">
+                      <Icon name="code" size={28} />
+                      <strong>A few useful extras.</strong>
+                      <p>
+                        Install a plugin to add commands here and in your
+                        command menu.
+                      </p>
+                    </div>
+                  )}
+                  {plugins.map((p) => (
+                    <article className="plugin-card" key={p.manifest.id}>
+                      <div className="plugin-card-heading">
+                        <strong>{p.manifest.name}</strong>
+                        <span>v{p.manifest.version}</span>
+                        <button
+                          disabled={busy || !p.origin}
+                          role="switch"
+                          aria-checked={p.enabled}
+                          aria-label={`Enable ${p.manifest.name}`}
+                          onClick={() =>
+                            void run(async () => {
+                              await invoke("plugins_enable", {
+                                id: p.manifest.id,
+                                enabled: !p.enabled,
+                              });
                               await onRefresh();
                             })
                           }
                         >
-                          Remove plugin
+                          {p.enabled ? "Enabled" : "Disabled"}
                         </button>
-                        <button onClick={() => setRemove(null)}>Keep</button>
                       </div>
-                    )}
-                  </article>
-                ))}
-              </section>
+                      <p>{p.manifest.description}</p>
+                      <small>By {p.manifest.author}</small>
+                      {p.origin ? (
+                        <div className="plugin-origin">
+                          <button
+                            onClick={() =>
+                              void openUrl(
+                                `https://github.com/${p.origin!.repository}/tree/${p.origin!.commit}`,
+                              ).catch((e) => setError(String(e)))
+                            }
+                          >
+                            {p.origin.repository} ↗
+                          </button>
+                          <span>{p.origin.commit.slice(0, 7)}</span>
+                          <button
+                            disabled={busy}
+                            onClick={() =>
+                              review(p.origin!.repository, p.manifest.id)
+                            }
+                          >
+                            Check for updates
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="plugin-legacy">
+                          Link this plugin to its GitHub repository above to
+                          enable it. Saved settings are kept.
+                        </p>
+                      )}
+                      <details>
+                        <summary>Permissions</summary>
+                        <ul>
+                          {p.manifest.permissions.map((permission) => (
+                            <li key={permission}>
+                              {permissionLabels[permission]}
+                            </li>
+                          ))}
+                          {!p.manifest.permissions.length && (
+                            <li>No additional permissions</li>
+                          )}
+                        </ul>
+                      </details>
+                      <div className="plugin-commands">
+                        {p.manifest.commands.map((c) => (
+                          <button
+                            key={c.id}
+                            disabled={busy || !p.enabled}
+                            aria-pressed={
+                              selected?.id === p.manifest.id &&
+                              selected.command === c.id
+                            }
+                            onClick={() => {
+                              setSelected({ id: p.manifest.id, command: c.id });
+                              setResult(null);
+                              setError("");
+                            }}
+                            title={c.description}
+                          >
+                            {c.title}
+                            <span>↗</span>
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        className="plugin-remove"
+                        disabled={busy}
+                        onClick={() => setRemove(p.manifest.id)}
+                      >
+                        Remove
+                      </button>
+                      {remove === p.manifest.id && (
+                        <div className="plugin-remove-confirm">
+                          <span>
+                            Remove this plugin and its saved settings?
+                          </span>
+                          <button
+                            disabled={busy}
+                            onClick={() =>
+                              void run(async () => {
+                                await invoke("plugins_remove", {
+                                  id: p.manifest.id,
+                                });
+                                setRemove(null);
+                                if (selected?.id === p.manifest.id) {
+                                  setSelected(undefined);
+                                  setResult(null);
+                                }
+                                await onRefresh();
+                              })
+                            }
+                          >
+                            Remove plugin
+                          </button>
+                          <button onClick={() => setRemove(null)}>Keep</button>
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                </section>
+              )}
             </>
           )}
           {plugin?.enabled && command && (

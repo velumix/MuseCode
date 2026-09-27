@@ -31,6 +31,24 @@ export interface PluginOrigin {
   repository: string;
   commit: string;
 }
+export interface CatalogEntry extends PluginOrigin {
+  manifest: PluginManifest;
+}
+export interface PluginCatalog {
+  catalog: { schemaVersion: 1; plugins: CatalogEntry[] };
+  fetched_at: number;
+  notice: string | null;
+}
+export function submissionUrl(preview: PluginPreview): string {
+  const url = new URL(
+    "https://github.com/velumix/velum-code-plugins/issues/new",
+  );
+  url.searchParams.set("template", "plugin.yml");
+  url.searchParams.set("title", `Plugin: ${preview.origin.repository}`);
+  url.searchParams.set("repository", preview.origin.repository);
+  url.searchParams.set("commit", preview.origin.commit);
+  return url.toString();
+}
 export interface PluginResult {
   title?: string;
   text: string;

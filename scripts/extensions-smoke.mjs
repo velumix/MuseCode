@@ -219,13 +219,15 @@ try {
     /Review this plugin/,
   );
   await page.getByRole("button", { name: "Plugins", exact: true }).click();
-  await page.getByLabel("GitHub repository").fill(repository);
-  await page.getByRole("button", { name: "Review plugin" }).click();
+  const listing = page.locator(".plugin-listing").filter({hasText:"Project tools"});
+  await expect(listing).toBeVisible();
+  await listing.getByRole("button", {name:"Install", exact:true}).click();
   await expect(page.locator(".plugin-review")).toContainText("Read text files");
   await page
     .getByRole("button", { name: "Allow and install", exact: true })
     .click();
   await page
+    .locator(".plugin-card").filter({hasText:repository})
     .getByRole("button", { name: "Create project brief", exact: false })
     .click();
   await page.getByRole("button", { name: "Run command", exact: true }).click();

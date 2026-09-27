@@ -41,8 +41,16 @@ pub fn valid_origin(origin: &Origin) -> bool {
         && origin.commit.bytes().all(|b| b.is_ascii_hexdigit())
 }
 fn download(client: &Client, path: &str, accept: &str, limit: usize) -> Result<String, String> {
+    download_url(
+        client,
+        &format!("https://api.github.com/repos/{path}"),
+        accept,
+        limit,
+    )
+}
+fn download_url(client: &Client, url: &str, accept: &str, limit: usize) -> Result<String, String> {
     let response = client
-        .get(format!("https://api.github.com/repos/{path}"))
+        .get(url)
         .header("Accept", accept)
         .header("X-GitHub-Api-Version", "2022-11-28")
         .send()
@@ -70,24 +78,42 @@ fn download(client: &Client, path: &str, accept: &str, limit: usize) -> Result<S
     }
     String::from_utf8(bytes).map_err(|_| "Plugin files must be UTF-8 text.".into())
 }
-pub fn package(input: &str) -> Result<(Origin, String, String), String> {
-    let repository = repository(input)?;
-    let client = Client::builder()
+fn client() -> Result<Client, String> {
+    Client::builder()
         .user_agent("VelumCode-Plugins/1")
         .timeout(Duration::from_secs(15))
         .connect_timeout(Duration::from_secs(8))
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())
+}
+pub fn directory() -> Result<String, String> {
+    download_url(
+        &client()?,
+        "https://raw.githubusercontent.com/velumix/velum-code-plugins/main/catalog.json",
+        "application/json",
+        1024 * 1024,
+    )
+}
+pub fn package(input: &str, pinned: Option<&str>) -> Result<(Origin, String, String), String> {
+    let repository = repository(input)?;
+    if pinned.is_some_and(|sha| sha.len() != 40 || !sha.bytes().all(|b| b.is_ascii_hexdigit())) {
+        return Err("Invalid listed plugin commit. Refresh the directory.".into());
+    }
+    let client = client()?;
     // HEAD resolves the default branch to one immutable commit before either file is read.
-    let commit = download(
-        &client,
-        &format!("{repository}/commits/HEAD"),
-        "application/vnd.github.sha",
-        256,
-    )?
-    .trim()
-    .to_string();
+    let commit = if let Some(commit) = pinned {
+        commit.to_lowercase()
+    } else {
+        download(
+            &client,
+            &format!("{repository}/commits/HEAD"),
+            "application/vnd.github.sha",
+            256,
+        )?
+        .trim()
+        .to_string()
+    };
     let origin = Origin { repository, commit };
     if !valid_origin(&origin) {
         return Err("GitHub did not return a valid commit.".into());
@@ -118,13 +144,28 @@ mod tests {
     #[test]
     #[ignore = "Requires public GitHub access; run explicitly for release verification"]
     fn live_github_plugin_download() {
-        let (origin, manifest, source) = package("velumix/velum-plugin-project-tools").unwrap();
+        let (origin, manifest, source) =
+            package("velumix/velum-plugin-project-tools", None).unwrap();
         assert!(valid_origin(&origin));
         assert_eq!(origin.repository, "velumix/velum-plugin-project-tools");
         let manifest: serde_json::Value = serde_json::from_str(&manifest).unwrap();
         assert_eq!(manifest["id"], "velum.project-tools");
         assert!(source.contains("self.VelumPlugin = plugin"));
         println!("Downloaded both plugin files at commit {}", origin.commit);
+        let list: serde_json::Value = serde_json::from_str(&directory().unwrap()).unwrap();
+        let entry = list["plugins"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["repository"] == "velumix/velum-plugin-project-tools")
+            .unwrap();
+        let (listed, _, _) = package(
+            entry["repository"].as_str().unwrap(),
+            entry["commit"].as_str(),
+        )
+        .unwrap();
+        assert_eq!(listed.commit, entry["commit"].as_str().unwrap());
+        println!("Downloaded directory and its pinned plugin version.");
     }
     #[test]
     fn github_urls_only() {

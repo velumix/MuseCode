@@ -34,10 +34,24 @@ async function pluginFixture(
         origin: { repository: "test/tools", commit: "a".repeat(40) },
       };
       w.qa.plugins = [plugin];
+      w.qa.catalog = {
+        catalog: {
+          schemaVersion: 1,
+          plugins: [
+            { manifest, repository: "test/tools", commit: "a".repeat(40) },
+          ],
+        },
+        fetched_at: 1,
+        notice: null,
+      };
       const original = w.__TAURI_INTERNALS__.invoke;
       w.__TAURI_INTERNALS__.invoke = async (cmd: string, args: any) => {
         if (!cmd.startsWith("plugins_")) return original(cmd, args);
         w.qa.calls.push({ cmd, args });
+        if (cmd === "plugins_catalog") {
+          if (w.qa.catalogError) throw w.qa.catalogError;
+          return structuredClone(w.qa.catalog);
+        }
         if (cmd === "plugins_list") return structuredClone(w.qa.plugins);
         if (cmd === "plugins_preview")
           return w.qa.nextPreview || { ...plugin, bytes: source.length };
@@ -91,6 +105,9 @@ test("plugins review permissions, run on demand, append to draft and disable", a
     .locator(".chat-wrap:not(.hidden) textarea")
     .fill("Keep this draft");
   await page.getByRole("button", { name: "Plugins", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Install from GitHub", exact: true })
+    .click();
   await page.getByLabel("GitHub repository").fill("test/tools");
   await page.getByRole("button", { name: "Review plugin" }).click();
   await expect(page.locator(".plugin-review")).toContainText("Read text files");
@@ -132,6 +149,7 @@ test("plugins review permissions, run on demand, append to draft and disable", a
     ),
   ).toBe(false);
   await page.getByRole("button", { name: "Plugins", exact: true }).click();
+  await page.getByRole("button", { name: /^Installed \(/ }).click();
   await page.getByRole("switch", { name: "Enable Test tools" }).click();
   await expect(
     page.getByRole("button", { name: "Test command", exact: false }),
@@ -144,6 +162,9 @@ test("GitHub updates are reviewed with commit and new permissions before install
   await boot(page);
   await pluginFixture(page, "self.VelumPlugin={commands:{}}");
   await page.getByRole("button", { name: "Plugins", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Install from GitHub", exact: true })
+    .click();
   await page.getByLabel("GitHub repository").fill("test/tools");
   await page.getByRole("button", { name: "Review plugin" }).click();
   await page
@@ -153,6 +174,7 @@ test("GitHub updates are reviewed with commit and new permissions before install
     .getByRole("button", { name: "Check for updates", exact: true })
     .click();
   await expect(page.getByRole("status")).toContainText("up to date");
+  await page.getByRole("button", { name: /^Installed \(/ }).click();
   await page.evaluate(() => {
     const w = window as any;
     const p = w.qa.plugins[0];
@@ -188,6 +210,135 @@ test("GitHub updates are reviewed with commit and new permissions before install
           .at(-1).args,
     ),
   ).toEqual({ repository: "test/tools", reviewedDigest: "updated-code" });
+});
+
+test("plugin directory opens first, searches metadata and reviews the listed commit", async ({
+  page,
+}) => {
+  await boot(page);
+  await pluginFixture(page, "self.VelumPlugin={commands:{}}");
+  expect(
+    await page.evaluate(() =>
+      (window as any).qa.calls.some((c: any) => c.cmd === "plugins_catalog"),
+    ),
+  ).toBe(false);
+  await page.getByRole("button", { name: "Plugins", exact: true }).click();
+  await expect(page.locator(".plugin-listing h3")).toHaveText("Test tools");
+  await expect(
+    page.getByLabel("GitHub repository", { exact: true }),
+  ).toHaveCount(0);
+  await page.getByLabel("Search plugins").fill("missing");
+  await expect(page.getByText("No matching plugins")).toBeVisible();
+  await page.getByLabel("Search plugins").fill("test author");
+  await expect(page.locator(".plugin-listing")).toHaveCount(1);
+  expect(
+    (await new AxeBuilder({ page }).include(".plugin-panel").analyze())
+      .violations,
+  ).toEqual([]);
+  await page.screenshot({
+    path: ".qa/plugin-directory.png",
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Install", exact: true }).click();
+  await expect(page.locator(".plugin-review")).toContainText("aaaaaaa");
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).qa.calls
+          .filter((c: any) => c.cmd === "plugins_preview")
+          .at(-1).args,
+    ),
+  ).toEqual({ repository: "test/tools", commit: "a".repeat(40) });
+  expect(
+    await page.evaluate(() =>
+      (window as any).qa.calls.some(
+        (c: any) => c.cmd === "plugins_install" || c.cmd === "plugins_source",
+      ),
+    ),
+  ).toBe(false);
+});
+test("publish checks the repository and opens a prefilled GitHub submission without posting", async ({
+  page,
+}) => {
+  await boot(page);
+  await pluginFixture(page, "self.VelumPlugin={commands:{}}", [
+    "workspace.read",
+  ]);
+  await page.getByRole("button", { name: "Plugins", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Publish your plugin", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Continue on GitHub", exact: false }),
+  ).toHaveCount(0);
+  await page.getByLabel("Your plugin repository").fill("test/tools");
+  await page
+    .getByRole("button", { name: "Check repository", exact: true })
+    .click();
+  await expect(page.locator(".plugin-publish .plugin-review")).toContainText(
+    "Read text files",
+  );
+  expect(
+    (await new AxeBuilder({ page }).include(".plugin-panel").analyze())
+      .violations,
+  ).toEqual([]);
+  await page.screenshot({
+    path: ".qa/plugin-publish.png",
+    animations: "disabled",
+  });
+  await page
+    .getByRole("button", { name: "Continue on GitHub", exact: false })
+    .click();
+  await expect(page.getByRole("status")).toContainText(
+    "Submission opened on GitHub",
+  );
+  const args = await page.evaluate(
+    () =>
+      (window as any).qa.calls
+        .filter((c: any) => c.cmd === "plugin:opener|open_url")
+        .at(-1).args,
+  );
+  const url = new URL(args.url);
+  expect(url.origin + url.pathname).toBe(
+    "https://github.com/velumix/velum-code-plugins/issues/new",
+  );
+  expect(url.searchParams.get("repository")).toBe("test/tools");
+  expect(url.searchParams.get("commit")).toBe("a".repeat(40));
+  expect(url.searchParams.get("template")).toBe("plugin.yml");
+  expect(
+    await page.evaluate(() =>
+      (window as any).qa.calls.some(
+        (c: any) => c.cmd === "plugins_install" || c.cmd === "agent_send",
+      ),
+    ),
+  ).toBe(false);
+});
+test("offline directory explains its saved list and allows explicit refresh", async ({
+  page,
+}) => {
+  await boot(page);
+  await pluginFixture(page, "self.VelumPlugin={commands:{}}");
+  await page.evaluate(
+    () =>
+      ((window as any).qa.catalog.notice =
+        "Could not refresh the directory. Showing your saved list; installed plugins still work."),
+  );
+  await page.getByRole("button", { name: "Plugins", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("saved list");
+  await expect(page.locator(".plugin-listing")).toHaveCount(1);
+  await page.evaluate(() => ((window as any).qa.catalog.notice = null));
+  await page
+    .getByRole("button", { name: "Refresh plugin directory", exact: true })
+    .click();
+  await expect(page.getByRole("status")).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).qa.calls
+          .filter((c: any) => c.cmd === "plugins_catalog")
+          .at(-1).args.refresh,
+    ),
+  ).toBe(true);
 });
 
 test("plugin worker cannot reach network, app storage or native IPC", async ({

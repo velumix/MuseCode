@@ -80,7 +80,7 @@ fn valid_id(id: &str) -> bool {
         .contains(&id.split('.').next().unwrap_or(""))
 }
 
-fn validate(m: &Manifest) -> Result<(), String> {
+pub(crate) fn validate(m: &Manifest) -> Result<(), String> {
     if m.api_version != 1 {
         return Err("This plugin needs a different SDK version. Supported API: 1.".into());
     }
@@ -167,8 +167,8 @@ fn digest(manifest: &Manifest, source: &str) -> String {
     format!("{:x}", hash.finalize())
 }
 
-fn package(repository: &str) -> Result<(Preview, String), String> {
-    let (origin, text, source) = plugin_github::package(repository)?;
+fn package(repository: &str, commit: Option<&str>) -> Result<(Preview, String), String> {
+    let (origin, text, source) = plugin_github::package(repository, commit)?;
     let manifest: Manifest =
         serde_json::from_str(&text).map_err(|e| format!("Invalid velum-plugin.json: {e}"))?;
     validate(&manifest)?;
@@ -297,9 +297,13 @@ pub fn plugins_list(state: State<PluginState>) -> Vec<Installed> {
 }
 
 #[tauri::command]
-pub async fn plugins_preview(app: tauri::AppHandle, repository: String) -> Result<Preview, String> {
+pub async fn plugins_preview(
+    app: tauri::AppHandle,
+    repository: String,
+    commit: Option<String>,
+) -> Result<Preview, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let (preview, source) = package(&repository)?;
+        let (preview, source) = package(&repository, commit.as_deref())?;
         let state = app.state::<PluginState>();
         let mut previews = state.previews.lock().unwrap();
         // One review at a time; retain only the bytes shown in the latest review.

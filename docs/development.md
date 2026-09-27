@@ -141,6 +141,7 @@ those workflows. YOLO changes approval/sandbox behavior; it does not add interac
 - `src-tauri/src/history.rs` / `src/desktopHistory.ts` — bounded native recovery and draft checkpoints
 - `src-tauri/src/plugins.rs` — package review, installation, permissions and confined file reads
 - `src-tauri/src/plugin_github.rs` — bounded GitHub downloads pinned to a commit, with no clone or build step
+- `src-tauri/src/plugin_catalog.rs` / `src/components/PluginDirectory.tsx` — cached community directory, browsing, and GitHub submission handoff
 - `src-tauri/src/kanban.rs` / `src/components/KanbanPanel.tsx` — atomic workspace boards and shared desktop/phone UI
 - `src/pluginRuntime.ts` / `src/pluginBridge.js` — lazy, isolated worker runtime
 - `packages/plugin-sdk/` / `examples/project-tools/` — plugin SDK and working starter
