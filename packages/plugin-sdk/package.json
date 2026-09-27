@@ -1,0 +1,9 @@
+{
+  "name": "@velum-code/plugin-sdk",
+  "version": "0.1.0",
+  "description": "Typed command plugins for Velum Code",
+  "type": "module",
+  "exports": { ".": { "types": "./index.d.ts", "import": "./index.js" } },
+  "files": ["index.js", "index.d.ts", "README.md"],
+  "bin": { "create-velum-plugin": "./create.mjs" }
+}

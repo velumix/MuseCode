@@ -1,6 +1,8 @@
 mod desktop;
 mod events;
+mod history;
 mod memory;
+mod plugins;
 mod provider_auth;
 mod provider_events;
 mod provider_models;
@@ -10,6 +12,7 @@ mod remote;
 mod remote_auth;
 mod runner;
 mod session_log;
+mod storage;
 mod tailscale;
 mod usb;
 
@@ -30,6 +33,8 @@ pub fn run() {
         .manage(session_log::SessionLog::default())
         .setup(|app| {
             memory::setup(app.handle());
+            plugins::setup(app.handle());
+            history::setup(app.handle());
             desktop::setup(app)?;
             remote::setup(app)
         })
@@ -37,6 +42,17 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             memory::memory_request,
             memory::memory_open,
+            plugins::plugins_list,
+            plugins::plugins_preview,
+            plugins::plugins_install,
+            plugins::plugins_enable,
+            plugins::plugins_remove,
+            plugins::plugins_source,
+            plugins::plugins_call,
+            history::history_forget,
+            history::history_desktop_save,
+            history::history_draft_save,
+            history::history_desktop_load,
             pty::pty_spawn,
             providers::provider_status,
             provider_models::provider_models,
@@ -77,6 +93,7 @@ pub fn run() {
                 remote::shutdown(app);
                 desktop::shutdown(app);
                 app.state::<AgentState>().shutdown();
+                history::shutdown(app);
                 app.state::<PtyState>().shutdown();
                 app.state::<provider_auth::AuthState>().shutdown();
             }

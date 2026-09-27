@@ -5,6 +5,8 @@ import Markdown from "./Markdown";
 import { providerNames, type Provider, type RunOptions } from "../providers";
 import { copyText } from "./clip";
 import Icon, { VelumMark, type IconName } from "./Icon";
+import type { PluginChatHandle } from "../plugins";
+import { readDraft, saveDraft } from "../desktopHistory";
 
 export type AgentStatus =
   | { kind: "starting" }
@@ -44,9 +46,12 @@ interface NewInfo {
   id: string;
   session_id: string;
   workspace: string;
+  restored?: AgentEventEnvelope["event"][];
+  truncated?: boolean;
 }
 
 interface ChatViewProps {
+  onPluginHandle: (id: string, handle: PluginChatHandle | null) => void;
   onRemember: (text:string)=>void;
   initialWorkspace?: string;
   provider: Provider;
@@ -237,7 +242,7 @@ function ToolBlock({ block }: { block: Extract<Block, { kind: "tool" }> }) {
   );
 }
 
-export default function ChatView({ provider, options, initialWorkspace, sessionId, active, sessionKey, onStatus, onWorkspace, onTitle, onRemember }: ChatViewProps) {
+export default function ChatView({ provider, options, initialWorkspace, sessionId, active, sessionKey, onStatus, onWorkspace, onTitle, onRemember, onPluginHandle }: ChatViewProps) {
   const optionsRef = useRef(options); optionsRef.current = options;
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [todos, setTodos] = useState<TodoEntry[]>([]);
@@ -262,6 +267,12 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
   const [workspaceError, setWorkspaceError] = useState("");
   const [showLatest, setShowLatest] = useState(false);
   const [memoryUsage,setMemoryUsage]=useState<{titles:string[];bytes:number}|null>(null);
+  const [draftError, setDraftError] = useState(false);
+  const identityRef = useRef({ workspace, sessionKey });
+  useEffect(() => {
+    if (!ready) return;
+    try { saveDraft(sessionId, input); setDraftError(false); } catch { setDraftError(true); }
+  }, [input, ready, sessionId]);
 
   const idRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -281,6 +292,19 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
   const assistantSeenRef = useRef(false);
   const applyingRef = useRef(false);
   const titleAssignedRef = useRef(false);
+  const blocksRef = useRef(blocks); blocksRef.current = blocks;
+  const inputRef = useRef(input); inputRef.current = input;
+  useEffect(() => {
+    onPluginHandle(sessionId, {
+      messages: () => blocksRef.current.filter(b => b.kind === "user" || b.kind === "assistant").map(b => ({ role: b.kind, text: "text" in b ? b.text : "" })),
+      insert: text => {
+        const next = inputRef.current ? `${inputRef.current}\n\n${text}` : text;
+        if (next.length > 64000) throw new Error("The result would exceed your draft’s 64,000-character limit. Shorten the draft first.");
+        setInput(next);
+      },
+    });
+    return () => onPluginHandle(sessionId, null);
+  }, [sessionId, onPluginHandle]);
 
   const setStatus = useCallback(
     (s: AgentStatus) => {
@@ -297,11 +321,14 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
     // A fresh native identity prevents old readers/events from touching a
     // replacement session, including StrictMode's mount/cleanup replay.
     const nativeId = `${sessionId}-agent-${crypto.randomUUID()}`;
+    const restarting = identityRef.current.workspace !== workspace || identityRef.current.sessionKey !== sessionKey;
+    identityRef.current = { workspace, sessionKey };
+    let replaying = false;
     nativeIdRef.current = null;
     idRef.current = 0;
     setBlocks([]);
     setTodos([]);
-    setInput("");
+    setInput(restarting ? "" : readDraft(sessionId));
     setRunning(false);
     runningRef.current = false;
     assistantSeenRef.current = false;
@@ -321,7 +348,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
       switch (e.kind) {
         case "memory_context": setMemoryUsage({titles:Array.isArray(e.titles)?e.titles as string[]:[],bytes:typeof e.bytes==="number"?e.bytes:0}); break;
         case "turn_start": {
-          if (!e.remote) break;
+          if (!e.remote && !replaying) break;
           const prompt = asString(e.prompt) ?? "";
           assistantSeenRef.current = false;
           runningRef.current = true;
@@ -498,8 +525,12 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
         // The listener above filters by session id; register after attaching
         // so no event from our own session can slip past.
         if (disposed) return;
-        const info = await invoke<NewInfo>("agent_new", { id: nativeId, workspace, tabId: sessionId, provider, options: optionsRef.current });
+        const info = await invoke<NewInfo>("agent_new", { id: nativeId, workspace, tabId: sessionId, provider, options: optionsRef.current, resume: !restarting });
         if (!disposed) {
+          replaying = true;
+          if (info.truncated) applyEvent({ id: nativeId, event: { kind: "notice", text: "Earlier display history was trimmed to keep recovery fast. The provider’s saved conversation is still used when continuing." } });
+          for (const event of info.restored || []) applyEvent({ id: nativeId, event });
+          replaying = false;
           nativeIdRef.current = nativeId;
           setEffective(info.workspace);
           setDraft(info.workspace);
@@ -763,8 +794,10 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
         </div>
       )}
       {workspaceError && <div className="notice error" role="alert">{workspaceError}</div>}
+      {draftError && <div className="notice error" role="alert">Your draft could not be saved. Copy it before closing Velum Code.</div>}
       <div className={`composer${running ? " is-running" : ""}${input.trim() ? " has-draft" : ""}`}>
         <textarea
+          maxLength={64000}
           ref={composerRef}
           value={input}
           rows={2}

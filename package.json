@@ -8,8 +8,10 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "playwright test",
+    "test:sdk": "node --test tests/plugin-sdk.test.mjs",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
-    "check": "npm run build && npm test && npm run test:rust",
+    "check": "npm run build && npm test && npm run test:sdk && npm run test:rust",
+    "check:extensions": "cargo build --manifest-path src-tauri/Cargo.toml && node scripts/extensions-smoke.mjs",
     "check:native": "cargo build --manifest-path src-tauri/Cargo.toml && node scripts/native-smoke.mjs",
     "check:remote": "npm run build && cargo build --manifest-path src-tauri/Cargo.toml && node scripts/remote-smoke.mjs",
     "tauri": "tauri"

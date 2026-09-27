@@ -1,0 +1,14 @@
+{
+  "apiVersion": 1,
+  "id": "velum.project-tools",
+  "name": "Project tools",
+  "version": "1.0.0",
+  "description": "Create a quick project brief and a focused review checklist without making an AI request.",
+  "author": "Velumix",
+  "entry": "index.js",
+  "permissions": ["workspace.read"],
+  "commands": [
+    { "id": "project-brief", "title": "Create project brief", "description": "Summarize root files, package details and available scripts." },
+    { "id": "review-checklist", "title": "Prepare review checklist", "description": "Build a review prompt from your project's scripts and the focus you enter." }
+  ]
+}

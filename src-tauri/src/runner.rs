@@ -63,6 +63,8 @@ pub struct NewInfo {
     pub id: String,
     pub session_id: String,
     pub workspace: String,
+    pub restored: Vec<AgentEvent>,
+    pub truncated: bool,
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -74,6 +76,7 @@ pub struct TurnInfo {
 fn emit(app: &AppHandle, id: &str, event: AgentEvent) {
     app.state::<crate::session_log::SessionLog>()
         .record(id, &event);
+    app.state::<crate::history::HistoryState>().mark(id);
     crate::remote::changed(app);
     // Emit failures mean the window is gone; nothing left to report to.
     let _ = app.emit(
@@ -248,8 +251,10 @@ fn spawn_reader(
         let mut invalid_proposal = false;
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             let events = fold.fold_line(&line);
-            if let Some(id) = &fold.session_id {
-                *session.session_id.lock().unwrap() = id.clone();
+            if let Some(resume_id) = &fold.session_id {
+                *session.session_id.lock().unwrap() = resume_id.clone();
+                app.state::<crate::history::HistoryState>()
+                    .resume_id(&id, resume_id);
             }
             for mut event in events {
                 if memory_mode != crate::memory::Capture::Manual {
@@ -417,18 +422,28 @@ fn spawn_reader(
 #[tauri::command]
 pub fn agent_new(
     app: AppHandle,
-    state: State<AgentState>,
     id: String,
     workspace: Option<String>,
     tab_id: Option<String>,
     provider: Option<Provider>,
     options: Option<RunOptions>,
+    resume: Option<bool>,
 ) -> Result<NewInfo, String> {
+    let state = app.state::<AgentState>();
     let workspace = resolve_workspace(workspace)?;
     let provider = provider.unwrap_or_default();
     let options = options.unwrap_or_default();
     options.validate(provider)?;
-    let session_id = if provider == Provider::Muse {
+    let tab_id = tab_id.unwrap_or_else(|| id.clone());
+    let history = app.state::<crate::history::HistoryState>();
+    let saved = if resume.unwrap_or(false) {
+        history.load(&tab_id, &workspace.display().to_string(), provider)?
+    } else {
+        None
+    };
+    let session_id = if let Some(saved) = &saved {
+        saved.session_id.clone()
+    } else if provider == Provider::Muse {
         uuid::Uuid::new_v4().to_string()
     } else {
         String::new()
@@ -440,7 +455,7 @@ pub fn agent_new(
         .insert(
             id.clone(),
             Arc::new(AgentSession {
-                tab_id: tab_id.unwrap_or_else(|| id.clone()),
+                tab_id: tab_id.clone(),
                 session_id: Mutex::new(session_id.clone()),
                 provider,
                 options: Mutex::new(options.clone()),
@@ -458,11 +473,29 @@ pub fn agent_new(
         .register_provider(&id, workspace.display().to_string(), provider);
     app.state::<crate::session_log::SessionLog>()
         .configure(&id, options);
+    let truncated = saved.as_ref().is_some_and(|saved| saved.truncated);
+    let restored = saved.map(|saved| saved.events).unwrap_or_default();
+    for event in &restored {
+        app.state::<crate::session_log::SessionLog>()
+            .record(&id, event);
+    }
+    history.bind(
+        &id,
+        tab_id,
+        workspace.display().to_string(),
+        provider,
+        session_id.clone(),
+    );
+    if truncated {
+        history.mark_truncated(&id);
+    }
     crate::remote::changed(&app);
     Ok(NewInfo {
         id,
         session_id,
         workspace: workspace.display().to_string(),
+        restored,
+        truncated,
     })
 }
 
@@ -660,6 +693,12 @@ pub fn agent_destroy(app: AppHandle, state: State<AgentState>, id: String) -> Re
         .and_then(|mut sessions| sessions.remove(&id));
     if let Some(session) = session {
         session.stop();
+    }
+    if let Err(error) = app
+        .state::<crate::history::HistoryState>()
+        .unbind(&id, &app.state::<crate::session_log::SessionLog>())
+    {
+        let _ = app.emit("history-status", Some(error));
     }
     app.state::<crate::session_log::SessionLog>().remove(&id);
     crate::remote::changed(&app);

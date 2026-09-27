@@ -39,10 +39,11 @@ So I made it. **Velum Code is the app I built around that idea.** It started as 
 | **Take the conversation with you.** | Follow live Agent activity, send messages, and stop tasks over private Tailscale or a USB cable. Pairing needs your desktop approval. |
 | **Choose the model and depth.** | Model catalogs from your CLIs, reasoning levels for each model, and preferences that carry into new conversations. |
 | **Keep what matters.** | A local Markdown memory vault, shared preferences, project notes, and selective recall with a strict context budget. Edit the same notes on desktop, phone, or in Obsidian. |
+| **Make it your own.** | A permission-based plugin system, command palette integration, and a small TypeScript SDK. Plugins run on demand in isolated workers. |
 | **A quieter workspace.** | Charcoal surfaces, blue accents, readable conversations, and motion that respects reduced-motion preferences. |
 | **See what the agent is doing.** | Streaming responses, Markdown and code blocks, tool activity, task lists, and visible errors. |
 | **Chat and terminal, together.** | Every tab has an Agent view and an embedded terminal. Switching views preserves both. |
-| **Pick up where you left off.** | Click the tray icon or open the desktop shortcut to restore the existing instance. |
+| **Pick up where you left off.** | Tabs, drafts, model choices and recent transcripts restore after quitting or restarting. Continue the same provider conversation. |
 | **Keep your hands on the keyboard.** | A command palette, session shortcuts, terminal search, and zoom controls. |
 
 <table>
@@ -156,8 +157,8 @@ on port **8443**; VelumCode leaves other Serve routes alone and does not enable 
 Keep the desktop awake and VelumCode running. Phone controls currently operate on Agent
 conversations opened on the desktop, using standard agent permissions. Terminal control,
 phone push notifications, and creating workspaces from the phone are not included yet.
-Reconnecting or refreshing the phone replays recent activity; quitting the desktop still
-ends its sessions. See [remote access details](docs/remote-access.md) for setup and troubleshooting.
+Reconnecting or refreshing the phone replays recent activity. Quitting stops running work;
+reopening the desktop restores its Agent conversations. See [remote access details](docs/remote-access.md) for setup and troubleshooting.
 
 ## Memory that stays useful
 
@@ -174,6 +175,38 @@ Memory works with **Muse, Codex, and Antigravity in Agent mode**. Automatic sugg
 <p align="center"><a href="docs/images/memory-desktop.png"><img src="docs/images/memory-desktop.png" alt="Velum Code memory editor with project notes and shared preferences" width="900" /></a><br /><sub>Desktop editor with sample notes. <a href="docs/images/memory-phone.png">See the phone editor.</a></sub></p>
 
 The Android app also restores unsent drafts after reloads and process restarts, retries failed connections when brought back to the foreground, and recovers when Android reclaims its WebView renderer. Draft storage is bounded and cleared when the phone disconnects or its access is revoked. The desktop must remain running to keep a conversation available.
+
+## Small plugins, useful tools
+
+Open **Plugins** in the sidebar to review and install a local plugin folder. Enabled commands
+also appear in **Ctrl+K**. The included **Project tools** example creates project briefs and
+review checklists; results can be added to your draft without sending an AI request.
+
+Plugins have explicit permissions for workspace reads, conversation reads and their own
+settings. They cannot access the network, run shell commands, write project files, or inject UI.
+Each command gets a fresh worker with a five-second limit. Plugin code stays unloaded while idle.
+
+Want to make one? The [SDK guide](docs/plugins.md) covers the API, starter generator,
+TypeScript builds, distribution, and limits. The SDK and working example are in this repository.
+
+<p align="center"><a href="docs/images/plugins.png"><img src="docs/images/plugins.png" alt="Velum Code running the Project tools plugin with a local project brief" width="720" /></a></p>
+
+## Reopen and carry on
+
+Velum saves open Agent tabs, drafts, selected models and recent conversation history locally.
+Reopening after Quit or a Windows restart resumes the original CLI conversation when its
+provider resume ID is available. A crashed or interrupted turn is marked as stopped and is
+never rerun automatically.
+
+Native checkpoints are written approximately once a second and flushed on normal exit.
+A crash may lose changes since the last checkpoint. Recovery keeps up to 32 open conversations,
+2 MB of recent events per conversation, and drafts up to 64,000 characters each within a shared
+storage budget. Older display history may be trimmed; provider context remains in the CLI's
+own session. Terminal processes and terminal scrollback are not restored.
+
+Closing a conversation removes Velum's saved transcript and draft for that tab. Provider logs
+and memory-vault notes are separate. Recovery files are local plaintext in the app's configuration
+directory; this is recovery for open conversations, not a permanent chat archive.
 
 ## A few shortcuts worth knowing
 
@@ -219,7 +252,7 @@ installed Tailscale connection; see the [development guide](docs/development.md)
 
 There are still a few things I want to improve:
 
-- **Save and restore desktop sessions.** Desktop tabs and drafts survive closing to the tray, but explicit Quit, crashes, and Windows restarts do not restore them yet. The memory vault is persistent; phone drafts are saved locally.
+- **Browse older conversations.** Open conversations recover automatically; a searchable archive of closed conversations is not included yet.
 - **Interactive approvals in chat.** Chat cannot answer interactive approval prompts; each provider follows the policy described above. The terminal is available for interactive workflows.
 - **Easier project switching.** A folder picker, recent workspaces, and clearer project navigation are on the list.
 

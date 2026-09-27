@@ -1,0 +1,351 @@
+.plugin-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 180;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #080c13bb;
+  backdrop-filter: blur(8px);
+}
+.plugin-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: 90dvh;
+  background: #1c2027;
+  border: 1px solid #485466;
+  border-radius: 16px;
+  color: #e3eaf4;
+  box-shadow: 0 24px 100px #0009;
+  overflow: hidden;
+  font-size: 13px;
+}
+.plugin-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px 26px 8px;
+}
+.plugin-header h2 {
+  margin: 4px 0;
+  font-size: 27px;
+  letter-spacing: -0.7px;
+  font-weight: 600;
+}
+.plugin-eyebrow {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #9db8db;
+}
+.plugin-intro {
+  margin: 0;
+  padding: 0 26px 22px;
+  color: #b0bdce;
+  line-height: 1.6;
+}
+.plugin-body {
+  overflow: auto;
+  padding: 0 26px 24px;
+  display: grid;
+  gap: 24px;
+  scrollbar-gutter: stable;
+}
+.plugin-panel h3 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+.plugin-panel h4 {
+  margin: 12px 0 8px;
+}
+.plugin-panel p {
+  line-height: 1.6;
+}
+.plugin-body p,
+.plugin-body small {
+  color: #b0bdce;
+}
+.plugin-panel button,
+.plugin-panel input,
+.plugin-panel textarea {
+  font: inherit;
+  border: 1px solid #465468;
+  border-radius: 8px;
+  color: #e3eaf4;
+  background: #27313f;
+  padding: 9px 12px;
+  min-height: 38px;
+}
+.plugin-panel button {
+  cursor: pointer;
+}
+.plugin-panel button:hover:not(:disabled) {
+  background: #33445c;
+}
+.plugin-panel button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.plugin-panel :focus-visible {
+  outline: 2px solid #9bc5ff;
+  outline-offset: 2px;
+}
+.plugin-panel input,
+.plugin-panel textarea {
+  background: #141a22;
+  min-width: 0;
+}
+.plugin-panel input {
+  flex: 1;
+}
+.plugin-panel textarea {
+  display: block;
+  resize: vertical;
+  min-height: 85px;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 8px 0 12px;
+}
+.plugin-panel label span {
+  color: #9faec0;
+}
+.plugin-panel form {
+  display: flex;
+  gap: 8px;
+}
+.plugin-panel .plugin-close {
+  background: transparent;
+  padding: 8px;
+  width: 38px;
+  display: grid;
+  place-items: center;
+}
+.plugin-review,
+.plugin-card,
+.plugin-run {
+  border: 1px solid #3d4b5e;
+  border-radius: 12px;
+  padding: 18px;
+  background: #19212c;
+}
+.plugin-review {
+  margin-top: 14px;
+  border-color: #6584ad;
+}
+.plugin-review ul,
+.plugin-card ul {
+  padding-left: 18px;
+  color: #c7d7ee;
+  line-height: 1.8;
+}
+.plugin-review h4 {
+  font-size: 12px;
+}
+.plugin-card + .plugin-card {
+  margin-top: 10px;
+}
+.plugin-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.plugin-card-heading > span {
+  font-size: 11px;
+  color: #afbed1;
+}
+.plugin-card-heading > button {
+  margin-left: auto;
+  font-size: 11px;
+}
+.plugin-card-heading > h4 {
+  margin: 0;
+}
+.plugin-card [aria-checked="true"] {
+  color: #bcdecf;
+  background: #234338;
+  border-color: #47745e;
+}
+.plugin-section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.plugin-section-title > span {
+  color: #a1b0c4;
+  font-size: 11px;
+}
+.plugin-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.plugin-panel .plugin-primary {
+  background: #a5c7ff;
+  border-color: #a5c7ff;
+  color: #111d30;
+  font-weight: 600;
+}
+.plugin-panel .plugin-primary:hover:not(:disabled) {
+  background: #bdd6ff;
+}
+.plugin-actions small {
+  margin-left: auto;
+  font-size: 11px;
+}
+.plugin-empty {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  padding: 24px;
+  border: 1px dashed #465468;
+  border-radius: 12px;
+  color: #aabed8;
+  gap: 10px;
+}
+.plugin-empty p {
+  max-width: 330px;
+  margin: 0;
+}
+.plugin-card details {
+  margin: 14px 0;
+  color: #b3c4db;
+  font-size: 11px;
+}
+.plugin-card summary {
+  cursor: pointer;
+}
+.plugin-commands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0;
+}
+.plugin-commands button {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  font-size: 12px;
+}
+.plugin-commands button[aria-pressed="true"] {
+  border-color: #9bc5ff;
+  background: #293e5b;
+}
+.plugin-commands button span {
+  color: #9cbbe7;
+}
+.plugin-panel .plugin-remove {
+  background: transparent;
+  border: 0;
+  min-height: 30px;
+  padding: 4px 0;
+  font-size: 11px;
+  color: #aebbcf;
+}
+.plugin-remove-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+.plugin-remove-confirm span {
+  flex-basis: 100%;
+  color: #ffd0d0;
+}
+.plugin-result {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #3d4b5e;
+}
+.plugin-result pre {
+  max-height: 250px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 12px/1.7 var(--font-mono, monospace);
+  background: #121820;
+  border-radius: 8px;
+  padding: 14px;
+}
+.plugin-result button {
+  font-size: 12px;
+}
+.plugin-error {
+  margin: 0 26px 16px;
+  background: #3e2b33;
+  border: 1px solid #8a5d60;
+  border-radius: 8px;
+  color: #ffd0d0;
+  padding: 10px 12px;
+}
+.plugin-footer {
+  padding: 16px 26px;
+  border-top: 1px solid #354154;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  color: #a9b7ca;
+}
+.plugin-footer a {
+  color: #bbd7ff;
+  text-decoration: none;
+}
+.plugin-footer a:hover {
+  text-decoration: underline;
+}
+@media (max-width: 640px) {
+  .plugin-overlay {
+    padding: 10px;
+  }
+  .plugin-panel {
+    max-height: 95dvh;
+  }
+  .plugin-header {
+    padding: 18px 18px 8px;
+  }
+  .plugin-intro {
+    padding: 0 18px 18px;
+  }
+  .plugin-body {
+    padding: 0 18px 18px;
+  }
+  .plugin-panel form {
+    flex-direction: column;
+  }
+  .plugin-panel button {
+    min-height: 44px;
+  }
+  .plugin-card-heading {
+    flex-wrap: wrap;
+  }
+  .plugin-actions {
+    flex-wrap: wrap;
+  }
+  .plugin-actions small {
+    margin-left: 0;
+  }
+}
+.plugin-panel .plugin-back {
+  justify-self: start;
+  background: transparent;
+  border: 0;
+  padding: 4px 0;
+  min-height: 28px;
+  color: #b7cde9;
+  font-size: 12px;
+}
+.plugin-panel .plugin-footer button {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  min-height: 20px;
+  color: #bbd7ff;
+  font-size: 11px;
+}
+.plugin-panel .plugin-footer button:hover {
+  background: transparent;
+  text-decoration: underline;
+}

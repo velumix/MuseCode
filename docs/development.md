@@ -58,6 +58,7 @@ Windows desktop and are run locally using the commands below.
 npm run check          # TypeScript + production frontend build + browser tests + Rust tests
 npm run check:native   # Windows debug build + real WebView2/IPC/ConPTY smoke test
 npm run check:remote   # real Tailscale HTTPS + native app + phone browser (Tailscale sign-in required)
+npm run check:extensions # native plugins, permissions, restart/crash recovery and provider resume
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
 
@@ -118,9 +119,15 @@ terminal in that directory. Invalid workspace paths preserve the current convers
 Restart resets only the currently selected mode. Closing a tab stops its processes; closing
 the window preserves them. Explicit Quit stops every owned agent and terminal process.
 
-Desktop transcripts and drafts live in memory. They survive hiding to the tray, but are not restored
-after explicit Quit, a crash, or a Windows restart.
-The CLI keeps its own session logs, but this UI has no history browser or restore operation yet.
+Open desktop tabs, drafts, options and bounded transcripts recover after Quit, a crash or a
+Windows restart. `history.rs` checkpoints dirty event logs and desktop state once a second
+on one background thread, using atomic file replacement. Normal exit flushes the latest native
+state. Browser local storage provides fast draft reads; native checkpoints make them durable
+even if WebView2 is killed. A crash can lose changes since the last checkpoint.
+Provider resume IDs are saved alongside transcripts. Interrupted turns are marked cancelled
+and never replayed as new commands. Missing resume IDs are disclosed before continuing.
+Terminal processes and scrollback are not restored. Closing a tab deletes its recovery data;
+CLI logs are separate. There is no browser for closed conversations yet.
 The separate [memory vault](memory.md) is persistent. Phone drafts use bounded local storage
 for reload/process recovery; they are cleared on logout or detected revocation and expire
 after seven days without a draft update. They do not restore a desktop session that has ended.
@@ -131,6 +138,10 @@ those workflows. YOLO changes approval/sandbox behavior; it does not add interac
 ## Layout
 
 - `src/` — React UI: `TitleBar`, `TabBar`, `ChatView`, `TerminalView`, `SearchBar`
+- `src-tauri/src/history.rs` / `src/desktopHistory.ts` — bounded native recovery and draft checkpoints
+- `src-tauri/src/plugins.rs` — package review, installation, permissions and confined file reads
+- `src/pluginRuntime.ts` / `src/pluginBridge.js` — lazy, isolated worker runtime
+- `packages/plugin-sdk/` / `examples/project-tools/` — plugin SDK and working starter
 - `src-tauri/src/runner.rs` — headless agent sessions, one `muse exec --json`
   child per turn (`agent_new/send/stop/destroy`, `agent-event` events)
 - `src-tauri/src/events.rs` — tolerant fold of the `--json` stream into UI events

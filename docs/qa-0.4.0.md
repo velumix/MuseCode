@@ -37,7 +37,7 @@ Checked on Windows with the existing Muse, Codex and Antigravity integrations, a
 
 ## Limits
 
-Memory is a notes system, not full chat restoration. Desktop transcripts/tabs still do not survive explicit Quit or Windows restart. Phone drafts cannot restore an ended desktop session.
+Memory is a notes system. A subsequent update adds separate native recovery for open desktop tabs, transcripts, drafts and provider resume IDs; see [plugin and recovery checks](qa-plugins-recovery.md). Terminal sessions and closed conversations are not restored.
 
 Retrieval uses local keyword matching, not semantic embeddings. The app caps the memory it adds, not the provider's entire context or billed tokens. Providers decide whether to follow the optional suggestion format. Terminal sessions do not receive automatic memory augmentation.
 

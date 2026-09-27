@@ -11,7 +11,7 @@
 //! fleeting [`AgentEvent::Activity`] detail so long model calls and reminder
 //! wrap-up never look like a stuck spinner.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -23,13 +23,13 @@ const TRUNCATED_MARKER: &str = "\n…[truncated]";
 /// Cap for one-line activity detail shown in the status bar / spinner.
 const MAX_ACTIVITY_CHARS: usize = 120;
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct TodoItem {
     pub text: String,
     pub status: String,
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AgentEvent {
     MemoryContext {

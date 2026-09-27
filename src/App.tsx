@@ -16,6 +16,10 @@ import type { PaletteAction } from "./components/CommandPalette";
 import "./App.css";
 import ProviderPicker from "./components/ProviderPicker";
 const MemoryPanel = lazy(() => import("./components/MemoryPanel"));
+const PluginPanel = lazy(() => import("./components/PluginPanel"));
+import type { PluginSelection } from "./components/PluginPanel";
+import type { InstalledPlugin, PluginChatHandle } from "./plugins";
+import { loadDesktop, saveDesktop, saveDraft, recoveryError } from "./desktopHistory";
 import type { MemoryView } from "./memory";
 import { preferredProvider, preferredOptions, saveOptions, providerNames, type Provider, type RunOptions } from "./providers";
 
@@ -70,20 +74,37 @@ function statusText(tab: Tab): string {
 }
 
 export default function App() {
-  const [tabs, setTabs] = useState<Tab[]>(() => [createTab(1)]);
-  const [activeId, setActiveId] = useState<string>(() => "");
+  const [recovery] = useState(loadDesktop);
+  const [tabs, setTabs] = useState<Tab[]>(() => recovery.tabs.length ? recovery.tabs.map((saved, i) => ({ ...createTab(i + 1, saved.provider), ...saved })) : [createTab(1)]);
+  const [activeId, setActiveId] = useState<string>(() => recovery.activeId);
   const [searchOpen, setSearchOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [remoteOpen, setRemoteOpen] = useState(false);
+  const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
+  const [pluginPanel, setPluginPanel] = useState<{ selection?: PluginSelection } | null>(null);
   const [memory, setMemory] = useState<{workspace:string;seed?:string}|null>(null);
   const [desktop, setDesktop] = useState<DesktopStatus>({ notifications_enabled: true, last_error: null });
-  const [desktopMessage, setDesktopMessage] = useState<{ text: string; error: boolean } | null>(null);
+  const [desktopMessage, setDesktopMessage] = useState<{ text: string; error: boolean } | null>(() => recoveryError ? { text: recoveryError, error: true } : null);
+  useEffect(() => {
+    const error = (e:Event) => setDesktopMessage({text:`Recovery could not save: ${(e as CustomEvent<string>).detail}`,error:true});
+    window.addEventListener("velum:recovery-error",error);
+    return () => window.removeEventListener("velum:recovery-error",error);
+  }, []);
 
   const counter = useRef(1);
   const handlesRef = useRef(new Map<string, TerminalHandles>());
+  const pluginHandles = useRef(new Map<string, PluginChatHandle>());
+  const handlePlugin = useCallback((id: string, handle: PluginChatHandle | null) => {
+    if (handle) pluginHandles.current.set(id, handle); else pluginHandles.current.delete(id);
+  }, []);
+  const refreshPlugins = useCallback(async () => setPlugins(await invoke<InstalledPlugin[]>("plugins_list") || []), []);
+  useEffect(() => { void refreshPlugins().catch(e => setDesktopMessage({ text: `Could not load plugins: ${String(e)}`, error: true })); }, [refreshPlugins]);
   // Render-committed snapshot so global shortcut handlers never go stale.
   const stateRef = useRef({ tabs, activeId });
   stateRef.current = { tabs, activeId };
+  useEffect(() => {
+    try { saveDesktop(tabs, activeId); } catch { setDesktopMessage({ text: "Could not save your open conversations. Check available disk space before quitting.", error: true }); }
+  }, [tabs, activeId]);
 
   // Default to the first tab on initial mount.
   useEffect(() => {
@@ -110,6 +131,7 @@ export default function App() {
         if (disposed) unlisten(); else unlistens.push(unlisten);
       };
       await Promise.all([
+        track(listen<string | null>("history-status", ({payload}) => { if (payload && !disposed) setDesktopMessage({ text: `Conversation recovery could not save: ${payload}`, error:true }); })),
         track(listen<{ tab_id: string; options: RunOptions }>("agent-options", ({ payload }) => {
           if (disposed) return;
           const provider = stateRef.current.tabs.find((t) => t.id === payload.tab_id)?.provider;
@@ -181,6 +203,7 @@ export default function App() {
   }, []);
 
   const openProvider = useCallback((provider: Provider) => {
+    if (stateRef.current.tabs.length >= 32) { setDesktopMessage({ text: "Close a conversation before opening another. Up to 32 can be open at once.", error: false }); return; }
     try { localStorage.setItem("velum-provider", provider); } catch { /* Storage is optional. */ }
     const t = createTab(++counter.current, provider);
     t.workspace = stateRef.current.tabs.find((tab) => tab.id === stateRef.current.activeId)?.workspace;
@@ -214,6 +237,8 @@ export default function App() {
   }, [closeSearch]);
 
   const closeTab = useCallback((id: string) => {
+    void invoke("history_forget", { tabId: id }).catch(e => setDesktopMessage({ text: `Could not delete saved conversation: ${String(e)}`, error: true }));
+    try { saveDraft(id, ""); } catch { /* Reported by the persistence effect if storage is unavailable. */ }
     // Each view owns its native session and completes cleanup after any
     // pending initialization. Sending a second kill here races that owner.
     handlesRef.current.delete(id);
@@ -361,6 +386,8 @@ export default function App() {
   const failed = activeTab && (tabStatus(activeTab).kind === "error" || tabStatus(activeTab).kind === "exited");
 
   const paletteActions: PaletteAction[] = [
+    { id: "cmd-plugins", title: "Manage plugins", run: () => setPluginPanel({}) },
+    ...plugins.filter(p => p.enabled).flatMap(p => p.manifest.commands.map(c => ({ id: `plugin-${p.manifest.id}-${c.id}`, title: `${c.title} · ${p.manifest.name}`, run: () => setPluginPanel({ selection: { id: p.manifest.id, command: c.id } }) }))),
     { id:"cmd-memory", title:"Open project memory vault", run:()=>{ if(activeTab?.workspace)setMemory({workspace:activeTab.workspace}); } },
     { id: "cmd-remote", title: "Connect your phone with Tailscale or USB", run: () => setRemoteOpen(true) },
     { id: "cmd-new", title: "New agent tab", hint: "Ctrl+T", run: newTab },
@@ -410,7 +437,7 @@ export default function App() {
         <button type="button" aria-label="Dismiss notification message" onClick={() => { setDesktopMessage(null); setDesktop((s) => ({ ...s, last_error: null })); }}><Icon name="close" size={15} /></button>
       </div>}
       <div className="app-body">
-      <TabBar tabs={tabs.map((t) => ({ ...t, status: tabStatus(t) }))} activeId={activeTab?.id ?? ""} onSelect={selectTab} onClose={closeTab} onNew={newTab} onCommands={togglePalette} workspace={activeTab?.workspace} />
+      <TabBar tabs={tabs.map((t) => ({ ...t, status: tabStatus(t) }))} activeId={activeTab?.id ?? ""} onSelect={selectTab} onClose={closeTab} onNew={newTab} onCommands={togglePalette} onPlugins={() => setPluginPanel({})} workspace={activeTab?.workspace} />
       <main className="conversation-pane" aria-label="Current conversation">
       <div className="conversation-toolbar">
         <div className="conversation-heading">
@@ -438,6 +465,7 @@ export default function App() {
         {tabs.map((t) => (
           <Fragment key={t.id}>
             <ChatView
+              onPluginHandle={handlePlugin}
               sessionId={t.id}
               provider={t.provider}
               options={t.options}
@@ -485,6 +513,7 @@ export default function App() {
       </div>
       {paletteOpen && <CommandPalette actions={paletteActions} onClose={() => setPaletteOpen(false)} />}
       {remoteOpen && <Suspense fallback={null}><RemotePanel onClose={() => setRemoteOpen(false)} /></Suspense>}
+      {pluginPanel && <Suspense fallback={null}><PluginPanel plugins={plugins} selection={pluginPanel.selection} onClose={() => setPluginPanel(null)} onRefresh={refreshPlugins} workspace={activeTab?.workspace || ""} messages={() => pluginHandles.current.get(activeTab?.id)?.messages() || []} onInsert={text => { pluginHandles.current.get(activeTab?.id)?.insert(text); focusComposer(); }} /></Suspense>}
       {memory&&<Suspense fallback={null}><MemoryPanel seed={memory.seed} onClose={()=>setMemory(null)} request={(request)=>invoke<MemoryView>("memory_request",{workspace:memory.workspace,request})} openVault={()=>invoke("memory_open")}/></Suspense>}
     </div>
   );
