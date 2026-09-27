@@ -14,6 +14,10 @@ Open **Bots → New bot** on desktop or a paired phone with control access.
 4. Set its default schedule, timezone, run limit, and whether assigned tasks run automatically. Each card can override the schedule and automatic mode.
 5. Save, then choose **Chat**. Selecting another provider opens a separate conversation with the same bot identity and memory.
 
+New profiles offer **Builder**, **Reviewer**, and **Researcher** presets under **Start with a preset**. These fill the specialty, color, personality, and working instructions while retaining your chosen name, provider, and model. Presets start with automatic scheduling off; everything remains editable before saving.
+
+**Duplicate** copies a saved profile into a new draft with a new identity. Its private memory starts empty and automatic scheduling is off. The original profile and vault remain unchanged. Save the draft to add it to your team; shared/project memory is still available if enabled in the profile.
+
 Example `soul.md`:
 
 ```markdown
@@ -60,6 +64,8 @@ Edit a Kanban card and choose **Assigned bot**. Saving creates one persistent jo
 | `30 18 * * *` | Daily at 6:30 PM in the selected timezone |
 
 With **Run automatically on schedule** enabled, an assigned Backlog or In progress task runs when due. Otherwise it waits for **Run now**. **Bots → Schedules** provides Run now, Pause/Resume, Stop, and a global scheduling pause. Pausing global scheduling prevents new automatic starts; use Stop to end an active run. Manual Run now remains available while global scheduling is paused.
+
+Tasks with unfinished or deleted prerequisites show **Waiting** with the blocker names. Neither automatic work nor Run now starts until all prerequisites are Done. Due dates and priorities order eligible automatic jobs; they do not change the cron expression. See [task planning and Trash](kanban.md) for details.
 
 Velum must be running, either open or in the tray, and Windows must be awake. This is an in-app scheduler, not a Windows service or a wake timer. Quitting ends work. Jobs persist across restarts; a missed schedule runs once when available rather than replaying every missed interval. A crash marks active runs interrupted and pauses their jobs for review.
 

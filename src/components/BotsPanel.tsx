@@ -2,6 +2,8 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { MemoryRequest, MemoryView } from "../memory";
 import {
   newBot,
+  botPresets,
+  duplicateBot,
   when,
   type BotProfile,
   type BotRequest,
@@ -200,7 +202,7 @@ export default function BotsPanel(props: Props) {
           if (e.key !== "Tab") return;
           const nodes = [
             ...panel.current!.querySelectorAll<HTMLElement>(
-              'button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]',
+              'button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),summary,[tabindex="0"]',
             ),
           ].filter((n) => n.offsetParent !== null);
           const first = nodes[0],
@@ -301,6 +303,38 @@ export default function BotsPanel(props: Props) {
             >
               {section === "identity" && (
                 <>
+                  {!editor.revision && !readOnly && (
+                    <details className="bot-presets">
+                      <summary>Start with a preset</summary>
+                      <p className="bot-help">
+                        Use a starting personality and working style. Your
+                        provider and model stay selected. You can edit
+                        everything before saving.
+                      </p>
+                      <div>
+                        {botPresets.map((preset) => (
+                          <button
+                            type="button"
+                            key={preset.id}
+                            disabled={busy}
+                            onClick={() =>
+                              patch({
+                                name: editor.name || preset.name,
+                                role: preset.role,
+                                color: preset.color,
+                                soul: preset.soul,
+                                agent: preset.agent,
+                                automatic: false,
+                              })
+                            }
+                          >
+                            {preset.name}
+                            <small>{preset.role}</small>
+                          </button>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                   <div className="bot-picture">
                     <BotAvatar bot={editor} size={72} />
                     <div>
@@ -679,6 +713,15 @@ export default function BotsPanel(props: Props) {
                           {readOnly ? "View profile" : "Edit bot"}
                         </button>
                         <button onClick={() => setMemory(bot)}>Memory</button>
+                        {!readOnly && (
+                          <button
+                            title="Copy this profile with fresh private memory and automatic scheduling off"
+                            disabled={busy || view.profiles.length >= 32}
+                            onClick={() => edit(duplicateBot(bot))}
+                          >
+                            Duplicate
+                          </button>
+                        )}
                       </div>
                     </article>
                   ))}
@@ -752,7 +795,8 @@ export default function BotsPanel(props: Props) {
                                 {job.paused ? " · Paused" : ""}
                               </p>
                               <small>
-                                {job.workspace?.replace(/^\\\\\?\\/, '')}<br/>
+                                {job.workspace?.replace(/^\\\\\?\\/, "")}
+                                <br />
                                 {job.assignment.cron} ·{" "}
                                 {job.assignment.timezone}
                                 {job.status !== "complete"
@@ -761,6 +805,16 @@ export default function BotsPanel(props: Props) {
                               </small>
                               {job.last_error && (
                                 <p className="bot-error">{job.last_error}</p>
+                              )}
+                              {!!job.blocked_by?.length && (
+                                <p className="bot-waiting">
+                                  Waiting for: {job.blocked_by.join("; ")}.
+                                  Scheduling continues once prerequisites are
+                                  Done.
+                                </p>
+                              )}
+                              {job.due_date && (
+                                <p className="bot-help">Due {job.due_date}</p>
                               )}
                             </div>
                             <div className="bot-card-actions">
@@ -779,7 +833,8 @@ export default function BotsPanel(props: Props) {
                                     disabled={
                                       readOnly ||
                                       busy ||
-                                      job.status === "complete"
+                                      job.status === "complete" ||
+                                      !!job.blocked_by?.length
                                     }
                                     onClick={() =>
                                       jobAction({ action: "run", id: job.id })
@@ -832,7 +887,8 @@ export default function BotsPanel(props: Props) {
                       </button>
                       <h3>{result.task}</h3>
                       <p>
-                        {result.workspace?.replace(/^\\\\\?\\/, '')}<br/>
+                        {result.workspace?.replace(/^\\\\\?\\/, "")}
+                        <br />
                         {result.bot_name} · {providerNames[result.provider]} ·{" "}
                         {result.status} · {when(result.started_at)}
                       </p>

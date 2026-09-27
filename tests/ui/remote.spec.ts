@@ -5,7 +5,7 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
   const remote = {
     paired, control, pending: false, failSend: false, revoked: false, sends: [] as string[],
     memory: {root:"C:\\Vault",settings:{enabled:true,capture:"review",budget_bytes:3000},notes:[] as any[],warning:null},
-    board: {revision:0,cards:[] as any[]},
+    board: {revision:0,cards:[] as any[],trash:[] as any[]},
     bots:{profiles:[] as any[],root:'C:\\Bots',warnings:[]},jobs:{enabled:true,jobs:[] as any[],runs:[] as any[],warning:null},
     sessions: [{ provider, options: { model: "", reasoning: "" }, id: "session-one", title: "Review the project", workspace: "C:\\Projects\\VelumCode", running: false, status: "completed", revision: 3 }],
     entries: [
@@ -53,6 +53,9 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
       if(body.action!=="load"&&!control)return answer({error:"View only"},403);
       if(body.action==="save") {remote.board.cards=[...remote.board.cards.filter(c=>c.id!==body.card.id),body.card];remote.board.revision++;}
       if(body.action==="move") {remote.board.cards.find(c=>c.id===body.id).column=body.column;remote.board.revision++;}
+      if(body.action==="delete") {remote.board.trash.unshift({card:remote.board.cards.find(c=>c.id===body.id),deleted_at:Date.now()/1000});remote.board.cards=remote.board.cards.filter(c=>c.id!==body.id);remote.board.revision++;}
+      if(body.action==="restore") {const card=remote.board.trash.find(e=>e.card.id===body.id).card;if(card.assignment)card.assignment.automatic=false;remote.board.cards.push(card);remote.board.trash=remote.board.trash.filter(e=>e.card.id!==body.id);remote.board.revision++;}
+      if(body.action==="purge") {remote.board.trash=remote.board.trash.filter(e=>e.card.id!==body.id);remote.board.revision++;}
       return answer(remote.board);
     }
     if (url.pathname.endsWith("/models")) return answer({ models: [{ id: "phone-model", label: "Phone model", efforts: ["low", "high"], default_effort: "low", description: "Available on your desktop" }], notice: null });
@@ -114,8 +117,34 @@ test("phone Kanban edits shared cards and prepares a draft with accessible touch
 });
 test("view-only phone Kanban cannot mutate cards",async({page})=>{
   const remote=await boot(page,true,false);remote.board.cards=[{id:"one",title:"Read only",description:"",column:"backlog",priority:"normal"}];
+  remote.board.trash=[{card:{id:"deleted",title:"Archived task",description:"",column:"backlog",priority:"normal"},deleted_at:Date.now()/1000}];
   await expect(page.locator(".phone-online")).toBeVisible();await page.getByRole("button",{name:"Kanban",exact:true}).click();
   await expect(page.getByRole("button",{name:"Add task to Backlog",exact:true})).toBeDisabled();await expect(page.getByLabel("Move Read only",{exact:true})).toBeDisabled();await expect(page.getByRole("button",{name:"Work on this",exact:false})).toHaveCount(0);
+  await page.getByRole("button",{name:/Trash 1/}).click();
+  await expect(page.getByRole("button",{name:"Restore Archived task"})).toBeDisabled();
+  await expect(page.getByRole("button",{name:"Delete permanently",exact:true})).toHaveCount(0);
+});
+test("phone planning fits touch screens and restoration leaves automatic work off",async({page})=>{
+  const remote=await boot(page);
+  remote.board.cards=[{id:"first",title:"Build the endpoint",description:"Acceptance criteria",column:"backlog",priority:"normal"},{id:"second",title:"Verify the endpoint",description:"Regression checks",column:"review",priority:"high",due_date:"2020-01-01",dependencies:["first"],assignment:{bot_id:"bot",cron:"*/15 * * * *",timezone:"UTC",automatic:true}}];
+  await expect(page.locator(".phone-online")).toBeVisible();await page.getByRole("button",{name:"Kanban",exact:true}).click();
+  await page.getByRole("button",{name:/Needs attention/}).click();
+  await expect(page.locator(".kanban-card")).toHaveCount(1);
+  await expect(page.getByRole("button",{name:/Work on this/})).toBeDisabled();
+  await page.screenshot({path:".qa/planning-phone.png",animations:"disabled"});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  expect((await new AxeBuilder({page}).include(".kanban-panel").analyze()).violations).toEqual([]);
+  await page.getByRole("button",{name:"Verify the endpoint",exact:true}).click();
+  await expect(page.getByLabel("Due date")).toHaveValue("2020-01-01");
+  await expect(page.getByRole("checkbox",{name:/Build the endpoint/})).toBeChecked();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  expect((await new AxeBuilder({page}).include(".kanban-panel").analyze()).violations).toEqual([]);
+  await page.getByRole("button",{name:"Delete task",exact:true}).click();
+  await page.getByRole("button",{name:"Move to Trash",exact:true}).click();
+  await page.getByRole("button",{name:/Trash 1/}).click();
+  await page.getByRole("button",{name:"Restore Verify the endpoint",exact:true}).click();
+  expect(remote.board.cards.find(c=>c.id==="second").assignment.automatic).toBe(false);
+  expect(remote.sends).toEqual([]);
 });
 test("revoking a phone closes its open Kanban and removes task details",async({page})=>{
   const remote=await boot(page);remote.board.cards=[{id:"one",title:"Private board task",description:"Project context",column:"backlog",priority:"normal"}];

@@ -77,7 +77,7 @@ Jobs run while Windows is awake and Velum is open or in the tray. Review/Done ta
 
 1. Open [Windows CI](https://github.com/velumix/VelumCode/actions/workflows/windows.yml) and choose the latest successful run.
 2. Download **VelumCode-windows-x64** from **Artifacts** and extract the ZIP.
-3. Run **Velum Code_0.5.0_x64-setup.exe**, then launch **Velum Code** from your desktop or Start menu.
+3. Run **Velum Code_0.6.0_x64-setup.exe**, then launch **Velum Code** from your desktop or Start menu.
 
 CI artifacts require a GitHub sign-in and are retained for 14 days. These are unsigned development builds. Install the bundle so Windows can register the app's notification identity and click handler.
 
@@ -194,7 +194,7 @@ Open **Kanban** on desktop or phone. Each workspace has its own board with **Bac
 
 Boards save to your desktop after every change and survive restarts. Refresh to pick up edits from another screen; stale edits are caught before they overwrite newer work. View-only phones can browse boards. **Work on this** prepares an agent draft with the task details—on desktop, in a new conversation using your selected provider and model. You choose when to send it.
 
-The board loads only when opened, supports up to 300 cards per workspace, and makes no AI requests. [Board details](docs/kanban.md).
+Plan with due dates and prerequisites, review **Needs attention**, and recover deleted cards from **Trash**. Assigned bots wait for prerequisites to finish. Boards support up to 300 active cards per workspace; opening and organizing them makes no AI requests. [Board details](docs/kanban.md).
 
 <p align="center"><a href="docs/images/kanban-desktop.png"><img src="docs/images/kanban-desktop.png" alt="Velum Code workspace Kanban board with task priorities and agent draft actions" width="900" /></a><br /><sub>One board per workspace. <a href="docs/images/kanban-phone.png">See the phone view.</a></sub></p>
 
@@ -266,7 +266,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Build
 
 The app uses **Tauri 2 + Rust**, **React 19 + TypeScript**, and **xterm.js over Windows ConPTY**. Chat translates each CLI’s structured output into shared messages, tool cards and turn status. Tray lifetime and notification delivery run in the native backend.
 
-See the [development guide](docs/development.md) for tests, native smoke checks, installer commands, and the project layout. The [0.5.0 QA report](docs/qa-0.5.0.md) records bot and scheduling verification; the [brand notes](docs/brand.md) cover the logo and assets.
+See the [development guide](docs/development.md) for tests, native smoke checks, installer commands, and the project layout. The [0.6.0 QA report](docs/qa-0.6.0.md) records task planning and recovery checks; the [0.5.0 report](docs/qa-0.5.0.md) covers bot identity and scheduling. The [brand notes](docs/brand.md) cover the logo and assets.
 
 ## Where it stands
 

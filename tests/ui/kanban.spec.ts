@@ -1,6 +1,52 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { boot } from "./fixture";
+test("planning flags overdue and blocked tasks, then restores deleted prerequisites", async ({page}) => {
+  await boot(page);
+  await page.getByRole("button",{name:"Kanban",exact:true}).click();
+  await add(page,"Build API");
+  await add(page,"Review API","Review");
+  await page.getByRole("button",{name:"Review API",exact:true}).click();
+  await page.getByLabel("Due date").fill("2020-01-01");
+  await page.getByRole("checkbox",{name:/Build API/}).check();
+  await page.getByRole("button",{name:"Save task",exact:true}).click();
+  await page.getByRole("button",{name:/Needs attention/}).click();
+  await expect(page.locator(".kanban-card")).toHaveCount(1);
+  await expect(page.locator(".kanban-card")).toContainText("Overdue");
+  await expect(page.getByRole("button",{name:/Work on this/})).toBeDisabled();
+  await expect(page.getByRole("button",{name:/Mark done/})).toBeDisabled();
+  await page.getByRole("button",{name:"Board",exact:true}).click();
+  await page.getByRole("button",{name:"Build API",exact:true}).click();
+  await page.getByRole("button",{name:"Delete task",exact:true}).click();
+  await page.getByRole("button",{name:"Move to Trash",exact:true}).click();
+  await page.getByRole("button",{name:/Trash 1/}).click();
+  await expect(page.getByText("Restoring keeps their details",{exact:false})).toBeVisible();
+  await page.getByRole("button",{name:"Restore Build API",exact:true}).click();
+  await page.getByRole("button",{name:"Board",exact:true}).click();
+  await page.getByLabel("Move Build API",{exact:true}).selectOption("done");
+  await page.getByRole("button",{name:/Needs attention/}).click();
+  await expect(page.getByRole("button",{name:/Mark done/})).toBeEnabled();
+  await page.getByRole("button",{name:/Mark done/}).click();
+  await expect(page.getByText("Nothing needs attention right now.")).toBeVisible();
+  expect((await new AxeBuilder({page}).include(".kanban-panel").analyze()).violations).toEqual([]);
+});
+test("Trash survives reopening and requires confirmation for permanent deletion",async({page})=>{
+  await boot(page);await page.getByRole("button",{name:"Kanban",exact:true}).click();
+  await add(page,"Recoverable task");
+  await page.getByRole("button",{name:"Recoverable task",exact:true}).click();
+  await page.getByRole("button",{name:"Delete task",exact:true}).click();
+  await page.getByRole("button",{name:"Move to Trash",exact:true}).click();
+  await page.getByRole("button",{name:"Close Kanban"}).click();await page.reload();
+  await page.getByRole("button",{name:"Kanban",exact:true}).click();
+  await page.getByRole("button",{name:/Trash 1/}).click();
+  await expect(page.getByRole("heading",{name:"Recoverable task"})).toBeVisible();
+  await page.getByRole("button",{name:"Delete permanently",exact:true}).click();
+  await page.getByRole("button",{name:"Keep in Trash",exact:true}).click();
+  await expect(page.getByRole("heading",{name:"Recoverable task"})).toBeVisible();
+  await page.getByRole("button",{name:"Delete permanently",exact:true}).click();
+  await page.getByRole("button",{name:"Confirm permanent deletion",exact:true}).click();
+  await expect(page.getByText("Trash is empty.")).toBeVisible();
+});
 async function add(page: Page, title: string, column = "Backlog") {
   await page
     .getByRole("button", { name: `Add task to ${column}`, exact: true })
@@ -70,7 +116,7 @@ test("Kanban creates, edits, moves, reorders, searches and persists tasks", asyn
     .getByRole("button", { name: "Fix reconnect", exact: true })
     .click();
   await page.getByRole("button", { name: "Delete task", exact: true }).click();
-  await page.getByRole("button", { name: "Delete permanently" }).click();
+  await page.getByRole("button", { name: "Move to Trash", exact:true }).click();
   await expect(page.locator(".kanban-card")).toHaveCount(1);
 });
 test("Kanban preserves unsaved edits through a conflict and protects dismissal", async ({

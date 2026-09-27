@@ -50,6 +50,12 @@ pub struct Job {
     pub workspace: String,
     pub card_id: String,
     pub title: String,
+    #[serde(default)]
+    pub blocked_by: Vec<String>,
+    #[serde(default)]
+    pub due_date: Option<String>,
+    #[serde(default)]
+    pub priority: String,
     pub assignment: Assignment,
     pub next_run: u64,
     pub paused: bool,
@@ -253,6 +259,9 @@ impl Store {
                     existing.iter().any(|j| {
                         j.card_id == c.id
                             && j.title == c.title
+                            && j.blocked_by == kanban::blockers(board, c)
+                            && j.due_date == c.due_date
+                            && j.priority == c.priority
                             && j.assignment == **a
                             && (if c.column == "done" || c.column == "review" {
                                 j.status == "complete"
@@ -272,6 +281,7 @@ impl Store {
             for (card, assignment) in desired {
                 let id = key(&workspace, &card.id);
                 let complete = card.column == "done" || card.column == "review";
+                let blocked_by = kanban::blockers(board, card);
                 if let Some(job) = s.jobs.iter_mut().find(|j| j.id == id) {
                     if job.assignment != *assignment || job.status == "complete" && !complete {
                         job.assignment = assignment.clone();
@@ -289,8 +299,20 @@ impl Store {
                         .into();
                     }
                     job.title = card.title.clone();
+                    job.blocked_by = blocked_by;
+                    job.due_date = card.due_date.clone();
+                    job.priority = card.priority.clone();
                     if complete {
                         job.status = "complete".into();
+                    } else if job.status != "running" && !job.blocked_by.is_empty() {
+                        job.status = "waiting".into();
+                    } else if job.status == "waiting" {
+                        job.status = if assignment.automatic {
+                            "scheduled"
+                        } else {
+                            "approval"
+                        }
+                        .into();
                     }
                 } else {
                     if s.jobs.len() >= 500 {
@@ -301,11 +323,16 @@ impl Store {
                         workspace: workspace.clone(),
                         card_id: card.id.clone(),
                         title: card.title.clone(),
+                        blocked_by: blocked_by.clone(),
+                        due_date: card.due_date.clone(),
+                        priority: card.priority.clone(),
                         assignment: assignment.clone(),
                         next_run: next_due(&assignment.cron, &assignment.timezone, now())?,
                         paused: false,
                         status: if complete {
                             "complete"
+                        } else if !blocked_by.is_empty() {
+                            "waiting"
                         } else if assignment.automatic {
                             "scheduled"
                         } else {
@@ -340,18 +367,45 @@ pub fn setup(app: &tauri::AppHandle) {
         .unwrap_or_else(|| app.path().app_config_dir().unwrap());
     app.manage(Store::load(root.join("automation.json")));
     let app = app.clone();
-    std::thread::spawn(move || loop {
-        std::thread::sleep(Duration::from_secs(5));
-        if app.state::<Store>().stopped.load(Ordering::Acquire) {
-            break;
-        }
-        if let Err(e) = tick(&app) {
-            let store = app.state::<Store>();
-            let mut warning = store.warning.lock().unwrap();
-            if warning.as_ref() != Some(&e) {
-                *warning = Some(e);
+    std::thread::spawn(move || {
+        // Reconcile checkpoints once after restart, including a board write that
+        // committed immediately before a crash interrupted its scheduler sync.
+        let workspaces: std::collections::HashSet<_> = app
+            .state::<Store>()
+            .view()
+            .snapshot
+            .jobs
+            .iter()
+            .map(|j| j.workspace.clone())
+            .collect();
+        for workspace in workspaces {
+            let result = app
+                .state::<kanban::Store>()
+                .request(&workspace, kanban::Request::Load {})
+                .and_then(|board| sync(&app, &workspace, &board));
+            if let Err(error) = result {
+                let store = app.state::<Store>();
+                let mut warning = store.warning.lock().unwrap();
+                if warning.is_none() {
+                    *warning = Some(format!("Could not reconcile a task board at startup: {error}. Open and refresh its board before resuming work."));
+                }
                 drop(warning);
                 changed(&app);
+            }
+        }
+        loop {
+            std::thread::sleep(Duration::from_secs(5));
+            if app.state::<Store>().stopped.load(Ordering::Acquire) {
+                break;
+            }
+            if let Err(e) = tick(&app) {
+                let store = app.state::<Store>();
+                let mut warning = store.warning.lock().unwrap();
+                if warning.as_ref() != Some(&e) {
+                    *warning = Some(e);
+                    drop(warning);
+                    changed(&app);
+                }
             }
         }
     });
@@ -388,6 +442,9 @@ fn tick(app: &tauri::AppHandle) -> Result<(), String> {
             {
                 return Err("The task assignment or status changed.".into());
             }
+            if !kanban::blockers(&board, card).is_empty() {
+                return Err("A prerequisite is no longer complete. Review the task dependencies before continuing.".into());
+            }
             if now().saturating_sub(run.started_at) > u64::from(run.max_minutes) * 60 {
                 return Err("The run reached its time limit.".into());
             }
@@ -412,9 +469,29 @@ fn tick(app: &tauri::AppHandle) -> Result<(), String> {
     if !snapshot.enabled {
         return Ok(());
     }
-    for job in snapshot.jobs.iter().filter(|j| {
-        !j.paused && j.assignment.automatic && j.status != "complete" && j.next_run <= now()
-    }) {
+    let mut eligible: Vec<_> = snapshot
+        .jobs
+        .iter()
+        .filter(|j| {
+            !j.paused
+                && j.blocked_by.is_empty()
+                && j.assignment.automatic
+                && j.status != "complete"
+                && j.next_run <= now()
+        })
+        .collect();
+    eligible.sort_by_key(|j| {
+        (
+            j.due_date.as_deref().unwrap_or("9999-12-31"),
+            match j.priority.as_str() {
+                "high" => 0,
+                "low" => 2,
+                _ => 1,
+            },
+            j.next_run,
+        )
+    });
+    for job in eligible {
         if app
             .state::<crate::runner::AgentState>()
             .workspace_busy(&job.workspace)
@@ -431,8 +508,18 @@ fn tick(app: &tauri::AppHandle) -> Result<(), String> {
                 Ok(())
             })?;
             changed(app);
+            break;
         }
-        break;
+        if app
+            .state::<Store>()
+            .view()
+            .snapshot
+            .runs
+            .iter()
+            .any(|r| r.status == "running")
+        {
+            break;
+        }
     }
     Ok(())
 }
@@ -460,6 +547,19 @@ fn start(app: &tauri::AppHandle, id: &str, manual: bool) -> Result<(), String> {
     {
         store.sync(&job.workspace, &board)?;
         return Ok(());
+    }
+    let blocked_by = kanban::blockers(&board, card);
+    if !blocked_by.is_empty() {
+        store.sync(&job.workspace, &board)?;
+        changed(app);
+        return if manual {
+            Err(format!(
+                "Complete these prerequisites first: {}",
+                blocked_by.join("; ")
+            ))
+        } else {
+            Ok(())
+        };
     }
     let profile = app.state::<bots::Store>().get(&job.assignment.bot_id)?;
     if !profile.enabled {
@@ -495,6 +595,8 @@ fn start(app: &tauri::AppHandle, id: &str, manual: bool) -> Result<(), String> {
             .find(|j| j.id == id)
             .ok_or("Task was removed.")?;
         if live.assignment != job.assignment
+            || !live.blocked_by.is_empty()
+            || live.status == "complete"
             || (!manual
                 && (!s.enabled
                     || live.paused
@@ -670,7 +772,23 @@ pub fn finish(
                         .as_ref()
                         .is_some_and(|a| a.bot_id == run.bot_id)
             }) {
-                if card.column == "backlog" || card.column == "progress" {
+                if !kanban::blockers(&board, card).is_empty() {
+                    // A short run can finish before the next scheduler tick notices
+                    // a reopened prerequisite. Keep the card blocked in that case.
+                    store.sync(&job.workspace, &board)?;
+                    store.edit(|s| {
+                        let detail = "A prerequisite changed during this run. Review its result and the task dependencies before continuing.";
+                        if let Some(j) = s.jobs.iter_mut().find(|j| j.id == run.job_id) {
+                            j.paused = true;
+                            j.last_error = detail.into();
+                        }
+                        if let Some(r) = s.runs.iter_mut().find(|r| r.id == run.id) {
+                            r.status = "review".into();
+                            r.detail = detail.into();
+                        }
+                        Ok(())
+                    })?;
+                } else if card.column == "backlog" || card.column == "progress" {
                     // An action sets last_summary; no action means ask the user to review.
                     if card.last_run.as_deref() != Some(session_id) {
                         let updated = app.state::<kanban::Store>().request(
@@ -812,6 +930,7 @@ mod tests {
             }),
             last_summary: String::new(),
             last_run: None,
+            ..Default::default()
         }
     }
     #[test]
@@ -851,6 +970,7 @@ mod tests {
         let store = Store::load(root.join("automation.json"));
         let workspace = root.display().to_string();
         let mut board = kanban::Board {
+            trash: vec![],
             revision: 1,
             cards: vec![card()],
         };
@@ -891,6 +1011,7 @@ mod tests {
             .sync(
                 &root.display().to_string(),
                 &kanban::Board {
+                    trash: vec![],
                     revision: 0,
                     cards: vec![card()],
                 },
@@ -948,6 +1069,60 @@ mod tests {
             })
             .is_err());
         assert!(store.view().snapshot.enabled);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn prerequisites_wait_until_done_and_never_clear_a_manual_pause() {
+        let root = temp();
+        let store = Store::load(root.join("automation.json"));
+        let workspace = root.to_str().unwrap();
+        let mut prerequisite = card();
+        prerequisite.assignment = None;
+        let mut dependent = card();
+        dependent.dependencies.push(prerequisite.id.clone());
+        dependent.due_date = Some("2027-01-01".into());
+        dependent.priority = "high".into();
+        let mut board = kanban::Board {
+            cards: vec![prerequisite, dependent],
+            ..Default::default()
+        };
+        store.sync(workspace, &board).unwrap();
+        let job = store.view().snapshot.jobs.remove(0);
+        assert_eq!(job.status, "waiting");
+        assert_eq!(job.blocked_by.len(), 1);
+        assert_eq!(job.priority, "high");
+        assert_eq!(job.due_date.as_deref(), Some("2027-01-01"));
+        board.cards[0].column = "review".into();
+        store.sync(workspace, &board).unwrap();
+        assert_eq!(
+            store.view().snapshot.jobs[0].status,
+            "waiting",
+            "Review is not Done"
+        );
+        store
+            .edit(|s| {
+                s.jobs[0].paused = true;
+                Ok(())
+            })
+            .unwrap();
+        board.cards[0].column = "done".into();
+        store.sync(workspace, &board).unwrap();
+        let job = store.view().snapshot.jobs.remove(0);
+        assert_eq!(job.status, "scheduled");
+        assert!(job.blocked_by.is_empty());
+        assert!(job.paused);
+        board.cards[0].column = "backlog".into();
+        store.sync(workspace, &board).unwrap();
+        assert_eq!(store.view().snapshot.jobs[0].status, "waiting");
+        board.cards.remove(0);
+        store.sync(workspace, &board).unwrap();
+        let job = store.view().snapshot.jobs.remove(0);
+        assert!(job.blocked_by[0].contains("Deleted prerequisite"));
+        assert!(job.paused);
+        board.cards[0].dependencies.clear();
+        board.cards[0].assignment.as_mut().unwrap().automatic = false;
+        store.sync(workspace, &board).unwrap();
+        assert_eq!(store.view().snapshot.jobs[0].status, "approval");
         fs::remove_dir_all(root).unwrap();
     }
 }

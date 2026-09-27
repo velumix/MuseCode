@@ -1299,6 +1299,16 @@ mod tests {
                 StatusCode::FORBIDDEN,
             ),
             (
+                json!({"action":"restore","id":"card","revision":0}),
+                Some(token.as_str()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                json!({"action":"purge","id":"card","revision":0}),
+                Some(token.as_str()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
                 json!({"action":"move","id":"card","column":"done","before":null,"revision":0}),
                 Some(token.as_str()),
                 StatusCode::FORBIDDEN,

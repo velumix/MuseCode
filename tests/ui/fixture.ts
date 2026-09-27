@@ -87,10 +87,13 @@ export async function boot(page: Page, delay = 0) {
             const key = `qa-board:${args.workspace}`;
             const board = JSON.parse(localStorage.getItem(key) || '{"revision":0,"cards":[]}');
             const q = args.request;
+            board.trash ||= [];
             if(q.action !== "load") {
               if(api.boardConflict || board.revision !== q.revision) throw "This board changed on another screen. Refresh the board before trying again. Your unsaved card is still here.";
               if(q.action === "save") { const index=board.cards.findIndex((c:any)=>c.id===q.card.id);if(index<0)board.cards.push(q.card);else board.cards[index]=q.card; }
-              if(q.action === "delete")board.cards=board.cards.filter((c:any)=>c.id!==q.id);
+              if(q.action === "delete") {board.trash.unshift({card:board.cards.find((c:any)=>c.id===q.id),deleted_at:Date.now()/1000});board.cards=board.cards.filter((c:any)=>c.id!==q.id);}
+              if(q.action === "restore") {const card=board.trash.find((e:any)=>e.card.id===q.id).card;if(card.assignment)card.assignment.automatic=false;card.last_run=null;board.cards.push(card);board.trash=board.trash.filter((e:any)=>e.card.id!==q.id);}
+              if(q.action === "purge")board.trash=board.trash.filter((e:any)=>e.card.id!==q.id);
               if(q.action === "move") {const c=board.cards.find((c:any)=>c.id===q.id);board.cards=board.cards.filter((c:any)=>c.id!==q.id);c.column=q.column;const i=q.before?board.cards.findIndex((c:any)=>c.id===q.before):board.cards.length;board.cards.splice(i,0,c);}
               board.revision++;localStorage.setItem(key,JSON.stringify(board));
             }

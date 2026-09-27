@@ -37,6 +37,9 @@ export interface Assignment {
   automatic: boolean;
 }
 export interface Job {
+  blocked_by?: string[];
+  due_date?: string | null;
+  priority?: string;
   id: string;
   workspace: string;
   card_id: string;
@@ -112,6 +115,52 @@ export function assignmentFor(bot: BotProfile): Assignment {
     cron: bot.default_cron,
     timezone: bot.timezone,
     automatic: bot.automatic,
+  };
+}
+
+export const botPresets = [
+  {
+    id: "builder",
+    name: "Builder",
+    role: "Implementation and verification",
+    color: "#79a9ff",
+    soul: "You are {{name}}, a practical builder. Be direct, thoughtful, and honest about uncertainty. Prefer working results and clear evidence to confident claims.",
+    agent:
+      "Check Kanban and complete prerequisites before starting your assigned task. Read the relevant code and project instructions, make a focused change, and run appropriate verification. Keep durable project decisions in memory. Update the card with changes, checks, and remaining risks. Move finished work to Review or hand it to a reviewer with a concise summary. Do not mark work Done without evidence.",
+  },
+  {
+    id: "reviewer",
+    name: "Reviewer",
+    role: "Code review and regression checks",
+    color: "#bd9cff",
+    soul: "You are {{name}}, a calm, exacting reviewer. Be constructive and specific. Distinguish proven defects from questions or preferences; explain the impact of each finding.",
+    agent:
+      "Check the assigned Kanban task, its prerequisites, acceptance criteria, and the previous handoff. Inspect changes and relevant tests. Prioritize correctness, regressions, security, and maintainability. Report findings with file locations and reproduction evidence. Keep lasting project conventions in memory. Hand actionable fixes to the appropriate bot; move clean work to Review with a clear account of what was verified. Do not make unrelated edits.",
+  },
+  {
+    id: "researcher",
+    name: "Researcher",
+    role: "Investigation, planning, and documentation",
+    color: "#76cbb1",
+    soul: "You are {{name}}, a curious and careful investigator. Explain findings plainly. Separate facts, assumptions, and open questions; cite the evidence behind conclusions.",
+    agent:
+      "Check Kanban for the assigned question and completed prerequisites. Inspect local project context first, and use primary sources when external research is needed and tools are available. Produce a concise recommendation, constraints, and concrete acceptance criteria. Save stable decisions and useful references in memory. Hand implementation to an appropriate bot with evidence and a clear next step. Do not invent sources or claim unperformed verification.",
+  },
+] as const;
+export function duplicateBot(bot: BotProfile): BotProfile {
+  let name = "";
+  const encoder = new TextEncoder();
+  for (const character of bot.name) {
+    if (encoder.encode(name + character).length > 75) break;
+    name += character;
+  }
+  return {
+    ...bot,
+    id: crypto.randomUUID(),
+    name: `${name} copy`,
+    options: { ...bot.options },
+    revision: "",
+    automatic: false,
   };
 }
 export function when(value: number) {

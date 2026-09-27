@@ -1,6 +1,44 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { boot } from "./fixture";
+import {duplicateBot, newBot} from "../../src/bots";
+test("duplicate names respect the native UTF-8 limit without splitting characters",()=>{
+  const profile=newBot("muse",{model:"test",reasoning:"high"});
+  profile.name="機器人🦉".repeat(5);
+  const copy=duplicateBot(profile);
+  expect(new TextEncoder().encode(copy.name).length).toBeLessThanOrEqual(80);
+  expect(copy.name).toMatch(/ copy$/);expect(copy.name).not.toContain("\ufffd");
+  expect(copy.id).not.toBe(profile.id);expect(copy.automatic).toBe(false);
+});
+test("bot presets retain provider choices and duplicates have fresh private memory",async({page})=>{
+  await boot(page);await create(page,"Custom builder");
+  await page.getByLabel("Bot preferred provider").selectOption("codex");
+  await page.getByText("Start with a preset",{exact:true}).click();
+  await page.getByRole("button",{name:/^Reviewer Code review/}).click();
+  await expect(page.getByLabel("Bot preferred provider")).toHaveValue("codex");
+  await expect(page.getByLabel("Bot name",{exact:true})).toHaveValue("Custom builder");
+  await page.getByRole("button",{name:"Personality & instructions",exact:true}).click();
+  await expect(page.getByLabel("soul.md",{exact:true})).toHaveValue(/calm, exacting reviewer/);
+  await expect(page.getByLabel("agent.md",{exact:true})).toHaveValue(/reproduction evidence/);
+  await page.getByRole("button",{name:"Save bot",exact:true}).click();
+  const original=page.locator(".bot-card").filter({has:page.getByRole("heading",{name:"Custom builder",exact:true})});
+  await original.getByRole("button",{name:"Memory",exact:true}).click();
+  await page.getByRole("button",{name:"New note",exact:true}).click();
+  await page.getByLabel("Memory title",{exact:true}).fill("Only for the original");
+  await page.getByLabel("Memory note",{exact:true}).fill("Private context");
+  await page.getByRole("button",{name:"Save note",exact:true}).click();
+  await page.getByRole("button",{name:"Close memory"}).click();
+  await original.getByRole("button",{name:"Duplicate",exact:true}).click();
+  await expect(page.getByLabel("Bot name",{exact:true})).toHaveValue("Custom builder copy");
+  await page.getByRole("button",{name:"Save bot",exact:true}).click();
+  const copy=page.locator(".bot-card").filter({hasText:"Custom builder copy"});
+  await copy.getByRole("button",{name:"Memory",exact:true}).click();
+  await expect(page.getByText("Only for the original",{exact:true})).toHaveCount(0);
+  await page.getByRole("button",{name:"Close memory"}).click();
+  const profiles=await page.evaluate(()=>JSON.parse(localStorage.getItem("qa-bots")!));
+  expect(profiles).toHaveLength(2);expect(profiles[0].id).not.toBe(profiles[1].id);
+  expect(profiles[1]).toMatchObject({provider:"codex",automatic:false,soul:profiles[0].soul,agent:profiles[0].agent,options:profiles[0].options});
+});
 test('scheduled-work notification opens bot activity',async({page})=>{
   await boot(page);
   await page.evaluate(()=>{const q=(window as any).qa;q.pendingNavigation='bot-run-00000000-0000-4000-8000-000000000000';q.emit('desktop-navigation',null);});

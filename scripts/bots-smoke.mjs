@@ -257,6 +257,50 @@ try {
   console.log(
     "PASS: soul.md/agent.md identity across all three providers; isolated private recall, pending capture and combined memory budget",
   );
+  const prerequisite=await card(grok,"Planning prerequisite");
+  const dependent=await card(grok,"Planning dependent");
+  let planningBoard=await board();
+  await invoke("kanban_request",{workspace,request:{action:"save",revision:planningBoard.revision,card:{...dependent,dependencies:[prerequisite.id],due_date:"2027-01-01",priority:"high"}}});
+  const waiting=await jobFor(dependent);
+  assert.equal(waiting.status,"waiting");assert.deepEqual(waiting.blocked_by,[prerequisite.title]);
+  const callsBeforeBlockedRun=records().length;
+  await assert.rejects(request({action:"run",id:waiting.id}),/Complete these prerequisites first/);
+  assert.equal(records().length,callsBeforeBlockedRun,"A blocked run launched the provider");
+  await manual(grok,"muse",`Check task\nTask ID: ${dependent.id}`);
+  assert.equal((await board()).cards.find(c=>c.id===dependent.id).column,"backlog","An interactive bot progressed a blocked task");
+  planningBoard=await board();
+  await invoke("kanban_request",{workspace,request:{action:"move",revision:planningBoard.revision,id:prerequisite.id,column:"done",before:null}});
+  assert.equal((await jobFor(dependent)).status,"approval");
+  await request({action:"run",id:waiting.id});
+  await expect.poll(async()=> (await request({action:"list"})).runs.find(r=>r.job_id===waiting.id)?.status,{timeout:12000}).toBe("completed");
+  assert(records().at(-1).input.includes('"due_date":"2027-01-01"'));
+  assert(records().at(-1).input.includes('"prerequisites"'));
+  planningBoard=await board();
+  await invoke("kanban_request",{workspace,request:{action:"delete",revision:planningBoard.revision,id:prerequisite.id}});
+  assert((await jobFor(dependent)).blocked_by[0].includes("Deleted prerequisite"));
+  planningBoard=await board();
+  await invoke("kanban_request",{workspace,request:{action:"restore",revision:planningBoard.revision,id:prerequisite.id}});
+  assert.deepEqual((await jobFor(dependent)).blocked_by,[]);
+  for(const c of [dependent,prerequisite]) {
+    planningBoard=await board();
+    await invoke("kanban_request",{workspace,request:{action:"delete",revision:planningBoard.revision,id:c.id}});
+  }
+  console.log("PASS: native prerequisites block manual provider launches, Done unblocks work, due dates reach context, deleted prerequisites remain blocking and Trash restores them");
+  const changedPrerequisite=await card(grok,"Changing prerequisite");
+  planningBoard=await board();
+  await invoke("kanban_request",{workspace,request:{action:"move",revision:planningBoard.revision,id:changedPrerequisite.id,column:"done",before:null}});
+  const shortRun=await card(grok,"BOT_STALE BOT_NO_ACTION dependency changed");
+  planningBoard=await board();
+  await invoke("kanban_request",{workspace,request:{action:"save",revision:planningBoard.revision,card:{...shortRun,dependencies:[changedPrerequisite.id]}}});
+  const shortJob=await jobFor(shortRun);
+  await request({action:"run",id:shortJob.id});
+  await expect.poll(()=>records().some(r=>r.prompt.includes(shortRun.title))).toBe(true);
+  planningBoard=await board();
+  await invoke("kanban_request",{workspace,request:{action:"move",revision:planningBoard.revision,id:changedPrerequisite.id,column:"backlog",before:null}});
+  await expect.poll(async()=> (await request({action:"list"})).runs.find(r=>r.job_id===shortJob.id)?.status,{timeout:12000}).toMatch(/review|cancelled/);
+  assert.equal((await board()).cards.find(c=>c.id===shortRun.id).column,"backlog");
+  assert((await jobFor(shortRun)).paused);
+  console.log("PASS: a prerequisite changed during a short run cannot advance the task through the no-action fallback");
   const chain = await card(grok, "BOT_CHAIN handoff", true);
   const first = await jobFor(chain);
   await request({ action: "run", id: first.id });
@@ -383,6 +427,24 @@ try {
     ),
     "Background runs accumulated conversation checkpoints",
   );
+  await request({action:"configure",enabled:false});
+  const ordered=[];
+  for(const [title,due_date,priority] of [["Order late high","2027-01-02","high"],["Order early low","2027-01-01","low"],["Order early high","2027-01-01","high"]]) {
+    const c=await card(grok,title,true);ordered.push(c);
+    const current=await board();await invoke("kanban_request",{workspace,request:{action:"save",revision:current.revision,card:{...c,due_date,priority}}});
+  }
+  await quit();
+  // An isolated checkpoint makes all three jobs eligible without waiting for cron.
+  const checkpointPath=path.join(config,"automation.json"),checkpoint=JSON.parse(readFileSync(checkpointPath,"utf8"));
+  checkpoint.enabled=true;
+  for(const job of checkpoint.jobs)if(ordered.some(c=>c.id===job.card_id))job.next_run=1;
+  writeFileSync(checkpointPath,JSON.stringify(checkpoint));
+  await start();
+  await expect.poll(()=>records().filter(r=>r.prompt.includes("Work on your assigned Kanban task: Order ")).length,{timeout:25000}).toBe(3);
+  const order=records().filter(r=>r.prompt.includes("Work on your assigned Kanban task: Order ")).map(r=>r.prompt.match(/Work on your assigned Kanban task: (.*)/)[1]);
+  assert.deepEqual(order,["Order early high","Order early low","Order late high"]);
+  await expect.poll(async()=> (await request({action:"list"})).runs.filter(r=>r.status==="running").length).toBe(0);
+  console.log("PASS: automatic runs honor due date, then priority, across a restart");
   // Exercise the actual desktop profile UI and capture it with native data.
   await page.getByRole("button", { name: "Bots", exact: true }).click();
   await expect(page.locator(".bot-card")).toHaveCount(3);

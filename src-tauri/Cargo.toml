@@ -1,6 +1,6 @@
 [package]
 name = "velum-code"
-version = "0.5.0"
+version = "0.6.0"
 description = "Velum Code — a desktop home for Muse, Codex and Antigravity"
 authors = ["velumix"]
 edition = "2021"

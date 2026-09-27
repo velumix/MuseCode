@@ -1,3 +1,41 @@
+.bot-presets {
+  border: 1px solid #3b4a60;
+  background: #172030;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.bot-presets summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.bot-presets > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+.bot-presets button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  gap: 5px;
+  padding: 12px;
+}
+.bot-presets small {
+  color: #bac8dd;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.bot-waiting {
+  padding: 10px;
+  border: 1px solid #6d5934;
+  border-radius: 8px;
+  background: #302a20;
+  color: #f4d9a0;
+  font-size: 12px;
+  line-height: 1.6;
+}
 .bots-overlay {
   position: fixed;
   inset: 0;
