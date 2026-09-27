@@ -4,11 +4,18 @@ const { spawn } = require("node:child_process");
 const args = process.argv.slice(2);
 const log = (entry) => fs.appendFileSync(process.env.MUSE_QA_LOG, JSON.stringify({ pid: process.pid, ...entry }) + "\n");
 const record = (type, payload) => console.log(JSON.stringify({ payload_type: type, payload }));
-if (args[0] === "--descendant") {
+if (args[0] === "serve") {
+  require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {
+    const request = JSON.parse(line);
+    if (request.id === undefined) return;
+    const result = request.method === "model/list" ? { models: [{ modelId: "fixture-muse", displayLabel: "Fixture Muse", variants: ["low", "high", "max"] }, { modelId: "fixture-muse-fast", displayLabel: "Fixture Muse Fast", variants: ["low"] }] } : {};
+    console.log(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }));
+  });
+} else if (args[0] === "--descendant") {
   log({ kind: "descendant" });
   setInterval(() => {}, 1000);
 } else if (args[0] !== "exec") {
-  log({ kind: "terminal", cwd: process.cwd() });
+  log({ kind: "terminal", cwd: process.cwd(), args });
   process.stdout.write("Muse QA terminal\r\nsearch target\r\n");
   process.stdin.on("data", (chunk) => process.stdout.write(chunk));
   setInterval(() => {}, 1000);

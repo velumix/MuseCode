@@ -4,8 +4,16 @@ const { spawn } = require("node:child_process");
 const provider = process.argv[2];
 const args = process.argv.slice(3);
 const log = (entry) => fs.appendFileSync(process.env.MUSE_QA_LOG, JSON.stringify({ provider, pid: process.pid, ...entry }) + "\n");
-if (provider === "antigravity" && args[0] === "models") {
+if (provider === "codex" && args[0] === "app-server") {
+  require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {
+    const request = JSON.parse(line);
+    if (request.id === undefined) return;
+    const result = request.method === "model/list" ? { data: [{ model: "fixture-codex", displayName: "Fixture Codex", supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "high" }], defaultReasoningEffort: "high" }], nextCursor: null } : {};
+    console.log(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }));
+  });
+} else if (provider === "antigravity" && args[0] === "models") {
   process.exitCode = fs.existsSync(process.env.MUSE_QA_LOG + ".auth") ? 0 : 1;
+  if (!process.exitCode) console.log("fixture-agy-high    Fixture Antigravity (High)\nfixture-agy-low    Fixture Antigravity (Low)");
 } else if (provider === "antigravity" && args.includes("--log-file")) {
   log({ kind: "auth" });
   let selected = false;
@@ -27,7 +35,7 @@ if (provider === "antigravity" && args[0] === "models") {
 } else if (args[0] === "--descendant") {
   log({ kind: "descendant" }); setInterval(() => {}, 1000);
 } else if (!args.includes("exec") && !args.includes("--input-format")) {
-  log({ kind: "terminal", cwd: process.cwd() });
+  log({ kind: "terminal", cwd: process.cwd(), args });
   process.stdout.write(`${provider} QA terminal\r\n`);
   process.stdin.on("data", (chunk) => process.stdout.write(chunk));
   setInterval(() => {}, 1000);

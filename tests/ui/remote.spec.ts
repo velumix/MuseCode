@@ -4,7 +4,7 @@ import AxeBuilder from "@axe-core/playwright";
 async function boot(page: Page, paired = true, control = true, provider = "muse") {
   const remote = {
     paired, control, pending: false, failSend: false, revoked: false, sends: [] as string[],
-    sessions: [{ provider, id: "session-one", title: "Review the project", workspace: "C:\\Projects\\VelumCode", running: false, status: "completed", revision: 3 }],
+    sessions: [{ provider, options: { model: "", reasoning: "" }, id: "session-one", title: "Review the project", workspace: "C:\\Projects\\VelumCode", running: false, status: "completed", revision: 3 }],
     entries: [
       { seq: 1, event: { kind: "turn_start", prompt: "Review the project", remote: false } },
       { seq: 2, event: { kind: "assistant_delta", text: "**Review complete.**\n\n```ts\nconst connected = true;\n```\n\n[Documentation](https://example.com)" } },
@@ -32,6 +32,12 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
     if (!remote.paired || remote.revoked) return answer({ error: "Pair again" }, 401);
     if (url.pathname === "/api/me") return answer({ device: { id: "phone", name: "My phone", control }, computer: "desktop.tail.ts.net" });
     if (url.pathname === "/api/sessions") return answer({ sessions: remote.sessions });
+    if (url.pathname.endsWith("/models")) return answer({ models: [{ id: "phone-model", label: "Phone model", efforts: ["low", "high"], default_effort: "low", description: "Available on your desktop" }], notice: null });
+    if (url.pathname.endsWith("/options")) {
+      expect(request.headers()["x-muse-request"]).toBe("1");
+      if (!remote.control || remote.sessions[0].running) return answer({ error: "Cannot change options now." }, 403);
+      remote.sessions[0].options = body; return answer({ ok: true });
+    }
     if (url.pathname.endsWith("/send")) {
       expect(request.headers()["x-muse-request"]).toBe("1");
       if (remote.failSend) return answer({ error: "Desktop could not start the task." }, 409);
@@ -52,6 +58,30 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
   await page.goto(`/remote.html${paired ? "" : "#pair=one-use-test-invitation"}`);
   return remote;
 }
+
+test("phone model choices update the session without losing the draft", async ({ page }) => {
+  const remote = await boot(page);
+  await expect(page.locator(".phone-online")).toBeVisible();
+  await page.getByLabel("Message your desktop agent").fill("Keep this phone draft");
+  await page.getByRole("button", { name: "Model: CLI default", exact: true }).click();
+  await page.getByRole("option", { name: /^Phone model/ }).click();
+  await page.getByRole("button", { name: "Reasoning: Default", exact: true }).click();
+  await page.getByRole("option", { name: /^High/ }).click();
+  await expect(page.getByRole("button", { name: "Reasoning: High", exact: true })).toBeVisible();
+  expect(remote.sessions[0].options).toEqual({ model: "phone-model", reasoning: "high" });
+  await expect(page.getByLabel("Message your desktop agent")).toHaveValue("Keep this phone draft");
+  await expect(page.locator(".md strong")).toHaveText("Review complete.");
+  await page.screenshot({ path: ".qa/phone-model-controls.png", animations: "disabled" });
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByRole("button", { name: "Model: Phone model", exact: true })).toBeDisabled();
+});
+
+test("view-only phones cannot edit model settings", async ({ page }) => {
+  await boot(page, true, false);
+  await expect(page.locator(".phone-online")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Model: CLI default", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Reasoning: Default", exact: true })).toBeDisabled();
+});
 
 test("phone pairs with a matching code and waits for desktop approval", async ({ page }) => {
   const remote = await boot(page, false);

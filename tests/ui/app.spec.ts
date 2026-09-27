@@ -32,6 +32,12 @@ async function boot(page: Page, delay = 0) {
       unregisterCallback(id: number) { callbacks.delete(id); },
       async invoke(cmd: string, args: any = {}) {
         api.calls.push({ cmd, args });
+        if (cmd === "provider_models") return api.failModels ? { models: [], notice: "Sign in to load models." } : { models: [
+          { id: `${args.provider}-deep`, label: "Deep model", description: "Complex work", efforts: ["low", "high", "max"], default_effort: "high" },
+          { id: `${args.provider}-fast`, label: "Fast model", description: "Quick work", efforts: ["low"], default_effort: "low" },
+          { id: `${args.provider}-basic`, label: "Basic model", description: "No reasoning controls", efforts: [], default_effort: "" },
+        ], notice: null };
+        if (cmd === "agent_configure") { if (api.failConfigure) throw "Wait for the current response."; api.emit("agent-options", { tab_id: args.tabId, options: args.options }); return; }
         if (cmd === "provider_status") return ["muse", "codex", "antigravity"].map((id) => ({ id, installed: id !== "antigravity" || api.antigravityInstalled, setup_url: "https://antigravity.google/docs/getting-started?tab=cli" }));
         if (cmd === "antigravity_login_status") return { ...api.auth };
         if (cmd === "antigravity_login_submit") { api.auth = { phase: "complete", url: "", message: "Antigravity is connected." }; return; }
@@ -83,6 +89,85 @@ async function boot(page: Page, delay = 0) {
 }
 
 const composer = (page: Page) => page.locator(".chat-wrap:not(.hidden) textarea");
+
+test("model and reasoning changes preserve the conversation and persist per provider", async ({ page }) => {
+  await boot(page);
+  await composer(page).fill("First message"); await composer(page).press("Enter");
+  await page.evaluate(() => (window as any).qa.agent({ kind: "turn_end", status: "completed", text: "Existing answer" }));
+  await composer(page).fill("Keep my draft");
+  const registrations = await page.evaluate(() => (window as any).qa.calls.filter((c: any) => c.cmd === "agent_new").length);
+  await page.getByRole("button", { name: "Model: CLI default", exact: true }).click();
+  await page.getByRole("option", { name: "Deep model", exact: false }).click();
+  await page.getByRole("button", { name: "Reasoning: Default", exact: true }).click();
+  await page.getByRole("option", { name: /^Maximum/ }).click();
+  await expect(page.getByRole("button", { name: "Reasoning: Maximum", exact: true })).toBeEnabled();
+  await expect(composer(page)).toHaveValue("Keep my draft");
+  await expect(page.locator(".msg.assistant")).toContainText("Existing answer");
+  expect(await page.evaluate(() => (window as any).qa.calls.filter((c: any) => c.cmd === "agent_new").length)).toBe(registrations);
+  await page.getByLabel("AI provider").selectOption("codex");
+  await expect(page.getByRole("button", { name: "Model: CLI default", exact: true })).toBeVisible();
+  await page.getByRole("tab").first().click();
+  await expect(page.getByRole("button", { name: "Reasoning: Maximum", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Model: Deep model", exact: true }).click();
+  await page.getByRole("option", { name: /^Fast model/ }).click();
+  await expect(page.getByRole("button", { name: "Reasoning: Default", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Reasoning: Default", exact: true }).click();
+  await expect(page.getByRole("option", { name: /^Maximum/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Reasoning: Default", exact: true })).toBeFocused();
+  await page.getByLabel("AI provider").selectOption("codex");
+  await page.getByLabel("AI provider").selectOption("muse");
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Model: Fast model", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => (window as any).qa.calls.findLast((c: any) => c.cmd === "agent_new").args.options)).toEqual({ model: "muse-fast", reasoning: "" });
+});
+
+test("model menus are accessible and disable edits during a response", async ({ page }) => {
+  await boot(page);
+  const model = page.getByRole("button", { name: "Model: CLI default", exact: true });
+  await model.focus(); await model.press("ArrowDown");
+  await expect(page.getByRole("option", { name: /^CLI default/ })).toBeFocused();
+  await page.keyboard.press("ArrowDown"); await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "Model: Deep model", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Reasoning: Default", exact: true }).click();
+  expect((await new AxeBuilder({ page }).include(".choice-menu").analyze()).violations).toEqual([]);
+  await page.screenshot({ path: ".qa/model-reasoning-menu.png", animations: "disabled" });
+  await page.keyboard.press("Escape");
+  await composer(page).fill("Hold this response"); await composer(page).press("Enter");
+  await expect(page.getByRole("button", { name: "Model: Deep model", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Reasoning: Default", exact: true })).toBeDisabled();
+});
+
+test("failed settings keep the selection and terminal changes wait for Restart", async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => { (window as any).qa.failConfigure = true; });
+  await page.getByRole("button", { name: "Model: CLI default", exact: true }).click();
+  await page.getByRole("option", { name: /^Deep model/ }).click();
+  await expect(page.getByRole("alert")).toContainText("Wait for the current response");
+  await expect(page.getByRole("button", { name: "Model: CLI default", exact: true })).toBeVisible();
+  await page.evaluate(() => { (window as any).qa.failConfigure = false; });
+  await page.getByRole("button", { name: "Terminal", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).qa.calls.filter((c: any) => c.cmd === "pty_spawn").length)).toBe(1);
+  await page.getByRole("button", { name: "Model: CLI default", exact: true }).click();
+  await page.getByRole("option", { name: /^Basic model/ }).click();
+  await expect(page.getByRole("button", { name: "Reasoning: Default", exact: true })).toBeDisabled();
+  await expect(page.getByText("Terminal changes apply when you restart the session.")).toBeVisible();
+  expect(await page.evaluate(() => (window as any).qa.calls.filter((c: any) => c.cmd === "pty_spawn").length)).toBe(1);
+  await page.getByRole("button", { name: "Restart", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).qa.calls.findLast((c: any) => c.cmd === "pty_spawn").args.options)).toEqual({ model: "muse-basic", reasoning: "" });
+});
+
+test("unavailable catalogs retain saved settings and accept a custom model", async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => { (window as any).qa.failModels = true; });
+  await page.getByRole("button", { name: "Refresh available models" }).click();
+  await expect(page.getByText("Sign in to load models.")).toBeVisible();
+  await page.getByRole("button", { name: "Model: CLI default", exact: true }).click();
+  await page.getByRole("option", { name: /^Enter model ID/ }).click();
+  await page.getByLabel("Custom model ID").fill("my/custom-model");
+  await page.getByRole("button", { name: "Apply model", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Model: my/custom-model", exact: true })).toBeVisible();
+});
 
 test("Antigravity sign-in keeps codes out of conversations and preserves drafts", async ({ page }) => {
   await boot(page);

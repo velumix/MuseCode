@@ -1,0 +1,499 @@
+//! Read model capabilities from installed CLIs without starting an agent turn.
+use crate::providers::Provider;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::{
+    collections::HashMap,
+    io::{BufRead, BufReader, Read, Write},
+    process::{Child, ChildStdin, Command, Stdio},
+    sync::{mpsc, LazyLock, Mutex},
+    time::{Duration, Instant},
+};
+
+const EFFORTS: &[&str] = &[
+    "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+];
+#[derive(Clone, Default, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct RunOptions {
+    pub model: String,
+    pub reasoning: String,
+}
+impl RunOptions {
+    pub fn validate(&self, provider: Provider) -> Result<(), String> {
+        if self.model.len() > 200
+            || self.model.starts_with('-')
+            || !self
+                .model
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-._/:@+".contains(&b))
+        {
+            return Err(
+                "Use a model ID containing letters, numbers, dots, dashes, underscores or slashes."
+                    .into(),
+            );
+        }
+        if !self.reasoning.is_empty()
+            && (!EFFORTS.contains(&self.reasoning.as_str())
+                || (provider == Provider::Antigravity
+                    && !["low", "medium", "high", "max"].contains(&self.reasoning.as_str())))
+        {
+            return Err("This provider does not support that reasoning level.".into());
+        }
+        if !self.reasoning.is_empty() {
+            if let Some((_, catalog)) = CATALOGS.lock().unwrap().get(&provider) {
+                if let Some(model) = catalog.models.iter().find(|m| m.id == self.model) {
+                    if !model.efforts.contains(&self.reasoning) {
+                        return Err("That reasoning level is unavailable for this model. Choose another level or use the default.".into());
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    pub fn args(&self, provider: Provider) -> Vec<String> {
+        let mut args = vec![];
+        if !self.model.is_empty() {
+            args.extend(["--model".into(), self.model.clone()]);
+        }
+        if !self.reasoning.is_empty() {
+            args.extend(match provider {
+                Provider::Muse => ["--reasoning-effort".into(), self.reasoning.clone()],
+                Provider::Codex => [
+                    "-c".into(),
+                    // TOML literal quotes survive Windows PowerShell and .cmd shims.
+                    format!("model_reasoning_effort='{}'", self.reasoning),
+                ],
+                Provider::Antigravity => ["--effort".into(), self.reasoning.clone()],
+            });
+        }
+        args
+    }
+}
+#[derive(Clone, Serialize)]
+pub struct Model {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    pub efforts: Vec<String>,
+    pub default_effort: String,
+}
+#[derive(Clone, Default, Serialize)]
+pub struct Catalog {
+    pub models: Vec<Model>,
+    pub notice: Option<String>,
+}
+static CATALOGS: LazyLock<Mutex<HashMap<Provider, (Instant, Catalog)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+// Every discovery process is bounded and reaped, including shim descendants.
+struct Process(Child);
+impl Drop for Process {
+    fn drop(&mut self) {
+        if self.0.try_wait().ok().flatten().is_none() {
+            #[cfg(windows)]
+            crate::runner::terminate_tree(self.0.id());
+            let _ = self.0.kill();
+        }
+        let _ = self.0.wait();
+    }
+}
+fn command(provider: Provider) -> Result<Command, String> {
+    let path = provider.resolve().ok_or_else(|| provider.missing())?;
+    let mut cmd = if path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("ps1"))
+    {
+        let mut cmd = Command::new("powershell");
+        cmd.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(path);
+        cmd
+    } else {
+        Command::new(path)
+    };
+    cmd.current_dir(crate::pty::home_dir())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    Ok(cmd)
+}
+struct Rpc {
+    _process: Process,
+    input: ChildStdin,
+    output: mpsc::Receiver<Value>,
+    deadline: Instant,
+}
+impl Rpc {
+    fn start(provider: Provider) -> Result<Self, String> {
+        let mut cmd = command(provider)?;
+        cmd.args(if provider == Provider::Muse {
+            vec!["serve", "--no-session-log"]
+        } else {
+            vec!["app-server", "--stdio"]
+        });
+        let mut process = Process(
+            cmd.spawn()
+                .map_err(|_| "Could not start model discovery.")?,
+        );
+        let input = process
+            .0
+            .stdin
+            .take()
+            .ok_or("Model discovery input unavailable.")?;
+        let out = process
+            .0
+            .stdout
+            .take()
+            .ok_or("Model discovery output unavailable.")?;
+        let (tx, output) = mpsc::channel();
+        std::thread::spawn(move || {
+            // Enforce a total bound as well as a line bound for unknown CLI builds.
+            for line in BufReader::new(out.take(2 * 1024 * 1024))
+                .lines()
+                .take(2000)
+                .map_while(Result::ok)
+            {
+                if line.len() > 1024 * 1024 {
+                    break;
+                }
+                if let Ok(value) = serde_json::from_str(&line) {
+                    if tx.send(value).is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+        let mut rpc = Self {
+            _process: process,
+            input,
+            output,
+            deadline: Instant::now() + Duration::from_secs(20),
+        };
+        rpc.request(0, "initialize", json!({"clientInfo":{"name":"velum_code","title":"Velum Code","version":env!("CARGO_PKG_VERSION")}}))?;
+        rpc.send(json!({"jsonrpc":"2.0", "method":"initialized", "params":{}}))?;
+        Ok(rpc)
+    }
+    fn send(&mut self, value: Value) -> Result<(), String> {
+        writeln!(self.input, "{value}")
+            .and_then(|_| self.input.flush())
+            .map_err(|_| "Model discovery ended unexpectedly.".into())
+    }
+    fn request(&mut self, id: u32, method: &str, params: Value) -> Result<Value, String> {
+        self.send(json!({"jsonrpc":"2.0", "id":id,"method":method,"params":params}))?;
+        loop {
+            let timeout = self.deadline.saturating_duration_since(Instant::now());
+            let value = self.output.recv_timeout(timeout).map_err(|_| {
+                "Could not load models. Check the CLI installation and sign-in, then refresh."
+            })?;
+            if value["id"] == id {
+                if value.get("error").is_some() {
+                    return Err("This CLI could not list its models. Update or sign in to the CLI, then refresh.".into());
+                }
+                return Ok(value["result"].clone());
+            }
+        }
+    }
+}
+fn field(value: &Value, key: &str) -> String {
+    value[key]
+        .as_str()
+        .unwrap_or_default()
+        .chars()
+        .take(1000)
+        .collect()
+}
+fn parse_rpc_models(provider: Provider, value: &Value) -> Vec<Model> {
+    let key = if provider == Provider::Muse {
+        "models"
+    } else {
+        "data"
+    };
+    value[key]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .take(500)
+        .filter(|m| m["hidden"] != true)
+        .filter_map(|entry| {
+            let (id, label, variants) = if provider == Provider::Muse {
+                (
+                    field(entry, "modelId"),
+                    field(entry, "displayLabel"),
+                    &entry["variants"],
+                )
+            } else {
+                (
+                    field(entry, "model"),
+                    field(entry, "displayName"),
+                    &entry["supportedReasoningEfforts"],
+                )
+            };
+            if id.is_empty()
+                || (RunOptions {
+                    model: id.clone(),
+                    reasoning: String::new(),
+                })
+                .validate(provider)
+                .is_err()
+            {
+                return None;
+            }
+            let efforts = variants
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|effort| {
+                    effort
+                        .as_str()
+                        .or_else(|| effort["reasoningEffort"].as_str())
+                })
+                .filter(|v| EFFORTS.contains(v))
+                .map(str::to_owned)
+                .collect();
+            Some(Model {
+                label: if label.is_empty() { id.clone() } else { label },
+                id,
+                description: field(entry, "description"),
+                efforts,
+                default_effort: field(entry, "defaultReasoningEffort"),
+            })
+        })
+        .collect()
+}
+fn parse_agy_models(output: &str) -> Vec<Model> {
+    let mut result: Vec<Model> = vec![];
+    for line in output.lines().take(1000) {
+        let line = line.trim();
+        let Some((id, label)) = line.split_once(char::is_whitespace) else {
+            continue;
+        };
+        let label = label.trim();
+        if !id.contains('-')
+            || label.is_empty()
+            || id.starts_with('-')
+            || id.ends_with(':')
+            || (RunOptions {
+                model: id.into(),
+                reasoning: String::new(),
+            })
+            .validate(Provider::Antigravity)
+            .is_err()
+        {
+            continue;
+        }
+        let effort = ["low", "medium", "high", "max"]
+            .into_iter()
+            .find(|e| id.ends_with(&format!("-{e}")));
+        let family = effort
+            .map(|e| id.trim_end_matches(&format!("-{e}")))
+            .unwrap_or(id);
+        if let Some(existing) = result.iter_mut().find(|m| {
+            m.id.rsplit_once('-')
+                .is_some_and(|(base, _)| base == family)
+        }) {
+            if let Some(effort) = effort {
+                if !existing.efforts.contains(&effort.into()) {
+                    existing.efforts.push(effort.into());
+                }
+                continue;
+            }
+        }
+        let label = if let Some(effort) = effort {
+            let suffix = format!(" ({})", effort_label(effort));
+            label.strip_suffix(&suffix).unwrap_or(label)
+        } else {
+            label
+        };
+        result.push(Model {
+            id: id.into(),
+            label: label.into(),
+            description: String::new(),
+            efforts: effort.map(|e| vec![e.into()]).unwrap_or_default(),
+            default_effort: effort.unwrap_or_default().into(),
+        });
+    }
+    for model in &mut result {
+        model
+            .efforts
+            .sort_by_key(|e| EFFORTS.iter().position(|v| v == e).unwrap_or(99));
+    }
+    result
+}
+fn effort_label(value: &str) -> String {
+    let mut c = value.chars();
+    c.next()
+        .map(|first| first.to_uppercase().collect::<String>() + c.as_str())
+        .unwrap_or_default()
+}
+fn discover(provider: Provider) -> Result<Catalog, String> {
+    if provider == Provider::Antigravity {
+        let mut cmd = command(provider)?;
+        cmd.arg("models").stdin(Stdio::null());
+        let mut process = Process(
+            cmd.spawn()
+                .map_err(|_| "Could not load Antigravity models.")?,
+        );
+        let mut out = process
+            .0
+            .stdout
+            .take()
+            .ok_or("Model output unavailable.")?
+            .take(1024 * 1024);
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut data = String::new();
+            let _ = out.read_to_string(&mut data);
+            let _ = tx.send(data);
+        });
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let output = rx.recv_timeout(Duration::from_secs(15)).map_err(|_| {
+            "Antigravity took too long to list models. Check your connection and refresh."
+        })?;
+        let status = loop {
+            if let Some(status) = process
+                .0
+                .try_wait()
+                .map_err(|_| "Antigravity model discovery stopped.")?
+            {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                return Err(
+                    "Antigravity took too long to list models. Refresh to try again.".into(),
+                );
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        if !status.success() {
+            return Err("Sign in to Antigravity to load available models, then refresh.".into());
+        }
+        let models = parse_agy_models(&output);
+        return Ok(Catalog {
+            notice: models.is_empty().then(|| {
+                "The CLI returned no selectable models. Use its default or enter a model ID.".into()
+            }),
+            models,
+        });
+    }
+    let mut rpc = Rpc::start(provider)?;
+    let mut models = vec![];
+    let mut cursor = Value::Null;
+    for id in 1..=10 {
+        let params = if provider == Provider::Muse {
+            json!({})
+        } else {
+            json!({"limit":100,"includeHidden":false,"cursor":cursor})
+        };
+        let page = rpc.request(id, "model/list", params)?;
+        models.extend(parse_rpc_models(provider, &page));
+        cursor = page["nextCursor"].clone();
+        if provider == Provider::Muse || cursor.is_null() {
+            break;
+        }
+    }
+    models.dedup_by(|a, b| a.id == b.id);
+    Ok(Catalog {
+        notice: models.is_empty().then(|| {
+            "The CLI returned no model catalog. Its configured default remains available.".into()
+        }),
+        models,
+    })
+}
+pub fn catalog(provider: Provider, refresh: bool) -> Catalog {
+    if !refresh {
+        if let Some((time, catalog)) = CATALOGS.lock().unwrap().get(&provider) {
+            if time.elapsed() < Duration::from_secs(300) {
+                return catalog.clone();
+            }
+        }
+    }
+    match discover(provider) {
+        Ok(catalog) => {
+            CATALOGS
+                .lock()
+                .unwrap()
+                .insert(provider, (Instant::now(), catalog.clone()));
+            catalog
+        }
+        Err(notice) => Catalog {
+            models: vec![],
+            notice: Some(notice),
+        },
+    }
+}
+#[tauri::command]
+pub async fn provider_models(provider: Provider, refresh: Option<bool>) -> Result<Catalog, String> {
+    tauri::async_runtime::spawn_blocking(move || catalog(provider, refresh.unwrap_or(false)))
+        .await
+        .map_err(|_| "Could not load models.".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn catalogs_keep_model_specific_efforts_and_hide_hidden_models() {
+        let result = parse_rpc_models(
+            Provider::Codex,
+            &json!({"data":[{"model":"one","displayName":"One","supportedReasoningEfforts":[{"reasoningEffort":"low"},{"reasoningEffort":"high"}]},{"model":"hidden","hidden":true}]}),
+        );
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].efforts, vec!["low", "high"]);
+        let muse = parse_rpc_models(
+            Provider::Muse,
+            &json!({"models":[{"modelId":"spark","variants":["high","max"]}]}),
+        );
+        assert_eq!(muse[0].efforts, vec!["high", "max"]);
+    }
+    #[test]
+    fn antigravity_groups_only_returned_effort_variants() {
+        let models=parse_agy_models("Fetching available models...\ngemini-test-high   Gemini Test (High)\ngemini-test-medium   Gemini Test (Medium)\nclaude-test   Claude Test (Thinking)\n");
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].label, "Gemini Test");
+        assert_eq!(models[0].efforts, vec!["medium", "high"]);
+        assert!(models[1].efforts.is_empty());
+    }
+    #[test]
+    fn options_are_data_and_use_each_cli_flag() {
+        let options = RunOptions {
+            model: "provider/model-1".into(),
+            reasoning: "high".into(),
+        };
+        assert!(options.validate(Provider::Muse).is_ok());
+        assert_eq!(
+            options.args(Provider::Codex),
+            vec![
+                "--model",
+                "provider/model-1",
+                "-c",
+                "model_reasoning_effort='high'"
+            ]
+        );
+        assert!(options
+            .args(Provider::Muse)
+            .contains(&"--reasoning-effort".into()));
+        assert!(options
+            .args(Provider::Antigravity)
+            .contains(&"--effort".into()));
+        for model in ["--yolo", "x\n--yolo", "x\";whoami", "x & whoami"] {
+            assert!(RunOptions {
+                model: model.into(),
+                reasoning: String::new()
+            }
+            .validate(Provider::Muse)
+            .is_err());
+        }
+        assert!(RunOptions {
+            model: String::new(),
+            reasoning: "ultra".into()
+        }
+        .validate(Provider::Antigravity)
+        .is_err());
+        assert!(RunOptions::default().args(Provider::Codex).is_empty());
+    }
+}

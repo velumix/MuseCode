@@ -5,7 +5,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, Hash, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
     #[default]
@@ -107,7 +107,9 @@ pub fn exec_command(
     workspace: &Path,
     prompt: &Path,
     yolo: bool,
+    options: &crate::provider_models::RunOptions,
 ) -> Result<Command, String> {
+    options.validate(provider)?;
     let mut cmd = if path
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("ps1"))
@@ -122,6 +124,7 @@ pub fn exec_command(
     match provider {
         Provider::Muse => {
             cmd.args(["exec", "--json"]);
+            cmd.args(options.args(provider));
             if yolo {
                 cmd.arg("--yolo");
             }
@@ -146,6 +149,7 @@ pub fn exec_command(
                 cmd.arg("resume");
             }
             cmd.args(["--json", "--skip-git-repo-check"]);
+            cmd.args(options.args(provider));
             if yolo {
                 cmd.arg("--dangerously-bypass-approvals-and-sandbox");
             }
@@ -162,6 +166,7 @@ pub fn exec_command(
                 "--output-format",
                 "stream-json",
             ]);
+            cmd.args(options.args(provider));
             if !session.is_empty() {
                 cmd.arg("--conversation").arg(session);
             }

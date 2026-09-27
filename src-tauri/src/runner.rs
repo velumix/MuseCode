@@ -10,6 +10,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::events::AgentEvent;
 use crate::provider_events::Stream;
+use crate::provider_models::RunOptions;
 use crate::providers::{self, Provider};
 use crate::pty::home_dir;
 
@@ -20,6 +21,7 @@ pub struct AgentSession {
     tab_id: String,
     session_id: Mutex<String>,
     provider: Provider,
+    options: Mutex<RunOptions>,
     workspace: std::path::PathBuf,
     child: Mutex<Option<Child>>,
     running: Mutex<bool>,
@@ -356,9 +358,12 @@ pub fn agent_new(
     workspace: Option<String>,
     tab_id: Option<String>,
     provider: Option<Provider>,
+    options: Option<RunOptions>,
 ) -> Result<NewInfo, String> {
     let workspace = resolve_workspace(workspace)?;
     let provider = provider.unwrap_or_default();
+    let options = options.unwrap_or_default();
+    options.validate(provider)?;
     let session_id = if provider == Provider::Muse {
         uuid::Uuid::new_v4().to_string()
     } else {
@@ -374,6 +379,7 @@ pub fn agent_new(
                 tab_id: tab_id.unwrap_or_else(|| id.clone()),
                 session_id: Mutex::new(session_id.clone()),
                 provider,
+                options: Mutex::new(options.clone()),
                 workspace: workspace.clone(),
                 child: Mutex::new(None),
                 running: Mutex::new(false),
@@ -385,6 +391,8 @@ pub fn agent_new(
     }
     app.state::<crate::session_log::SessionLog>()
         .register_provider(&id, workspace.display().to_string(), provider);
+    app.state::<crate::session_log::SessionLog>()
+        .configure(&id, options);
     crate::remote::changed(&app);
     Ok(NewInfo {
         id,
@@ -393,7 +401,52 @@ pub fn agent_new(
     })
 }
 
-/// Run one prompt as `muse exec --json` against the tab's session.
+pub fn configure_session(
+    app: &AppHandle,
+    state: &AgentState,
+    id: &str,
+    options: RunOptions,
+    by_tab: bool,
+) -> Result<(), String> {
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "Agent state unavailable.")?;
+    let (id, session) = sessions
+        .iter()
+        .find(|(key, session)| {
+            if by_tab {
+                session.tab_id == id
+            } else {
+                key.as_str() == id
+            }
+        })
+        .ok_or("Conversation is still starting. Try again in a moment.")?;
+    if *session.running.lock().unwrap() {
+        return Err("Wait for the current response or stop it before changing models.".into());
+    }
+    options.validate(session.provider)?;
+    *session.options.lock().unwrap() = options.clone();
+    app.state::<crate::session_log::SessionLog>()
+        .configure(id, options.clone());
+    let _ = app.emit(
+        "agent-options",
+        serde_json::json!({"tab_id":session.tab_id,"options":options}),
+    );
+    crate::remote::changed(app);
+    Ok(())
+}
+#[tauri::command]
+pub fn agent_configure(
+    app: AppHandle,
+    state: State<AgentState>,
+    tab_id: String,
+    options: RunOptions,
+) -> Result<(), String> {
+    configure_session(&app, &state, &tab_id, options, true)
+}
+
+/// Run one prompt against the tab's provider and conversation.
 /// When `yolo` is set, `--yolo` disables approval and sandboxing for the turn.
 /// Fails while a previous turn is still running; stop it first.
 #[tauri::command]
@@ -435,7 +488,16 @@ pub fn agent_send(
     std::fs::write(file, provider.input(&prompt))
         .map_err(|e| format!("failed to stage prompt: {e}"))?;
 
-    let mut cmd = providers::exec_command(provider, &cli_path, &session_id, workspace, file, yolo)?;
+    let options = session.options.lock().unwrap().clone();
+    let mut cmd = providers::exec_command(
+        provider,
+        &cli_path,
+        &session_id,
+        workspace,
+        file,
+        yolo,
+        &options,
+    )?;
     let child = cmd
         .spawn()
         .map_err(|e| format!("failed to launch `{}`: {e}", cli_path.display()))?;
@@ -510,6 +572,7 @@ mod tests {
             std::path::Path::new("."),
             std::path::Path::new("prompt.txt"),
             yolo,
+            &crate::provider_models::RunOptions::default(),
         )
         .unwrap()
     }

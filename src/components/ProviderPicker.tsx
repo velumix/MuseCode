@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { providerNames, type Provider } from "../providers";
+import { providerNames, type Provider, type RunOptions, type ModelCatalog } from "../providers";
+import ModelControls from "./ModelControls";
 import Icon from "./Icon";
 import AntigravityLogin from "./AntigravityLogin";
 interface Info { id: Provider; installed: boolean; setup_url: string }
-export default function ProviderPicker({ value, onChange, failure }: { value: Provider; onChange: (provider: Provider) => void; failure?: string }) {
+export default function ProviderPicker({ value, onChange, failure, options, onOptionsChange, disabled, terminal }: { value: Provider; onChange: (provider: Provider) => void; failure?: string; options: RunOptions; onOptionsChange: (options: RunOptions) => Promise<void>; disabled: boolean; terminal: boolean }) {
   const [providers, setProviders] = useState<Info[]>([]);
   const [error, setError] = useState("");
   const [signIn, setSignIn] = useState(false);
+  const [modelsKey, setModelsKey] = useState(0);
   useEffect(() => {
     if (value === "antigravity" && failure && /sign[ -]?in|not authenticated|unauthorized|auth.*(?:required|expired|failed)|token.*expired/i.test(failure)) setSignIn(true);
   }, [value, failure]);
@@ -20,10 +22,12 @@ export default function ProviderPicker({ value, onChange, failure }: { value: Pr
     <select id="provider-choice" value={value} onChange={(event) => onChange(event.target.value as Provider)} title="Choosing a different provider opens a new conversation">
       {Object.entries(providerNames).map(([id, name]) => <option key={id} value={id}>{name}{id === "codex" ? " · ChatGPT" : ""}</option>)}
     </select>
-    <span className="provider-note">{error || (current && !current.installed ? "CLI not installed" : "Switch provider to start a new conversation")}</span>
+    <ModelControls provider={value} options={options} onChange={onOptionsChange} disabled={disabled} refreshKey={modelsKey} load={(provider, refresh) => invoke<ModelCatalog>("provider_models", { provider, refresh })} />
+    {(error || (current && !current.installed)) && <span className="provider-note">{error || "CLI not installed"}</span>}
     {current && !current.installed && <button className="status-btn" onClick={() => void openUrl(current.setup_url).catch((error) => setError(String(error)))}>Setup</button>}
     {value === "antigravity" && current?.installed && <button className="status-btn" onClick={() => setSignIn(true)}>Sign in</button>}
     <button className="status-btn" aria-label="Refresh installed providers" onClick={() => void refresh()}><Icon name="reset" size={14} /></button>
-    {signIn && <AntigravityLogin onClose={() => setSignIn(false)} />}
+    {terminal && <p className="provider-terminal-note">Terminal changes apply when you restart the session.</p>}
+    {signIn && <AntigravityLogin onClose={() => { setSignIn(false); setModelsKey((n) => n + 1); }} />}
   </div>;
 }

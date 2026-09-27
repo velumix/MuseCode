@@ -2,6 +2,7 @@ mod desktop;
 mod events;
 mod provider_auth;
 mod provider_events;
+mod provider_models;
 mod providers;
 mod pty;
 mod remote;
@@ -34,6 +35,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             pty::pty_spawn,
             providers::provider_status,
+            provider_models::provider_models,
+            runner::agent_configure,
             provider_auth::antigravity_login_start,
             provider_auth::antigravity_login_status,
             provider_auth::antigravity_login_submit,

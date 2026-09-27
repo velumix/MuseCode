@@ -37,6 +37,7 @@ So I made it. **Velum Code is the app I built around that idea.** It started as 
 | **Close it. Keep working.** | Closing the window sends VelumCode to the tray. Running tasks, terminals, tabs, and drafts stay alive. |
 | **Real Windows notifications.** | Background Agent turns notify you when they finish or fail. Open the notification to return to its conversation. |
 | **Take the conversation with you.** | Follow live Agent activity, send messages, and stop tasks over private Tailscale or a USB cable. Pairing needs your desktop approval. |
+| **Choose the model and depth.** | Model catalogs from your CLIs, reasoning levels for each model, and preferences that carry into new conversations. |
 | **A quieter workspace.** | Charcoal surfaces, blue accents, readable conversations, and motion that respects reduced-motion preferences. |
 | **See what the agent is doing.** | Streaming responses, Markdown and code blocks, tool activity, task lists, and visible errors. |
 | **Chat and terminal, together.** | Every tab has an Agent view and an embedded terminal. Switching views preserves both. |
@@ -62,7 +63,7 @@ So I made it. **Velum Code is the app I built around that idea.** It started as 
 
 1. Open [Windows CI](https://github.com/velumix/VelumCode/actions/workflows/windows.yml) and choose the latest successful run.
 2. Download **VelumCode-windows-x64** from **Artifacts** and extract the ZIP.
-3. Run **Velum Code_0.3.1_x64-setup.exe**, then launch **Velum Code** from your desktop or Start menu.
+3. Run **Velum Code_0.3.2_x64-setup.exe**, then launch **Velum Code** from your desktop or Start menu.
 
 CI artifacts require a GitHub sign-in and are retained for 14 days. These are unsigned development builds. Install the bundle so Windows can register the app's notification identity and click handler.
 
@@ -78,8 +79,18 @@ Prefer to build it yourself? See [Build from source](#build-from-source) below.
 
 Choosing another provider opens a new conversation in the current workspace. Existing
 conversations, running tasks and drafts stay with their original provider. Each provider
-resumes its own CLI session and uses its configured model; Velum Code does not collect API keys.
+resumes its own CLI session; Velum Code does not collect API keys.
 The embedded Terminal starts that tab's provider for sign-in and interactive approvals.
+
+Choose **Model**, then **Reasoning**, above the conversation. Available models come from
+the installed CLI and its signed-in account; reasoning levels depend on the selected model.
+**CLI default** keeps the CLI's configuration, and **Enter model ID** supports custom aliases.
+Your last choices are remembered separately for each provider. In Agent view they apply to
+the next message without clearing the conversation or draft. In Terminal view, use **Restart**
+to launch with new settings. Paired phones with control access have the same selectors;
+view-only phones cannot change them. Refresh the catalog after signing in or updating a CLI.
+
+<p align="center"><img src="docs/images/model-reasoning.png" alt="Model and reasoning dropdowns in Velum Code, showing the levels supported by the selected model" width="1000" /></p>
 
 Antigravity has a dedicated Google sign-in screen. Open the browser from that screen,
 copy Google's one-time authorization code, and paste it into **Connect account**.
@@ -177,7 +188,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Build
 
 The app uses **Tauri 2 + Rust**, **React 19 + TypeScript**, and **xterm.js over Windows ConPTY**. Chat translates each CLI’s structured output into shared messages, tool cards and turn status. Tray lifetime and notification delivery run in the native backend.
 
-See the [development guide](docs/development.md) for tests, native smoke checks, installer commands, and the project layout. The [0.3.1 QA report](docs/qa-0.3.1.md) records the verified behavior and remaining work; the [brand notes](docs/brand.md) cover the logo and assets.
+See the [development guide](docs/development.md) for tests, native smoke checks, installer commands, and the project layout. The [0.3.2 QA report](docs/qa-0.3.2.md) records the verified behavior and remaining work; the [brand notes](docs/brand.md) cover the logo and assets.
 
 ## Where it stands
 

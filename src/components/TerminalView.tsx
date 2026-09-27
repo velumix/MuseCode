@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { Provider } from "../providers";
+import type { Provider, RunOptions } from "../providers";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
@@ -24,6 +24,7 @@ export interface TerminalHandles {
 
 interface TerminalViewProps {
   provider: Provider;
+  options: RunOptions;
   sessionId: string;
   active: boolean;
   /** Bump to tear down the session and spawn a fresh one. */
@@ -33,7 +34,8 @@ interface TerminalViewProps {
   onHandles: (sessionId: string, handles: TerminalHandles | null) => void;
 }
 
-export default function TerminalView({ provider, sessionId, active, sessionKey, workspace, onStatus, onHandles }: TerminalViewProps) {
+export default function TerminalView({ provider, options, sessionId, active, sessionKey, workspace, onStatus, onHandles }: TerminalViewProps) {
+  const optionsRef = useRef(options); optionsRef.current = options;
   const containerRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef<{ id: string; term: Terminal; fit: FitAddon } | null>(null);
   const statusRef = useRef(onStatus);
@@ -125,6 +127,7 @@ export default function TerminalView({ provider, sessionId, active, sessionKey, 
         if (disposed) return;
         const info = await invoke<{ id: string; backend: string }>("pty_spawn", {
           provider,
+          options: optionsRef.current,
           id: nativeId,
           workspace,
           cols: Math.max(1, term.cols),

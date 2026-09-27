@@ -15,6 +15,7 @@ pub struct Entry {
 
 #[derive(Clone, Serialize)]
 pub struct Summary {
+    pub options: crate::provider_models::RunOptions,
     pub provider: crate::providers::Provider,
     pub id: String,
     pub title: String,
@@ -56,6 +57,7 @@ impl SessionLog {
             id.into(),
             Log {
                 summary: Summary {
+                    options: crate::provider_models::RunOptions::default(),
                     provider,
                     id: id.into(),
                     title: "New conversation".into(),
@@ -72,6 +74,12 @@ impl SessionLog {
 
     pub fn remove(&self, id: &str) {
         self.0.lock().unwrap().remove(id);
+    }
+
+    pub fn configure(&self, id: &str, options: crate::provider_models::RunOptions) {
+        if let Some(log) = self.0.lock().unwrap().get_mut(id) {
+            log.summary.options = options;
+        }
     }
 
     pub fn record(&self, id: &str, event: &AgentEvent) {

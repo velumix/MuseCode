@@ -65,7 +65,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'APK signature verification failed.' }
   $outputDir = Join-Path $root 'artifacts\android'
   New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
-  $outputName = if ($DebugBuild) { 'VelumCode-Android-debug.apk' } else { 'VelumCode-0.3.1.apk' }
+  $outputName = if ($DebugBuild) { 'VelumCode-Android-debug.apk' } else { 'VelumCode-0.3.2.apk' }
   $output = Join-Path $outputDir $outputName
   Copy-Item -LiteralPath $apk -Destination $output -Force
   $hash = (Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash.ToLowerInvariant()

@@ -49,6 +49,8 @@ try {
   desktop.on("pageerror", (e) => errors.push(e.message));
   await expect(desktop.locator("textarea")).toBeEnabled();
   await invoke("desktop_set_notifications", { enabled: false });
+  // WebView2 needs a shown window for simulated input. Background activity is tested below.
+  await invoke("desktop_show");
   await desktop.locator("textarea").fill("Desktop fixture");
   await desktop.locator("textarea").press("Enter");
   await expect(desktop.locator(".status-text")).toContainText("Done");
@@ -84,7 +86,7 @@ try {
   await phone.goto(invitation.url);
   if (release) {
     await phone.evaluate(() => navigator.serviceWorker.ready.then(() => true));
-    await expect.poll(() => phone.evaluate(() => caches.keys())).toEqual(["velum-phone-v3"]);
+    await expect.poll(() => phone.evaluate(() => caches.keys())).toEqual(["velum-phone-v4"]);
     await context.setOffline(true);
     const offline = await context.newPage();
     await offline.goto(new URL("/", invitation.url).href);
@@ -92,7 +94,7 @@ try {
     assert(!(await offline.locator("body").innerText()).includes("Old phone shell"));
     await offline.close();
     await context.setOffline(false);
-    const cached = await phone.evaluate(async () => (await (await caches.open("velum-phone-v3")).keys()).map((r) => r.url));
+    const cached = await phone.evaluate(async () => (await (await caches.open("velum-phone-v4")).keys()).map((r) => r.url));
     assert(cached.every((url) => !url.includes("/api/") && !url.includes("pair=")), "Phone cache contains private data");
     console.log("PASS: old phone cache migrates, offline launch has current branding, private data stays uncached");
   }
@@ -112,6 +114,13 @@ try {
   assert(!readFileSync(path.join(run, "settings/remote.json"), "utf8").includes(cookie.value));
   console.log("PASS: QR pairing requires desktop confirmation; phone replays desktop history; credentials are hashed at rest");
   await desktop.getByRole("button", { name: "Close remote access" }).click();
+  await phone.getByRole("button", { name: /^Model:/ }).click();
+  await phone.getByRole("option").getByText("Fixture Muse", { exact: true }).click();
+  await phone.getByRole("button", { name: "Reasoning: Default", exact: true }).click();
+  await phone.getByRole("option", { name: /^High / }).click();
+  await expect(desktop.getByRole("button", { name: "Model: Fixture Muse", exact: true })).toBeVisible();
+  await expect(desktop.getByRole("button", { name: "Reasoning: High", exact: true })).toBeVisible();
+  await expect.poll(() => desktop.evaluate(() => JSON.parse(localStorage.getItem("velum-options-muse") || "null"))).toEqual({ model: "fixture-muse", reasoning: "high" });
   await desktop.getByRole("button", { name: "Close", exact: true }).click();
   assert.equal(await invoke("plugin:window|is_visible", { label: "main" }), false);
   await phone.getByLabel("Message your desktop agent").fill("From phone in tray");

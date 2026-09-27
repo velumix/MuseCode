@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { providerNames } from "../providers";
+import { providerNames, defaultOptions, type ModelCatalog } from "../providers";
 import Icon, { VelumMark } from "../components/Icon";
 import Markdown from "../components/Markdown";
 import { transcript, type Replay, type Session } from "./transcript";
+
+import ModelControls from "../components/ModelControls";
 
 interface Device { id: string; name: string; control: boolean }
 interface Pending { name: string; code: string; expires_at: number }
@@ -213,6 +215,15 @@ export default function RemoteApp() {
     </section>}
     <button className="phone-session-select" aria-expanded={listOpen} aria-controls="phone-sessions" onClick={() => setListOpen((value) => !value)}><span><span className="phone-eyebrow">Conversation</span><strong>{current?.title || "Your conversations"}</strong></span><Icon name="down" size={18} /></button>
     {listOpen && <nav className="phone-sessions" id="phone-sessions" aria-label="Conversations">{sessions.map((session) => <button key={session.id} aria-current={session.id === selected ? "true" : undefined} onClick={() => { setSelected(session.id); setReplay(cache.current.get(session.id) || null); setListOpen(false); follow.current = true; setError(""); }}><Icon name="chat" size={18} /><span><strong>{session.title}</strong><small>{providerNames[session.provider || "muse"]} · {session.workspace.split(/[\\/]/).filter(Boolean).pop()}</small></span><i className={session.running ? "working" : ""}>{session.running ? "Working" : session.status === "completed" ? "Done" : "Ready"}</i></button>)}</nav>}
+    {current && <div className="phone-models"><ModelControls key={current.id} provider={current.provider || "muse"} options={current.options || defaultOptions} disabled={busy || !connected || current.running || !device.control} load={(provider, refresh) => api<ModelCatalog>(`/providers/${provider}/models?refresh=${refresh}`)} onChange={async (options) => {
+      const id = current.id;
+      setBusy(true);
+      try {
+        await api(`/sessions/${encodeURIComponent(id)}/options`, options);
+        setSessions((sessions) => sessions.map((s) => s.id === id ? { ...s, options } : s));
+        await refreshRef.current();
+      } finally { setBusy(false); }
+    }} /></div>}
     {!connected && <div className="phone-reconnect" role="status">{usb ? "Check your USB cable and keep your desktop awake." : "Reconnect Tailscale and keep your desktop awake."} Your draft is safe.<button onClick={() => void refreshRef.current()}>Retry</button></div>}
     <div className="phone-transcript" ref={scroll} onScroll={() => { const el = scroll.current; if (el) { follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; setLatest(!follow.current); } }}>
       {!sessions.length ? <div className="phone-empty"><Icon name="chat" size={32} /><h2>No conversations yet</h2><p>Open an Agent conversation on your desktop. It will appear here automatically.</p></div> : !view.blocks.length ? <div className="phone-empty"><VelumMark size={64} /><h2>What’s next?</h2><p>Send a message to your desktop agent. Your files and tools stay on your computer.</p></div> : null}

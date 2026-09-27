@@ -55,6 +55,10 @@ pub struct SpawnInfo {
 /// (`.cmd`/`.bat`/`.ps1`) cannot be launched directly through ConPTY,
 /// so they are wrapped in their interpreter.
 pub(crate) fn build_command(muse_path: &Path) -> CommandBuilder {
+    build_command_with_args(muse_path, &[])
+}
+
+fn build_command_with_args(muse_path: &Path, args: &[String]) -> CommandBuilder {
     let ext = muse_path
         .extension()
         .and_then(|e| e.to_str())
@@ -67,6 +71,7 @@ pub(crate) fn build_command(muse_path: &Path) -> CommandBuilder {
             cmd.arg("Bypass");
             cmd.arg("-File");
             cmd.arg(muse_path);
+            cmd.args(args);
             cmd
         }
         Some("cmd" | "bat") => {
@@ -78,12 +83,17 @@ pub(crate) fn build_command(muse_path: &Path) -> CommandBuilder {
                 "-NoLogo",
                 "-NoProfile",
                 "-Command",
-                "& $env:MUSE_CODE_CLI; exit $LASTEXITCODE",
+                "$cliArgs = @(ConvertFrom-Json -InputObject $env:VELUM_CLI_ARGS); & $env:MUSE_CODE_CLI @cliArgs; exit $LASTEXITCODE",
             ]);
             cmd.env("MUSE_CODE_CLI", muse_path);
+            cmd.env("VELUM_CLI_ARGS", serde_json::to_string(args).unwrap());
             cmd
         }
-        _ => CommandBuilder::new(muse_path),
+        _ => {
+            let mut cmd = CommandBuilder::new(muse_path);
+            cmd.args(args);
+            cmd
+        }
     }
 }
 
@@ -205,6 +215,7 @@ fn spawn_reader(app: AppHandle, id: String, child: PtyChild, mut reader: Box<dyn
 /// Spawn the `muse` CLI inside a new PTY registered under `id`,
 /// replacing any session already registered under that id.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri injects app and state into this IPC command.
 pub fn pty_spawn(
     app: AppHandle,
     state: State<PtyState>,
@@ -213,10 +224,13 @@ pub fn pty_spawn(
     rows: u16,
     workspace: Option<String>,
     provider: Option<crate::providers::Provider>,
+    options: Option<crate::provider_models::RunOptions>,
 ) -> Result<SpawnInfo, String> {
     let workspace = crate::runner::resolve_workspace(workspace)?;
     kill_session(&state, &id);
     let provider = provider.unwrap_or_default();
+    let options = options.unwrap_or_default();
+    options.validate(provider)?;
     let muse_path = provider.resolve().ok_or_else(|| provider.missing())?;
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -227,7 +241,7 @@ pub fn pty_spawn(
             pixel_height: 0,
         })
         .map_err(|e| format!("failed to open terminal: {e}"))?;
-    let mut cmd = build_command(&muse_path);
+    let mut cmd = build_command_with_args(&muse_path, &options.args(provider));
     cmd.cwd(&workspace);
     let writer = pair
         .master

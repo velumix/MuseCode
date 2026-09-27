@@ -522,6 +522,8 @@ fn router(state: WebState) -> Router {
         .route("/api/sessions/{id}", get(replay))
         .route("/api/sessions/{id}/send", post(send))
         .route("/api/sessions/{id}/stop", post(stop))
+        .route("/api/sessions/{id}/options", post(configure))
+        .route("/api/providers/{provider}/models", get(models))
         .route("/api/events", get(events))
         .fallback(asset)
         .layer(DefaultBodyLimit::max(64 * 1024))
@@ -771,6 +773,44 @@ async fn send(
     Ok(Json(json!(result)))
 }
 
+#[derive(Default, Deserialize)]
+struct ModelQuery {
+    #[serde(default)]
+    refresh: bool,
+}
+async fn models(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Path(provider): Path<crate::providers::Provider>,
+    Query(query): Query<ModelQuery>,
+) -> ApiResult {
+    authenticate(&state, &headers, false)?;
+    let catalog = tauri::async_runtime::spawn_blocking(move || {
+        crate::provider_models::catalog(provider, query.refresh)
+    })
+    .await
+    .map_err(|e| bad(e.to_string()))?;
+    Ok(Json(json!(catalog)))
+}
+async fn configure(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(options): Json<crate::provider_models::RunOptions>,
+) -> ApiResult {
+    authenticate(&state, &headers, true)?;
+    let app = state.app.ok_or_else(|| bad("Desktop unavailable."))?;
+    runner::configure_session(
+        &app,
+        &app.state::<runner::AgentState>(),
+        &id,
+        options,
+        false,
+    )
+    .map_err(|e| ApiError(StatusCode::CONFLICT, e))?;
+    Ok(Json(json!({"ok":true})))
+}
+
 async fn stop(
     State(state): State<WebState>,
     headers: HeaderMap,
@@ -969,6 +1009,38 @@ mod tests {
     #[tokio::test]
     async fn read_only_devices_cannot_send_or_stop_and_extra_controls_are_rejected() {
         let (state, token) = fixture(false);
+        assert_eq!(
+            router(state.clone())
+                .oneshot(request(
+                    "/api/sessions/one/options",
+                    Some(&token),
+                    Some(json!({"model":"test","reasoning":"high"}))
+                ))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            router(state.clone())
+                .oneshot(request("/api/providers/codex/models", None, None))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            router(state.clone())
+                .oneshot(request(
+                    "/api/sessions/one/options",
+                    Some(&token),
+                    Some(json!({"model":"test","reasoning":"high","yolo":true}))
+                ))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
         assert_eq!(
             router(state.clone())
                 .oneshot(request(

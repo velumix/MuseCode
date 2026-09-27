@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import Markdown from "./Markdown";
-import { providerNames, type Provider } from "../providers";
+import { providerNames, type Provider, type RunOptions } from "../providers";
 import { copyText } from "./clip";
 import Icon, { VelumMark, type IconName } from "./Icon";
 
@@ -49,6 +49,7 @@ interface NewInfo {
 interface ChatViewProps {
   initialWorkspace?: string;
   provider: Provider;
+  options: RunOptions;
   sessionId: string;
   active: boolean;
   /** Bump to drop the conversation and start a fresh agent session. */
@@ -235,7 +236,8 @@ function ToolBlock({ block }: { block: Extract<Block, { kind: "tool" }> }) {
   );
 }
 
-export default function ChatView({ provider, initialWorkspace, sessionId, active, sessionKey, onStatus, onWorkspace, onTitle }: ChatViewProps) {
+export default function ChatView({ provider, options, initialWorkspace, sessionId, active, sessionKey, onStatus, onWorkspace, onTitle }: ChatViewProps) {
+  const optionsRef = useRef(options); optionsRef.current = options;
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [todos, setTodos] = useState<TodoEntry[]>([]);
   const [input, setInput] = useState("");
@@ -492,7 +494,7 @@ export default function ChatView({ provider, initialWorkspace, sessionId, active
         // The listener above filters by session id; register after attaching
         // so no event from our own session can slip past.
         if (disposed) return;
-        const info = await invoke<NewInfo>("agent_new", { id: nativeId, workspace, tabId: sessionId, provider });
+        const info = await invoke<NewInfo>("agent_new", { id: nativeId, workspace, tabId: sessionId, provider, options: optionsRef.current });
         if (!disposed) {
           nativeIdRef.current = nativeId;
           setEffective(info.workspace);

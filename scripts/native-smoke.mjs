@@ -3,7 +3,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "@playwright/test";
+import { chromium, expect } from "@playwright/test";
 
 if (process.platform !== "win32") throw new Error("This smoke test requires Windows/WebView2.");
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -86,7 +86,9 @@ try {
   const desktop = await invoke("desktop_status");
   assert.equal(desktop.last_error, null, "Native notification activator did not initialize");
   await invoke("desktop_set_notifications", { enabled: false });
-  await invoke("plugin:window|minimize", { label: "main" });
+  // WebView2 can defer controlled-input updates while minimized. Exercise
+  // input with the window shown; background behavior is checked explicitly below.
+  await invoke("desktop_show");
   const composer = page.locator(".chat-wrap:not(.hidden) textarea");
   const status = page.locator(".status-text");
   async function send(text) {
@@ -103,12 +105,29 @@ try {
   await page.getByRole("button", { name: "Apply", exact: true }).click();
   await page.waitForFunction((dir) => document.querySelector('[aria-label="Workspace directory"]')?.title === dir, runDir);
 
+  async function chooseModel(label, effort = "High") {
+    await page.getByRole("button", { name: /^Model:/ }).click();
+    await page.getByRole("option").getByText(label, { exact: true }).click();
+    await page.getByRole("button", { name: /^Reasoning:/ }).click();
+    await page.getByRole("option", { name: new RegExp(`^${effort} `) }).click();
+    await page.getByRole("button", { name: `Reasoning: ${effort}`, exact: true }).waitFor();
+  }
+  await chooseModel("Fixture Muse");
   for (const prompt of ["First native turn", "Second native turn", "FINAL_ONLY"]) {
+    if (prompt === "Second native turn") await chooseModel("Fixture Muse Fast", "Low");
+    if (prompt === "FINAL_ONLY") await chooseModel("Fixture Muse");
     await send(prompt);
     await done();
     assert((await page.locator(".msg.assistant").last().innerText()).includes(`Reply: ${prompt}`));
   }
-  console.log("PASS: native IPC, workspace validation, consecutive turns, final-only answers");
+  const museTurns = records().filter((r) => r.kind === "turn");
+  for (const turn of museTurns) {
+    const changed = turn.prompt === "Second native turn";
+    assert(turn.args.includes(changed ? "fixture-muse-fast" : "fixture-muse"));
+    assert.equal(turn.args[turn.args.indexOf("--reasoning-effort") + 1], changed ? "low" : "high");
+  }
+  assert.equal(new Set(museTurns.map((r) => r.args[r.args.indexOf("--session-id") + 1])).size, 1);
+  console.log("PASS: native model catalog, reasoning argv, workspace validation, consecutive turns, final-only answers");
 
   await send("FAIL");
   await page.locator(".notice.error").filter({ hasText: "QA fixture failed deliberately" }).waitFor();
@@ -136,6 +155,7 @@ try {
   for (let i = 0; i < 100 && !records().some((r) => r.kind === "terminal"); i++) await sleep(50);
   const terminal = records().find((r) => r.kind === "terminal");
   assert(terminal, "ConPTY fixture never launched");
+  assert(terminal.args.includes("fixture-muse") && terminal.args.includes("high"));
   assert.equal(terminal.cwd.toLowerCase(), runDir.toLowerCase());
   await page.keyboard.press("Control+f");
   await page.getByLabel("Find in terminal").fill("search target");
@@ -152,7 +172,7 @@ try {
   await send("BACKGROUND");
   await composer.fill("background draft survives");
   await page.getByRole("button", { name: "Close", exact: true }).click();
-  assert.equal(await invoke("plugin:window|is_visible", { label: "main" }), false);
+  await expect.poll(() => invoke("plugin:window|is_visible", { label: "main" })).toBe(false);
   assert(alive(app.pid), "Close exited instead of hiding to tray");
   await done();
   assert((await page.locator(".msg.assistant").last().innerText()).includes("Reply: BACKGROUND"));
@@ -230,12 +250,17 @@ try {
     await page.locator(".chat-wrap:not(.hidden)").getByLabel("Workspace directory").fill(runDir);
     if (await page.getByRole("button", { name: "Apply", exact: true }).count()) await page.getByRole("button", { name: "Apply", exact: true }).click();
     await page.waitForFunction((dir) => document.querySelector('.chat-wrap:not(.hidden) [aria-label="Workspace directory"]')?.title === dir, runDir);
+    await chooseModel(provider === "codex" ? "Fixture Codex" : "Fixture Antigravity");
     for (const prompt of ["First provider turn & $quoted", "Second provider turn"]) {
       await send(prompt); await done();
       assert((await page.locator(".chat-wrap:not(.hidden) .msg.assistant").last().innerText()).includes(`Reply: ${prompt}`));
     }
     const turns = records().filter((r) => r.kind === "provider-turn" && r.provider === provider);
     assert.equal(turns.length, 2);
+    for (const turn of turns) {
+      assert(turn.args.includes(provider === "codex" ? "fixture-codex" : "fixture-agy-high"));
+      assert(turn.args.includes(provider === "codex" ? "model_reasoning_effort='high'" : "high"));
+    }
     assert.equal(turns[0].cwd.toLowerCase(), runDir.toLowerCase());
     assert(!turns[0].args.includes("resume") && !turns[0].args.includes("--conversation"));
     assert(turns[1].args.includes(provider === "codex" ? "62c2d305-9dd5-4c94-b4c0-667eb612f401" : "ae283c22-1851-4d5c-a5c5-d14d53c23b72"));
@@ -254,7 +279,10 @@ try {
     assert(records().find((r) => r.provider === provider && r.prompt === "YOLO provider").args.includes(provider === "codex" ? "--dangerously-bypass-approvals-and-sandbox" : "--dangerously-skip-permissions"));
     await page.getByRole("button", { name: "Terminal", exact: true }).click();
     for (let i = 0; i < 100 && !records().some((r) => r.provider === provider && r.kind === "terminal"); i++) await sleep(50);
-    assert(records().some((r) => r.provider === provider && r.kind === "terminal"));
+    const providerTerminal = records().find((r) => r.provider === provider && r.kind === "terminal");
+    assert(providerTerminal);
+    assert(providerTerminal.args.includes(provider === "codex" ? "fixture-codex" : "fixture-agy-high"));
+    assert(providerTerminal.args.includes(provider === "codex" ? "model_reasoning_effort='high'" : "high"));
     await page.getByRole("tab", { selected: true }).locator(".tab-close").click();
     console.log(`PASS: ${provider} native stdin, resume isolation, failures, Stop, permissions and ConPTY`);
   }

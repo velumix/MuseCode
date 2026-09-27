@@ -15,12 +15,13 @@ const RemotePanel = lazy(() => import("./components/RemotePanel"));
 import type { PaletteAction } from "./components/CommandPalette";
 import "./App.css";
 import ProviderPicker from "./components/ProviderPicker";
-import { preferredProvider, providerNames, type Provider } from "./providers";
+import { preferredProvider, preferredOptions, saveOptions, providerNames, type Provider, type RunOptions } from "./providers";
 
 type TabMode = "agent" | "terminal";
 interface DesktopStatus { notifications_enabled: boolean; last_error: string | null }
 
 interface Tab {
+  options: RunOptions;
   provider: Provider;
   id: string;
   title: string;
@@ -40,7 +41,7 @@ function newId(): string {
 }
 
 function createTab(n: number, provider = preferredProvider()): Tab {
-  return { provider, id: newId(), title: `New conversation ${n}`, mode: "agent", agentStatus: { kind: "starting" }, terminalStatus: { kind: "starting" }, agentKey: 0, terminalKey: 0, terminalStarted: false };
+  return { provider, options: preferredOptions(provider), id: newId(), title: `New conversation ${n}`, mode: "agent", agentStatus: { kind: "starting" }, terminalStatus: { kind: "starting" }, agentKey: 0, terminalKey: 0, terminalStarted: false };
 }
 
 function tabStatus(tab: Tab): PtyStatus | AgentStatus {
@@ -106,6 +107,12 @@ export default function App() {
         if (disposed) unlisten(); else unlistens.push(unlisten);
       };
       await Promise.all([
+        track(listen<{ tab_id: string; options: RunOptions }>("agent-options", ({ payload }) => {
+          if (disposed) return;
+          const provider = stateRef.current.tabs.find((t) => t.id === payload.tab_id)?.provider;
+          if (provider) saveOptions(provider, payload.options);
+          setTabs((tabs) => tabs.map((t) => t.id === payload.tab_id ? { ...t, options: payload.options } : t));
+        })),
         track(listen<DesktopStatus>("desktop-status", ({ payload }) => { if (!disposed) setDesktop(payload); })),
         track(listen("desktop-navigation", () => { if (!disposed) void navigate().catch(() => {}); })),
       ]);
@@ -179,6 +186,12 @@ export default function App() {
   }, []);
 
   const newTab = useCallback(() => openProvider(preferredProvider()), [openProvider]);
+
+  const configure = useCallback(async (tab: Tab, options: RunOptions) => {
+    await invoke("agent_configure", { tabId: tab.id, options });
+    setTabs((tabs) => tabs.map((t) => t.id === tab.id ? { ...t, options } : t));
+    saveOptions(tab.provider, options);
+  }, []);
 
   const selectTab = useCallback(
     (id: string) => {
@@ -414,13 +427,14 @@ export default function App() {
           <Icon name="reset" size={17} />
         </button>
       </div>
-      {activeTab && <ProviderPicker value={activeTab.provider} failure={activeTab.agentStatus.kind === "error" ? activeTab.agentStatus.message : undefined} onChange={(provider) => { if (provider !== activeTab.provider) openProvider(provider); }} />}
+      {activeTab && <ProviderPicker key={activeTab.id} value={activeTab.provider} options={activeTab.options} onOptionsChange={(options) => configure(activeTab, options)} disabled={activeTab.agentStatus.kind === "starting" || activeTab.agentStatus.kind === "running"} terminal={activeTab.mode === "terminal"} failure={activeTab.agentStatus.kind === "error" ? activeTab.agentStatus.message : undefined} onChange={(provider) => { if (provider !== activeTab.provider) openProvider(provider); }} />}
       <div className="terminal-wrap">
         {tabs.map((t) => (
           <Fragment key={t.id}>
             <ChatView
               sessionId={t.id}
               provider={t.provider}
+              options={t.options}
               initialWorkspace={t.workspace}
               active={t.id === activeTab?.id && t.mode === "agent"}
               sessionKey={t.agentKey}
@@ -432,6 +446,7 @@ export default function App() {
             <TerminalView
               sessionId={t.id}
               provider={t.provider}
+              options={t.options}
               active={t.id === activeTab?.id && t.mode === "terminal"}
               sessionKey={t.terminalKey}
               workspace={t.workspace}
