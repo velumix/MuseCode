@@ -745,7 +745,7 @@ pub fn finish(
                         "The provider run failed. Open its result for details.".into()
                     }
                 });
-                if status == "cancelled" || status == "review" || j.failures >= 3 {
+                if matches!(status, "cancelled" | "review" | "blocked") || j.failures >= 3 {
                     j.paused = true;
                 }
             }

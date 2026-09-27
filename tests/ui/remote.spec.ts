@@ -33,6 +33,7 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
     if (url.pathname === "/api/pair/claim") { remote.pending = true; return answer({ pending: { name: body.name, code: "482196", expires_at: Math.floor(Date.now() / 1000) + 120 } }); }
     if (url.pathname === "/api/pair/finish") return answer(remote.paired ? { status: "paired", device: { id: "phone", name: "My phone", control } } : { status: "pending", pending: { name: "My phone", code: "482196", expires_at: Math.floor(Date.now() / 1000) + 120 } });
     if (!remote.paired || remote.revoked) return answer({ error: "Pair again" }, 401);
+    if(url.pathname.endsWith('/diagnostics'))return answer({app:'Velum Code',version:'0.6.1',host_os:'windows',checked_at:1800000000,workspace:{directory_listing:true,git_repository:true,message:'Folder listing passed.'},providers:[{provider:'muse',installed:true,authentication:'not checked',tool_connections:'not checked'}],memory:{readable:true,enabled:true,notes:2,budget_bytes:3000,capture:'review'},sessions:{active:0,failed:0,blocked:0}});
     if (url.pathname === "/api/me") return answer({ device: { id: "phone", name: "My phone", control }, computer: "desktop.tail.ts.net" });
     if(url.pathname==='/api/bots'){
       if(body.action!=='list'&&!control)return answer({error:'View only'},403);
@@ -85,6 +86,31 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
   await page.goto(`/remote.html${paired ? "" : "#pair=one-use-test-invitation"}`);
   return remote;
 }
+
+test('phone diagnostics preserve drafts, fit the screen and disappear after revocation',async({page})=>{
+  const remote=await boot(page);
+  await page.getByLabel('Message your desktop agent').fill('Keep phone draft');
+  await page.getByRole('button',{name:'Project context & diagnostics'}).click();
+  await expect(page.getByLabel('Velum diagnostics preview')).toContainText('not checked');
+  await page.getByRole('button',{name:'Chat layout',exact:true}).click();
+  expect(JSON.parse(await page.getByLabel('Chat layout snapshot preview').inputValue()).source).toBe('phone');
+  expect((await new AxeBuilder({page}).include('.context-panel').analyze()).violations).toEqual([]);
+  await page.screenshot({path:test.info().outputPath('context-phone.png')});
+  expect(await page.locator('.context-panel').evaluate(e=>e.scrollWidth<=e.clientWidth)).toBe(true);
+  await page.getByRole('button',{name:'Add to message'}).click();
+  await expect(page.getByLabel('Message your desktop agent')).toHaveValue(/^Keep phone draft\n\n\[Chat layout snapshot/);
+  expect(remote.sends).toEqual([]);
+  await page.getByRole('button',{name:'Project context & diagnostics'}).click();
+  remote.revoked=true;await page.evaluate(()=>(window as any).remoteEvent('revoked'));
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('view-only phone diagnostics expose no attachment or write check controls',async({page})=>{
+  await boot(page,true,false);await page.getByRole('button',{name:'Project context & diagnostics'}).click();
+  await expect(page.getByLabel('Velum diagnostics preview')).toContainText('not checked');
+  await expect(page.getByRole('button',{name:'Add to message'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Test file access'})).toHaveCount(0);
+});
 
 test('phone creates a bot with personality, model and schedule controls',async({page})=>{
   const remote=await boot(page);await expect(page.locator('.phone-online')).toBeVisible();await page.getByRole('button',{name:'Bots',exact:true}).click();await page.getByRole('button',{name:'New bot',exact:true}).click();await page.getByLabel('Bot name',{exact:true}).fill('Grokbot');

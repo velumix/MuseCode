@@ -96,6 +96,11 @@ try {
     await composer.press("Enter");
   }
   async function done() { await status.filter({ hasText: "Done" }).waitFor(); }
+  const access=await invoke('workspace_check',{workspace:runDir,write:true});
+  assert(access.readable && access.writable, 'Workspace probe failed in writable fixture');
+  const diagnostic=await invoke('app_diagnostics',{workspace:runDir});
+  assert.equal(diagnostic.workspace.directory_listing,true);
+  assert(!JSON.stringify(diagnostic).includes(runDir),'Diagnostics leaked the workspace path');
 
   // Validate workspace in the actual Rust backend, including a rejected path.
   await page.getByLabel("Workspace directory").fill(path.join(runDir, "missing"));
@@ -285,6 +290,8 @@ try {
     assert(turns[0].input.includes("SQLite with WAL"), "New provider conversation did not recall project memory");
     assert(!turns[1].input.includes("SQLite with WAL"), "Unchanged memory was injected again");
     for (const turn of turns) {
+      assert(turn.input.includes('<velum-app-context>'),'Provider did not receive app context');
+      assert(turn.input.includes('"directory_listing":"passed in Velum"'));
       assert(turn.args.includes(provider === "codex" ? "fixture-codex" : "fixture-agy-high"));
       assert(turn.args.includes(provider === "codex" ? "model_reasoning_effort='high'" : "high"));
     }
@@ -294,6 +301,12 @@ try {
     assert(!turns[1].args.some((arg) => arg.includes("dangerously")));
     await send("FAIL");
     await page.locator(".chat-wrap:not(.hidden) .notice.error").filter({ hasText: "Provider fixture failure" }).waitFor();
+    if(provider==='antigravity') {
+      await send('DENIED');
+      await page.locator('.chat-wrap:not(.hidden) .notice.error').filter({hasText:'Antigravity blocked a tool'}).waitFor();
+      assert((await page.locator('.chat-wrap:not(.hidden) .msg.assistant').last().innerText()).includes('Reply: DENIED'));
+      assert(!records().find(r=>r.prompt==='DENIED').args.includes('--dangerously-skip-permissions'));
+    }
     await send("HOLD");
     for (let i = 0; i < 100 && !records().some((r) => r.provider === provider && r.kind === "descendant"); i++) await sleep(50);
     const child = records().find((r) => r.provider === provider && r.kind === "descendant");

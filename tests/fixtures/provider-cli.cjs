@@ -57,6 +57,10 @@ if (provider === "codex" && args[0] === "app-server") {
     emit({ type: "item.completed", item: { id: "msg", type: "agent_message", text: `Reply: ${prompt}` } });
     emit({ type: "turn.completed" });
   } else {
+    if (prompt === 'DENIED') {
+      console.error('jetski: a tool required the command permission that headless mode cannot prompt for, so it was auto-denied.');
+      for (let i=0;i<40;i++) console.error('Following stderr diagnostic '+i);
+    }
     emit({ event: "step_update", step_update: { step_type: "agent_response", text_delta: `Reply: ${prompt}` } });
     emit({ event: "result", result: { status: "SUCCESS", response: `Reply: ${prompt}`, conversation_id: id } });
   }

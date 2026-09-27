@@ -154,7 +154,31 @@ pub(crate) fn resolve_workspace(workspace: Option<String>) -> Result<std::path::
 
 #[tauri::command]
 pub fn agent_validate_workspace(workspace: Option<String>) -> Result<String, String> {
-    resolve_workspace(workspace).map(|path| path.display().to_string())
+    let path = resolve_workspace(workspace)?;
+    if !crate::app_context::readable(&path) {
+        return Err(
+            "Velum cannot list this folder. Choose another project or check Windows folder access."
+                .into(),
+        );
+    }
+    Ok(path.display().to_string())
+}
+
+fn headless_permission_denied(text: &str) -> bool {
+    let text = text.to_ascii_lowercase();
+    text.contains("permission")
+        && (text.contains("auto-denied")
+            || text.contains("soft-denied")
+            || (text.contains("headless") && text.contains("cannot prompt")))
+}
+
+fn mark_permission_blocked(terminal: &mut Option<AgentEvent>, denied: bool) {
+    if let Some(AgentEvent::TurnEnd { status, reason, .. }) = terminal {
+        if denied && status != "cancelled" {
+            *status = "blocked".into();
+            *reason = Some("Antigravity blocked a tool because headless mode cannot ask for permission. Open Terminal, run agy, then /permissions to review the command rule in settings.json. Allow only the command needed, then retry. Scheduled work is paused; partial output is not a completed task.".into());
+        }
+    }
 }
 
 /// Take the tab's child (if any), kill it, and reap it. The reader thread
@@ -252,12 +276,17 @@ fn spawn_reader(
     // Drain stderr on a side thread so verbose children can never block on
     // a full pipe; the tail is only surfaced when the turn dies silently.
     let stderr_tail: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let permission_denied = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stderr_handle = stderr.map(|err| {
         let tail = Arc::clone(&stderr_tail);
+        let denied = Arc::clone(&permission_denied);
         std::thread::spawn(move || {
             for line in BufReader::new(err).lines().map_while(Result::ok) {
+                if headless_permission_denied(&line) {
+                    denied.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
                 if let Ok(mut guard) = tail.lock() {
-                    guard.push(line);
+                    guard.push(line.chars().take(4000).collect());
                     let len = guard.len();
                     if len > STDERR_TAIL_LINES {
                         guard.drain(..len - STDERR_TAIL_LINES);
@@ -288,6 +317,10 @@ fn spawn_reader(
                     .resume_id(&id, resume_id);
             }
             for mut event in events {
+                if matches!(&event, AgentEvent::ToolEnd { reason: Some(reason), .. } | AgentEvent::TurnEnd { reason: Some(reason), .. } if headless_permission_denied(reason))
+                {
+                    permission_denied.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
                 if action_context.is_some() {
                     if let AgentEvent::AssistantDelta { text } = &mut event {
                         *text = bot_output.push(text);
@@ -350,26 +383,6 @@ fn spawn_reader(
             let _ = handle.join();
         }
         let exit = reap_child(&session);
-        // Headless Antigravity can deny a tool yet still finish successfully.
-        // Surface those permission notices so skipped work is visible.
-        if session.provider == Provider::Antigravity {
-            if let Ok(tail) = stderr_tail.lock() {
-                for line in tail.iter().filter(|line| {
-                    let line = line.to_ascii_lowercase();
-                    line.contains("denied")
-                        || line.contains("approval")
-                        || line.contains("permission")
-                }) {
-                    emit(
-                        &app,
-                        &id,
-                        AgentEvent::Notice {
-                            text: line.chars().take(2000).collect(),
-                        },
-                    );
-                }
-            }
-        }
         if terminal.is_none() || exit.is_none() || exit.is_some_and(|code| code != Some(0)) {
             // Reaped by us: exit code decides the status. Already reaped by
             // `kill_session`: the user stopped the turn.
@@ -403,6 +416,12 @@ fn spawn_reader(
                 text: None,
                 reason,
             });
+        }
+        if session.provider == Provider::Antigravity {
+            mark_permission_blocked(
+                &mut terminal,
+                permission_denied.load(std::sync::atomic::Ordering::Relaxed),
+            );
         }
         drop(prompt);
         if let Ok(mut prompt) = session.prompt.lock() {
@@ -826,10 +845,26 @@ pub fn agent_send(
     } else {
         None
     };
+    let options = session.options.lock().unwrap().clone();
+    if let Some(prefix) = prepared.strip_suffix(&prompt) {
+        if !prefix.ends_with("Current request:\n") {
+            prepared = format!("{prefix}Current request:\n{prompt}");
+        }
+    }
+    let source = if managed {
+        "scheduler"
+    } else if remote.unwrap_or(false) {
+        "phone"
+    } else {
+        "desktop"
+    };
+    prepared = format!(
+        "{}{prepared}",
+        crate::app_context::turn_context(workspace, provider, &options, source, yolo)
+    );
     std::fs::write(file, provider.input(&prepared))
         .map_err(|e| format!("failed to stage prompt: {e}"))?;
 
-    let options = session.options.lock().unwrap().clone();
     let mut cmd = providers::exec_command(
         provider,
         &cli_path,
@@ -954,6 +989,33 @@ mod tests {
         .unwrap()
     }
     use std::path::Path;
+
+    #[test]
+    fn headless_denial_overrides_success_but_preserves_stop_and_partial_output() {
+        use super::{headless_permission_denied, mark_permission_blocked};
+        use crate::events::AgentEvent;
+        assert!(headless_permission_denied("a tool required the command permission that headless mode cannot prompt for, so it was auto-denied"));
+        assert!(!headless_permission_denied("Access denied (os error 5)"));
+        assert!(!headless_permission_denied("Permission check passed"));
+        let mut event = Some(AgentEvent::TurnEnd {
+            status: "completed".into(),
+            text: Some("Partial answer".into()),
+            reason: None,
+        });
+        mark_permission_blocked(&mut event, true);
+        assert!(
+            matches!(&event, Some(AgentEvent::TurnEnd { status, text: Some(text), reason: Some(reason) }) if status == "blocked" && text == "Partial answer" && reason.contains("/permissions"))
+        );
+        let mut stopped = Some(AgentEvent::TurnEnd {
+            status: "cancelled".into(),
+            text: None,
+            reason: None,
+        });
+        mark_permission_blocked(&mut stopped, true);
+        assert!(
+            matches!(stopped, Some(AgentEvent::TurnEnd { status, .. }) if status == "cancelled")
+        );
+    }
 
     #[test]
     fn tab_id_is_sanitized_for_filenames() {

@@ -38,6 +38,7 @@ So I made it. **Velum Code is the app I built around that idea.** It started as 
 | **Real Windows notifications.** | Background Agent turns notify you when they finish or fail. Open the notification to return to its conversation. |
 | **Take the conversation with you.** | Follow live Agent activity, send messages, and stop tasks over private Tailscale or a USB cable. Pairing needs your desktop approval. |
 | **Choose the model and depth.** | Model catalogs from your CLIs, reasoning levels for each model, and preferences that carry into new conversations. |
+| **Give the agent its bearings.** | A project folder picker, access checks, automatic app context, and previewable diagnostics and chat layout attachments on desktop and phone. [How context works](docs/project-context.md). |
 | **Keep what matters.** | A local Markdown memory vault, shared preferences, project notes, and selective recall with a strict context budget. Edit the same notes on desktop, phone, or in Obsidian. |
 | **Make it your own.** | A permission-based plugin system, command palette integration, and a small TypeScript SDK. Plugins run on demand in isolated workers. |
 | **A team with personality.** | Named bots with profile pictures, editable soul.md and agent.md, preferred models and reasoning, and private memory that follows them across providers. |
@@ -77,7 +78,7 @@ Jobs run while Windows is awake and Velum is open or in the tray. Review/Done ta
 
 1. Open [Windows CI](https://github.com/velumix/VelumCode/actions/workflows/windows.yml) and choose the latest successful run.
 2. Download **VelumCode-windows-x64** from **Artifacts** and extract the ZIP.
-3. Run **Velum Code_0.6.0_x64-setup.exe**, then launch **Velum Code** from your desktop or Start menu.
+3. Run **Velum Code_0.6.1_x64-setup.exe**, then launch **Velum Code** from your desktop or Start menu.
 
 CI artifacts require a GitHub sign-in and are retained for 14 days. These are unsigned development builds. Install the bundle so Windows can register the app's notification identity and click handler.
 
@@ -266,7 +267,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Build
 
 The app uses **Tauri 2 + Rust**, **React 19 + TypeScript**, and **xterm.js over Windows ConPTY**. Chat translates each CLI’s structured output into shared messages, tool cards and turn status. Tray lifetime and notification delivery run in the native backend.
 
-See the [development guide](docs/development.md) for tests, native smoke checks, installer commands, and the project layout. The [0.6.0 QA report](docs/qa-0.6.0.md) records task planning and recovery checks; the [0.5.0 report](docs/qa-0.5.0.md) covers bot identity and scheduling. The [brand notes](docs/brand.md) cover the logo and assets.
+See the [development guide](docs/development.md) for tests, native smoke checks, installer commands, and the project layout. The [0.6.1 QA report](docs/qa-0.6.1.md) records project context and diagnostics checks; the [0.6.0 report](docs/qa-0.6.0.md) covers task planning and recovery. The [brand notes](docs/brand.md) cover the logo and assets.
 
 ## Where it stands
 

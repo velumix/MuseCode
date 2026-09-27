@@ -13,6 +13,8 @@ import Markdown from "../components/Markdown";
 import { transcript, type Replay, type Session } from "./transcript";
 
 import ModelControls from "../components/ModelControls";
+import { attachment, chatSnapshot, type Diagnostics } from '../context';
+const ContextPanel = lazy(() => import('../components/ContextPanel'));
 
 interface Device { id: string; name: string; control: boolean }
 interface Pending { name: string; code: string; expires_at: number }
@@ -57,6 +59,8 @@ export default function RemoteApp() {
   const [memorySession,setMemorySession]=useState("");
   const [boardSession,setBoardSession]=useState("");
   const [botsOpen,setBotsOpen]=useState(false);
+  const [context, setContext] = useState<{id:string;snapshot:string}|null>(null);
+  useEffect(() => { if (context && (!device || !sessions.some(s => s.id === context.id))) setContext(null); }, [context, device, sessions]);
   const [bots,setBots]=useState<BotProfile[]>([]);
   const [memorySeed,setMemorySeed]=useState<string>();
   const [listOpen, setListOpen] = useState(false);
@@ -226,6 +230,7 @@ export default function RemoteApp() {
       <button className="phone-icon-button" aria-label="Phone settings" onClick={() => setInstallHelp((value) => !value)}><Icon name="phone" size={21} /></button>
     </header>
     <nav className="phone-tools" aria-label="Workspace tools"><button disabled={!current||!connected} onClick={()=>setBotsOpen(true)}><Icon name="chat" size={17}/>Bots</button><button aria-label="Kanban" disabled={!current||!connected} onClick={()=>setBoardSession(selected)}><Icon name="board" size={17}/>Kanban</button><button aria-label="Memory" disabled={!current||!connected} onClick={()=>{setMemorySeed(undefined);setMemorySession(selected);}}><Icon name="memory" size={17}/>Memory</button></nav>
+    {current && <button type="button" className="phone-context" disabled={!connected} onClick={e => setContext({id:current.id,snapshot:chatSnapshot(e.currentTarget.closest('.phone-app'),current.provider || 'muse',current.options || defaultOptions,current.running,'phone')})}><Icon name="settings" size={15}/>Project context & diagnostics</button>}
     {installHelp && <section className="phone-settings" aria-label="Phone settings"><strong>{device.name}</strong><p>{computer || "Your desktop"}</p><p>{device.control ? "View and control · standard agent permissions" : "View-only access"}</p>
       {install ? <button onClick={() => void install.prompt().then(() => setInstall(null))}>Add to home screen</button> : <p>Use your browser menu → Add to Home screen or Install app.</p>}
       <button onClick={() => setSignout(true)}>Disconnect this phone</button>
@@ -267,5 +272,10 @@ export default function RemoteApp() {
       setDrafts(drafts=>({...drafts,[target]:prompt}));setSelected(target);setBoardSession("");
     }}/></Suspense>}
     {botsOpen&&current&&<Suspense fallback={null}><BotsPanel workspace={current.workspace} provider={current.provider||'muse'} options={current.options||defaultOptions} readOnly={!device.control||!connected} request={request=>api<BotView>('/bots',request)} automation={request=>api(`/sessions/${encodeURIComponent(selected)}/automation`,request)} memory={(id,request)=>api<MemoryView>(`/sessions/${encodeURIComponent(selected)}/bots/${encodeURIComponent(id)}/memory`,request)} loadModels={(provider,refresh)=>api<ModelCatalog>(`/providers/${provider}/models?refresh=${refresh}`)} onClose={()=>setBotsOpen(false)} onChat={device.control?(async bot=>{const result=await api<{id:string}>(`/sessions/${encodeURIComponent(selected)}/bots/${bot.id}/chat`,{});setSelected(result.id);setReplay(null);setBotsOpen(false);await refreshRef.current();}):undefined}/></Suspense>}
+    {context && <Suspense fallback={null}><ContextPanel key={context.id} snapshot={context.snapshot} load={() => api<Diagnostics>(`/sessions/${encodeURIComponent(context.id)}/diagnostics`)} onClose={() => setContext(null)} onAttach={device.control && connected ? (label, text) => {
+      const extra = attachment(label, text);
+      if ((drafts[context.id] || '').length + extra.length > 16000) throw new Error('Shorten your draft before adding this report, or copy it instead.');
+      setDrafts(previous => ({...previous, [context.id]:(previous[context.id] || '') + extra})); setContext(null);
+    } : undefined}/></Suspense>}
   </main>;
 }

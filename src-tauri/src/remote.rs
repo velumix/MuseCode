@@ -529,6 +529,7 @@ fn router(state: WebState) -> Router {
         .route("/api/sessions/{id}/bots/{bot}/memory", post(bot_memory))
         .route("/api/sessions/{id}/bots/{bot}/chat", post(bot_chat))
         .route("/api/sessions/{id}/automation", post(automation_request))
+        .route("/api/sessions/{id}/diagnostics", get(diagnostics))
         .route("/api/providers/{provider}/models", get(models))
         .route("/api/events", get(events))
         .fallback(asset)
@@ -815,6 +816,22 @@ async fn configure(
     )
     .map_err(|e| ApiError(StatusCode::CONFLICT, e))?;
     Ok(Json(json!({"ok":true})))
+}
+
+async fn diagnostics(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> ApiResult {
+    authenticate(&state, &headers, false)?;
+    let app = state.app.ok_or_else(|| bad("Desktop unavailable."))?;
+    let workspace = session_workspace(&app, &id)?;
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        crate::app_context::diagnostics(&app, &workspace)
+    })
+    .await
+    .map_err(|e| bad(e.to_string()))?;
+    Ok(Json(report))
 }
 
 fn session_workspace(app: &tauri::AppHandle, id: &str) -> Result<String, ApiError> {
@@ -1169,6 +1186,7 @@ mod tests {
             "/api/me",
             "/api/sessions",
             "/api/sessions/one",
+            "/api/sessions/one/diagnostics",
             "/api/events",
         ] {
             assert_eq!(

@@ -259,7 +259,7 @@ pub(crate) fn should_notify(
     foreground: bool,
     outcome: &str,
 ) -> bool {
-    enabled && !quitting && !foreground && matches!(outcome, "completed" | "failed")
+    enabled && !quitting && !foreground && matches!(outcome, "completed" | "failed" | "blocked")
 }
 
 pub fn notify_turn(app: &AppHandle, tab_id: &str, outcome: &str) {

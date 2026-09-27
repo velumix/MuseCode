@@ -92,3 +92,4 @@ body { background: var(--phone-bg); }
 @media (min-width: 761px) { .phone-app { border-left: 1px solid #343e4f; border-right: 1px solid #343e4f; } .phone-transcript { padding: 30px 40px; } }
 @media (prefers-reduced-motion: reduce) { .phone-pulse { animation: none; } }
 .phone-tools{display:flex;gap:8px;padding:8px 15px;border-bottom:1px solid #364154;flex:0 0 auto}.phone-tools button{display:flex;align-items:center;justify-content:center;gap:8px;flex:1;min-height:40px;border:1px solid #43536b;border-radius:8px;background:#263141;color:#d4e2f7;font-size:12px}.phone-tools button:disabled{opacity:.5}.phone-sessions{top:calc(206px + env(safe-area-inset-top))}
+.phone-context{display:flex;align-items:center;justify-content:center;gap:7px;flex-shrink:0;margin:0 16px 10px;min-height:36px;border:1px solid #374354;border-radius:8px;background:#1e2631;color:#b9cde8;font:inherit;font-size:12px;cursor:pointer}.phone-context:disabled{opacity:.5}

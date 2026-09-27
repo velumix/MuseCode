@@ -36,6 +36,7 @@ if (!args.includes("exec") && !args.includes("--input-format")) {
       conversation_id: "ae283c22-1851-4d5c-a5c5-d14d53c23b72",
     });
   const complete = () => {
+    if (provider === 'antigravity' && prompt.includes('BOT_DENIED')) console.error('Tool required command permission in headless mode and was auto-denied.');
     let answer = "Checked the fixture task and verified the result.";
     const ticket = raw.match(/"ticket":"([^"]+)"/)?.[1],
       revision = Number(raw.match(/Board revision: (\d+)/)?.[1]);

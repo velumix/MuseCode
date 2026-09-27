@@ -335,6 +335,15 @@ try {
   console.log(
     "PASS: Muse → Codex → Antigravity scheduled handoffs; bounded summaries, fresh sessions, applied board actions, review stops work",
   );
+  const denied = await card(research, 'BOT_DENIED BOT_MEMORY permission test');
+  const deniedJob = await jobFor(denied);
+  await request({action:'run',id:deniedJob.id});
+  await expect.poll(async()=>(await jobFor(denied)).status).toBe('blocked');
+  assert((await jobFor(denied)).paused,'Permission denial must pause immediately');
+  assert.notEqual((await board()).cards.find(c=>c.id===denied.id).column,'review','Denied run applied its board action');
+  const deniedMemory=await invoke('bots_memory',{id:research.id,workspace,request:{action:'list',query:''}});
+  assert(!deniedMemory.notes.some(n=>n.title==='Private deployment detail'),'Denied run saved a memory proposal');
+  console.log('PASS: successful CLI exit with a denied tool pauses the job and skips board actions and memory proposals');
   const stale = await card(grok, "BOT_STALE revision test");
   const staleJob = await jobFor(stale);
   await request({ action: "run", id: staleJob.id });

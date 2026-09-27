@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import Markdown from "./Markdown";
@@ -9,6 +9,8 @@ import type { PluginChatHandle } from "../plugins";
 import { readDraft, saveDraft } from "../desktopHistory";
 import type { BotIdentity } from '../bots';
 import BotAvatar from './BotAvatar';
+import { attachment, chatSnapshot, type AccessCheck, type Diagnostics } from '../context';
+const ContextPanel = lazy(() => import('./ContextPanel'));
 
 export type AgentStatus =
   | { kind: "starting" }
@@ -97,7 +99,7 @@ function isPlainAllow(decision: string): boolean {
 
 function statusTone(status: string): "ok" | "bad" | "busy" {
   if (status === "completed") return "ok";
-  if (status === "failed" || status === "rejected" || status === "cancelled") return "bad";
+  if (status === "failed" || status === "blocked" || status === "rejected" || status === "cancelled") return "bad";
   return "busy";
 }
 
@@ -248,6 +250,7 @@ function ToolBlock({ block }: { block: Extract<Block, { kind: "tool" }> }) {
 
 export default function ChatView({ provider, options, initialWorkspace, sessionId, active, sessionKey, onStatus, onWorkspace, onTitle, onRemember, onPluginHandle, botId, taskId }: ChatViewProps) {
   const [bot,setBot]=useState<BotIdentity|null>(null);
+  const [contextSnapshot, setContextSnapshot] = useState<string | null>(null);
   const optionsRef = useRef(options); optionsRef.current = options;
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [todos, setTodos] = useState<TodoEntry[]>([]);
@@ -394,7 +397,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
             const next: Block[] = prev.map((b) => b.kind === "assistant" ? { ...b, open: false }
               : b.kind === "tool" && b.status === "running" ? { ...b, status } : b);
             if (needsFinal) next.push({ id: ++idRef.current, kind: "assistant", text: finalText!, open: false });
-            if (status === "failed" || status === "cancelled") {
+            if (status === "failed" || status === "blocked" || status === "cancelled") {
               return [
                 ...next,
                 {
@@ -410,7 +413,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
           setRunning(false);
           runningRef.current = false;
           setActivity("");
-          setStatus(status === "completed" ? { kind: "done" } : status === "failed"
+          setStatus(status === "completed" ? { kind: "done" } : status === "failed" || status === "blocked"
             ? { kind: "error", message: reason || "Turn failed" } : { kind: "idle" });
           break;
         }
@@ -849,6 +852,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
           {yolo ? <YoloIcon /> : <Icon name="shield" size={16} />}<span>{yolo ? "YOLO on" : "Standard"}</span>
         </button>
         <span className="composer-hint">Shift + Enter for a new line</span>
+        <button type="button" className="yolo-btn" aria-label="Project context and diagnostics" title="Project context and diagnostics" disabled={!effective} onClick={e => setContextSnapshot(chatSnapshot(e.currentTarget.closest('.chat-wrap'), provider, options, running, 'desktop'))}><Icon name="settings" size={16}/></button>
         {running ? (
           <button type="button" className="composer-btn stop" onClick={stop} aria-label="Stop" title="Stop">
             <StopIcon />
@@ -868,7 +872,13 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
         </div>
       </div>
       <div className="workspace-bar">
-        <Icon name="folder" size={14} />
+        <button type="button" className="workspace-btn" aria-label="Choose project folder" title="Choose project folder, then Apply" disabled={running || applying} onClick={async () => {
+          if (runningRef.current || applyingRef.current) return;
+          applyingRef.current = true; setApplying(true); setWorkspaceError('');
+          try { const path = await invoke<string | null>('workspace_pick'); if (path) setDraft(path); }
+          catch (e) { setWorkspaceError(String(e)); }
+          finally { applyingRef.current = false; setApplying(false); }
+        }}><Icon name="folder" size={14} /></button>
         <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => {
           if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); void applyWorkspace(); }
         }} placeholder={effective || "Choose a workspace"} aria-label="Workspace directory" title={effective || "default (home)"} spellCheck={false} />
@@ -876,6 +886,11 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
         <span className="workspace-label">Workspace</span>
       </div>
       </div>
+      {contextSnapshot !== null && active && <Suspense fallback={null}><ContextPanel snapshot={contextSnapshot} load={() => invoke<Diagnostics>('app_diagnostics', { workspace: effective })} check={() => invoke<AccessCheck>('workspace_check', { workspace: effective, write: true })} onClose={() => setContextSnapshot(null)} onAttach={(label, text) => {
+        const extra = attachment(label, text);
+        if (input.length + extra.length > 64000) throw new Error('The message is too long to add this report. Copy it instead, or shorten your draft.');
+        setInput(previous => previous + extra); setContextSnapshot(null); composerRef.current?.focus();
+      }}/></Suspense>}
     </div>
   );
 }

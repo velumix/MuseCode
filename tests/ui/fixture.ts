@@ -259,9 +259,16 @@ export async function boot(page: Page, delay = 0) {
             return;
           }
           if (cmd === "agent_validate_workspace") {
+            if (args.workspace?.includes('denied')) throw 'Velum cannot list this folder. Check Windows folder access.';
             if (args.workspace?.includes("missing"))
               throw "workspace is not a directory";
             return args.workspace || "C:\\QA";
+          }
+          if (cmd === 'workspace_pick') return api.pickedFolder || null;
+          if (cmd === 'workspace_check') return {path:args.workspace,checked_at:1800000001,readable:true,writable:!api.readOnlyFolder,message:api.readOnlyFolder ? 'Folder listing works; creating a file failed. Read-only work is still available.' : 'Folder listing and temporary-file creation passed.'};
+          if (cmd === 'app_diagnostics') {
+            if (api.failDiagnostics) throw 'Diagnostics unavailable';
+            return {app:'Velum Code',version:'0.6.1',host_os:'windows',checked_at:1800000000,workspace:{path:'<selected-project>',directory_listing:true,git_repository:true,write_access:'not checked',message:'Folder listing passed. Write access and CLI tool permissions have not been tested.'},providers:[{provider:'muse',installed:true,authentication:'not checked',tool_connections:'not checked'},{provider:'antigravity',installed:true,authentication:'not checked',tool_connections:'not checked'}],memory:{readable:true,enabled:true,notes:2,budget_bytes:3000,capture:'review'},sessions:{active:0,failed:0,blocked:0}};
           }
           if (cmd === "agent_new") {
             if (delay) await new Promise((r) => setTimeout(r, delay));

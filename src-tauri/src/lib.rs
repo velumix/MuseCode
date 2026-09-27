@@ -1,3 +1,4 @@
+mod app_context;
 mod automation;
 mod bot_actions;
 mod bots;
@@ -50,6 +51,9 @@ pub fn run() {
         })
         .on_window_event(desktop::close_to_tray)
         .invoke_handler(tauri::generate_handler![
+            app_context::workspace_pick,
+            app_context::workspace_check,
+            app_context::app_diagnostics,
             bots::bots_request,
             bots::bots_memory,
             bots::bots_open,

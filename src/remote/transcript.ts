@@ -43,7 +43,7 @@ export function transcript(entries: Entry[]) {
       case "turn_end":
         activity = "";
         if (!seenAssistant && text(e.text)) blocks.push({ id: seq, kind: "assistant", text: text(e.text) });
-        if (e.status === "failed" || e.status === "cancelled") blocks.push({ id: seq, kind: "notice", text: text(e.reason) || (e.status === "cancelled" ? "Task stopped." : "Task failed. Check the desktop for details.") });
+        if (e.status === "failed" || e.status === "blocked" || e.status === "cancelled") blocks.push({ id: seq, kind: "notice", text: text(e.reason) || (e.status === "cancelled" ? "Task stopped." : "Task failed. Check the desktop for details.") });
         for (const tool of tools.values()) { if (tool.status === "running") tool.status = text(e.status); }
         assistant = undefined;
         break;
