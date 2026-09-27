@@ -86,7 +86,7 @@ try {
   await phone.goto(invitation.url);
   if (release) {
     await phone.evaluate(() => navigator.serviceWorker.ready.then(() => true));
-    await expect.poll(() => phone.evaluate(() => caches.keys())).toEqual(["velum-phone-v5"]);
+    await expect.poll(() => phone.evaluate(() => caches.keys())).toEqual(["velum-phone-v6"]);
     await context.setOffline(true);
     const offline = await context.newPage();
     await offline.goto(new URL("/", invitation.url).href);
@@ -94,7 +94,7 @@ try {
     assert(!(await offline.locator("body").innerText()).includes("Old phone shell"));
     await offline.close();
     await context.setOffline(false);
-    const cached = await phone.evaluate(async () => (await (await caches.open("velum-phone-v5")).keys()).map((r) => r.url));
+    const cached = await phone.evaluate(async () => (await (await caches.open("velum-phone-v6")).keys()).map((r) => r.url));
     assert(cached.every((url) => !url.includes("/api/") && !url.includes("pair=")), "Phone cache contains private data");
     console.log("PASS: old phone cache migrates, offline launch has current branding, private data stays uncached");
   }
@@ -161,6 +161,25 @@ try {
   await expect(phone.locator(".review .kanban-card-title")).toHaveText("From phone board");
   await phone.getByRole("button",{name:"Close Kanban"}).click();
   console.log("PASS: paired phone and desktop edit the same persistent Kanban board");
+  await phone.getByRole('button',{name:'Bots',exact:true}).click();
+  await phone.getByRole('button',{name:'New bot',exact:true}).click();
+  await phone.getByLabel('Bot name',{exact:true}).fill('Phone teammate');
+  await expect(phone.locator('.bots-panel').getByRole('button',{name:/^Model: Fixture Muse$/})).toBeEnabled();
+  await phone.getByRole('button',{name:'Automation',exact:true}).click();
+  await phone.getByLabel('Run automatically on schedule').uncheck();
+  await expect(phone.getByText(/Next runs:/)).toBeVisible();
+  await phone.getByRole('button',{name:'Save bot',exact:true}).click();
+  const savedBots=await invoke('bots_request',{request:{action:'list'}});
+  assert.equal(savedBots.profiles[0].name,'Phone teammate');assert.equal(savedBots.profiles[0].automatic,false);
+  await phone.locator('.bot-card').getByRole('button',{name:'Memory',exact:true}).click();
+  await phone.getByRole('button',{name:'New note',exact:true}).click();await phone.getByLabel('Memory title',{exact:true}).fill('Private phone note');await phone.getByLabel('Memory note',{exact:true}).fill('This memory belongs to Phone teammate.');await phone.getByRole('button',{name:'Save note',exact:true}).click();await phone.getByRole('button',{name:'Close memory'}).click();
+  const botVault=await invoke('bots_memory',{id:savedBots.profiles[0].id,workspace:sessions[0].workspace,request:{action:'list',query:''}});assert(botVault.notes.some(n=>n.title==='Private phone note'));
+  await phone.locator('.bot-card').getByRole('button',{name:'Chat',exact:true}).click();
+  await expect(phone.locator('.bots-panel')).toHaveCount(0);await expect(phone.locator('.phone-session-select')).toContainText('Phone teammate');await expect(phone.locator('.phone-online')).toBeVisible();
+  assert.equal((await phone.evaluate(async()=>(await (await fetch('/api/sessions')).json()).sessions)).length,2);
+  await phone.screenshot({path:path.join(run,'bot-phone.png')});
+  await phone.locator('.phone-session-select').click();await phone.locator('.phone-sessions button').filter({hasText:'Desktop fixture'}).click();await expect(phone.getByLabel('Message your desktop agent')).toHaveValue('Recover this phone draft');
+  console.log('PASS: paired phone creates native bot profiles/private memories, previews cron, and opens the correct desktop bot conversation without sending');
   if (usb) {
     await invoke("remote_usb_disconnect");
     await expect(phone.getByLabel("Message your desktop agent")).toHaveCount(0);

@@ -32,6 +32,9 @@ pub struct TodoItem {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AgentEvent {
+    BotIdentity {
+        bot: crate::bots::Identity,
+    },
     MemoryContext {
         titles: Vec<String>,
         bytes: usize,

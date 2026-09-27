@@ -40,6 +40,8 @@ So I made it. **Velum Code is the app I built around that idea.** It started as 
 | **Choose the model and depth.** | Model catalogs from your CLIs, reasoning levels for each model, and preferences that carry into new conversations. |
 | **Keep what matters.** | A local Markdown memory vault, shared preferences, project notes, and selective recall with a strict context budget. Edit the same notes on desktop, phone, or in Obsidian. |
 | **Make it your own.** | A permission-based plugin system, command palette integration, and a small TypeScript SDK. Plugins run on demand in isolated workers. |
+| **A team with personality.** | Named bots with profile pictures, editable soul.md and agent.md, preferred models and reasoning, and private memory that follows them across providers. |
+| **Work that keeps moving.** | Kanban assignments create cron jobs. Bots update cards and hand off to teammates, with pause/stop controls and a clear activity history. |
 | **A quieter workspace.** | Charcoal surfaces, blue accents, readable conversations, and motion that respects reduced-motion preferences. |
 | **See what the agent is doing.** | Streaming responses, Markdown and code blocks, tool activity, task lists, and visible errors. |
 | **Chat and terminal, together.** | Every tab has an Agent view and an embedded terminal. Switching views preserves both. |
@@ -59,13 +61,23 @@ So I made it. **Velum Code is the app I built around that idea.** It started as 
 
 <p align="center"><sub>Actual app interface with sample content. Click a preview to see it at full size.</sub></p>
 
+## Your own bot team
+
+Open **Bots → New bot** and give your assistant a name, picture, personality, and preferred provider/model. Edit **soul.md** for its voice and **agent.md** for its working style. Its private Markdown memory stays with it when you switch from Muse to Codex or Antigravity.
+
+Assign a bot to a Kanban card to create a scheduled job. Choose automatic work or **Run now** approval, then follow the results in **Bots → Activity**. Ask a bot to check the board, update its work, or hand off to a teammate with the right specialty. Desktop and phone share the same controls.
+
+<p align="center"><img src="docs/images/bots.png" alt="Named bot profiles with provider preferences, chat, editing and private memory controls" width="940" /></p>
+
+Jobs run while Windows is awake and Velum is open or in the tray. Review/Done tasks stop; interrupted runs pause for inspection. [Read the bots guide](docs/bots.md) for memory budgets, cron examples, handoffs, permissions, and limits.
+
 ## Get VelumCode
 
 **You'll need Windows x64 and at least one supported CLI.** Install and sign in to the CLI you want to use, then choose it from **AI provider** in the app.
 
 1. Open [Windows CI](https://github.com/velumix/VelumCode/actions/workflows/windows.yml) and choose the latest successful run.
 2. Download **VelumCode-windows-x64** from **Artifacts** and extract the ZIP.
-3. Run **Velum Code_0.4.0_x64-setup.exe**, then launch **Velum Code** from your desktop or Start menu.
+3. Run **Velum Code_0.5.0_x64-setup.exe**, then launch **Velum Code** from your desktop or Start menu.
 
 CI artifacts require a GitHub sign-in and are retained for 14 days. These are unsigned development builds. Install the bundle so Windows can register the app's notification identity and click handler.
 
@@ -254,7 +266,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Build
 
 The app uses **Tauri 2 + Rust**, **React 19 + TypeScript**, and **xterm.js over Windows ConPTY**. Chat translates each CLI’s structured output into shared messages, tool cards and turn status. Tray lifetime and notification delivery run in the native backend.
 
-See the [development guide](docs/development.md) for tests, native smoke checks, installer commands, and the project layout. The [0.4.0 QA report](docs/qa-0.4.0.md) records the verified behavior and remaining work; the [brand notes](docs/brand.md) cover the logo and assets.
+See the [development guide](docs/development.md) for tests, native smoke checks, installer commands, and the project layout. The [0.5.0 QA report](docs/qa-0.5.0.md) records bot and scheduling verification; the [brand notes](docs/brand.md) cover the logo and assets.
 
 ## Where it stands
 

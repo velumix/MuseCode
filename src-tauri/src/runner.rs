@@ -18,6 +18,10 @@ use crate::pty::home_dir;
 const STDERR_TAIL_LINES: usize = 30;
 
 pub struct AgentSession {
+    bot_id: Option<String>,
+    bot_identity: Mutex<Option<crate::bots::Identity>>,
+    task_id: Option<String>,
+    shared_memory: Mutex<crate::memory::Session>,
     tab_id: String,
     session_id: Mutex<String>,
     provider: Provider,
@@ -49,6 +53,18 @@ impl AgentSession {
 }
 
 impl AgentState {
+    pub fn stop_id(&self, id: &str) {
+        let session = self.sessions.lock().ok().and_then(|s| s.get(id).cloned());
+        if let Some(s) = session {
+            s.stop();
+        }
+    }
+    pub fn workspace_busy(&self, workspace: &str) -> bool {
+        let workspace = std::fs::canonicalize(workspace).ok();
+        self.sessions.lock().unwrap().values().any(|s| {
+            *s.running.lock().unwrap() && std::fs::canonicalize(&s.workspace).ok() == workspace
+        })
+    }
     pub fn shutdown(&self) {
         if let Ok(mut sessions) = self.sessions.lock() {
             for (_, session) in sessions.drain() {
@@ -60,6 +76,7 @@ impl AgentState {
 
 #[derive(serde::Serialize, Clone)]
 pub struct NewInfo {
+    pub bot: Option<crate::bots::Identity>,
     pub id: String,
     pub session_id: String,
     pub workspace: String,
@@ -215,6 +232,10 @@ fn reap_child(session: &AgentSession) -> Option<Option<i32>> {
     }
 }
 
+struct TurnContext {
+    memory_mode: crate::memory::Capture,
+    action_context: Option<crate::bot_actions::Context>,
+}
 fn spawn_reader(
     app: AppHandle,
     id: String,
@@ -222,8 +243,12 @@ fn spawn_reader(
     prompt: StagedPrompt,
     stdout: std::process::ChildStdout,
     stderr: Option<std::process::ChildStderr>,
-    memory_mode: crate::memory::Capture,
+    context: TurnContext,
 ) {
+    let TurnContext {
+        memory_mode,
+        action_context,
+    } = context;
     // Drain stderr on a side thread so verbose children can never block on
     // a full pipe; the tail is only surfaced when the turn dies silently.
     let stderr_tail: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
@@ -249,6 +274,12 @@ fn spawn_reader(
         let mut memory_filter = crate::memory::Filter::default();
         let mut final_proposal = None;
         let mut invalid_proposal = false;
+        let mut bot_output = crate::bot_actions::Output::default();
+        let mut final_action = None;
+        let mut invalid_action = false;
+        let mut answer = String::new();
+        let mut action_error = None;
+        let mut action_report = None;
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             let events = fold.fold_line(&line);
             if let Some(resume_id) = &fold.session_id {
@@ -257,7 +288,26 @@ fn spawn_reader(
                     .resume_id(&id, resume_id);
             }
             for mut event in events {
-                if memory_mode != crate::memory::Capture::Manual {
+                if action_context.is_some() {
+                    if let AgentEvent::AssistantDelta { text } = &mut event {
+                        *text = bot_output.push(text);
+                        if text.is_empty() {
+                            continue;
+                        }
+                    }
+                    if let AgentEvent::TurnEnd {
+                        text: Some(text), ..
+                    } = &mut event
+                    {
+                        let mut output = crate::bot_actions::Output::default();
+                        let mut clean = output.push(text);
+                        clean.push_str(&output.finish());
+                        *text = clean;
+                        final_action = output.action;
+                        final_proposal = output.memory;
+                        invalid_action |= output.invalid;
+                    }
+                } else if memory_mode != crate::memory::Capture::Manual {
                     if let AgentEvent::AssistantDelta { text } = &mut event {
                         *text = memory_filter.push(text);
                         if text.is_empty() {
@@ -273,6 +323,17 @@ fn spawn_reader(
                         final_proposal = proposal;
                         invalid_proposal |= invalid;
                     }
+                }
+                match &event {
+                    AgentEvent::AssistantDelta { text } => {
+                        if answer.len() < 16000 {
+                            answer.extend(text.chars().take(16000 - answer.len()));
+                        }
+                    }
+                    AgentEvent::TurnEnd {
+                        text: Some(text), ..
+                    } if !text.is_empty() => answer = text.chars().take(16000).collect(),
+                    _ => {}
                 }
                 if matches!(event, AgentEvent::TurnEnd { .. }) {
                     terminal = Some(event);
@@ -359,17 +420,23 @@ fn spawn_reader(
         *session.running.lock().unwrap() = false;
         let mut outcome = None;
         if current {
-            let tail = memory_filter.finish();
+            let tail = if action_context.is_some() {
+                bot_output.finish()
+            } else {
+                memory_filter.finish()
+            };
             if !tail.is_empty() {
+                answer.push_str(&tail);
                 emit(&app, &id, AgentEvent::AssistantDelta { text: tail });
             }
             if !matches!(&terminal,Some(AgentEvent::TurnEnd{status,..}) if status=="completed") {
                 // A failed CLI may never have accepted its input. Re-send
                 // relevant context next time rather than trusting its history.
                 *session.memory.lock().unwrap() = crate::memory::Session::default();
+                *session.shared_memory.lock().unwrap() = crate::memory::Session::default();
             }
             if matches!(&terminal,Some(AgentEvent::TurnEnd{status,..}) if status=="completed") {
-                if memory_filter.invalid || invalid_proposal {
+                if memory_filter.invalid || invalid_proposal || bot_output.invalid {
                     emit(
                         &app,
                         &id,
@@ -379,13 +446,29 @@ fn spawn_reader(
                         },
                     );
                 }
-                if let Some(proposal) = memory_filter.proposal.or(final_proposal) {
-                    match app.state::<crate::memory::Store>().capture(
-                        &session.workspace.display().to_string(),
-                        &proposal,
-                        memory_mode,
-                        session.provider.label(),
-                    ) {
+                let valid_memory =
+                    !(memory_filter.invalid || invalid_proposal || bot_output.invalid);
+                if let Some(proposal) = bot_output
+                    .memory
+                    .or(memory_filter.proposal)
+                    .or(final_proposal)
+                    .filter(|_| valid_memory)
+                {
+                    let private = session
+                        .bot_id
+                        .as_ref()
+                        .map(|id| app.state::<crate::bots::Store>().memory(id))
+                        .transpose();
+                    let capture = private.and_then(|private| {
+                        let global = app.state::<crate::memory::Store>();
+                        private.as_deref().unwrap_or(&global).capture(
+                            &session.workspace.display().to_string(),
+                            &proposal,
+                            memory_mode,
+                            session.provider.label(),
+                        )
+                    });
+                    match capture {
                         Ok(count) if count > 0 => {
                             crate::memory::changed(&app);
                             emit(&app,&id,AgentEvent::Notice{text:format!("{count} memory note(s) added to the vault. Open Memory to view them.")});
@@ -400,17 +483,63 @@ fn spawn_reader(
                         _ => {}
                     }
                 }
+                if let Some(context) = &action_context {
+                    if invalid_action || bot_output.invalid {
+                        let text="Incomplete or duplicate bot actions were skipped. The board was not changed.".to_owned();
+                        action_error = Some(text.clone());
+                        emit(&app, &id, AgentEvent::Notice { text });
+                    } else if let Some(action) = bot_output.action.or(final_action) {
+                        let result = crate::bot_actions::apply(
+                            &app,
+                            &session.workspace.display().to_string(),
+                            &id,
+                            context,
+                            &action,
+                        );
+                        let text = match result {
+                            Ok(text) => {
+                                action_report = Some(text.clone());
+                                text
+                            }
+                            Err(e) => {
+                                let text = format!("Bot actions: {e}");
+                                action_error = Some(text.clone());
+                                text
+                            }
+                        };
+                        emit(&app, &id, AgentEvent::Notice { text });
+                    }
+                }
             }
             if let Some(event) = terminal {
                 emit(&app, &id, event.clone());
-                if let AgentEvent::TurnEnd { status, .. } = event {
-                    outcome = Some(status);
+                if let AgentEvent::TurnEnd { status, reason, .. } = event {
+                    outcome = Some((status, reason));
                 }
             }
         }
         drop(sessions);
-        if let Some(status) = outcome {
+        if let Some((status, reason)) = outcome {
             crate::desktop::notify_turn(&app, &session.tab_id, &status);
+            if let Err(error) = crate::automation::finish(
+                &app,
+                &id,
+                if action_error.is_some() {
+                    "review"
+                } else {
+                    &status
+                },
+                &answer,
+                action_error.or(action_report).or(reason),
+            ) {
+                emit(
+                    &app,
+                    &id,
+                    AgentEvent::Notice {
+                        text: format!("Could not finish the scheduled run: {error}"),
+                    },
+                );
+            }
         }
     });
 }
@@ -420,6 +549,7 @@ fn spawn_reader(
 /// registered under `id`. A bad workspace leaves any existing session
 /// untouched.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Preserve the named IPC arguments used by existing desktops.
 pub fn agent_new(
     app: AppHandle,
     id: String,
@@ -428,16 +558,24 @@ pub fn agent_new(
     provider: Option<Provider>,
     options: Option<RunOptions>,
     resume: Option<bool>,
+    bot_id: Option<String>,
+    task_id: Option<String>,
 ) -> Result<NewInfo, String> {
     let state = app.state::<AgentState>();
     let workspace = resolve_workspace(workspace)?;
     let provider = provider.unwrap_or_default();
+    let bot = bot_id
+        .as_ref()
+        .map(|id| app.state::<crate::bots::Store>().get(id))
+        .transpose()?;
     let options = options.unwrap_or_default();
     options.validate(provider)?;
     let tab_id = tab_id.unwrap_or_else(|| id.clone());
     let history = app.state::<crate::history::HistoryState>();
     let saved = if resume.unwrap_or(false) {
-        history.load(&tab_id, &workspace.display().to_string(), provider)?
+        history
+            .load(&tab_id, &workspace.display().to_string(), provider)?
+            .filter(|saved| saved.bot_id == bot_id)
     } else {
         None
     };
@@ -455,6 +593,10 @@ pub fn agent_new(
         .insert(
             id.clone(),
             Arc::new(AgentSession {
+                bot_id: bot_id.clone(),
+                bot_identity: Mutex::new(bot.as_ref().map(|p| p.identity())),
+                task_id,
+                shared_memory: Mutex::new(crate::memory::Session::default()),
                 tab_id: tab_id.clone(),
                 session_id: Mutex::new(session_id.clone()),
                 provider,
@@ -486,11 +628,22 @@ pub fn agent_new(
         provider,
         session_id.clone(),
     );
+    history.bind_bot(&id, bot_id);
+    if let Some(profile) = &bot {
+        emit(
+            &app,
+            &id,
+            AgentEvent::BotIdentity {
+                bot: profile.identity(),
+            },
+        );
+    }
     if truncated {
         history.mark_truncated(&id);
     }
     crate::remote::changed(&app);
     Ok(NewInfo {
+        bot: bot.map(|p| p.identity()),
         id,
         session_id,
         workspace: workspace.display().to_string(),
@@ -572,6 +725,24 @@ pub fn agent_send(
         return Err("a turn is already running — stop it first".to_string());
     }
     let session = Arc::clone(session);
+    let managed = app.state::<crate::automation::Store>().managed(&id);
+    if sessions.iter().any(|(other_id, other)| {
+        other_id != &id
+            && *other.running.lock().unwrap()
+            && std::fs::canonicalize(&other.workspace).ok()
+                == std::fs::canonicalize(&session.workspace).ok()
+            && (managed || app.state::<crate::automation::Store>().managed(other_id))
+    }) {
+        return Err("Scheduled work and chat cannot run together in the same workspace. Wait for the current turn or stop it first.".into());
+    }
+    let bot = session
+        .bot_id
+        .as_ref()
+        .map(|bot| app.state::<crate::bots::Store>().get(bot))
+        .transpose()?;
+    if bot.as_ref().is_some_and(|bot| !bot.enabled) {
+        return Err("This bot is disabled. Enable it from Bots before starting work.".into());
+    }
     let provider = session.provider;
     let cli_path = provider.resolve().ok_or_else(|| provider.missing())?;
     let session_id = session.session_id.lock().unwrap().clone();
@@ -584,11 +755,47 @@ pub fn agent_send(
         std::fs::create_dir_all(dir).map_err(|e| format!("failed to stage prompt: {e}"))?;
     }
     let mut next_memory = session.memory.lock().unwrap().clone();
-    let (prepared, memory_usage, memory_mode) = match app.state::<crate::memory::Store>().prepare(
-        &workspace.display().to_string(),
-        &prompt,
-        &mut next_memory,
-    ) {
+    let mut next_shared = session.shared_memory.lock().unwrap().clone();
+    let memory_result = if let Some(bot) = &bot {
+        (|| {
+            let global = app.state::<crate::memory::Store>();
+            let shared_budget = if bot.shared_memory {
+                bot.memory_budget / 3
+            } else {
+                0
+            };
+            let (shared, shared_usage, _) = global.prepare_limited(
+                &workspace.display().to_string(),
+                &prompt,
+                &mut next_shared,
+                Some(shared_budget),
+                false,
+            )?;
+            let private = app.state::<crate::bots::Store>().memory(&bot.id)?;
+            let (own, mut usage, mode) = private.prepare_limited(
+                &workspace.display().to_string(),
+                &prompt,
+                &mut next_memory,
+                Some(bot.memory_budget - shared_usage.bytes),
+                true,
+            )?;
+            usage.bytes += shared_usage.bytes;
+            usage.titles.extend(shared_usage.titles);
+            usage.budget_bytes = bot.memory_budget;
+            Ok((
+                format!("{}{own}", shared.strip_suffix(&prompt).unwrap_or("")),
+                usage,
+                mode,
+            ))
+        })()
+    } else {
+        app.state::<crate::memory::Store>().prepare(
+            &workspace.display().to_string(),
+            &prompt,
+            &mut next_memory,
+        )
+    };
+    let (mut prepared, memory_usage, memory_mode) = match memory_result {
         Ok(value) => value,
         Err(error) => {
             emit(
@@ -604,6 +811,20 @@ pub fn agent_send(
                 crate::memory::Capture::Manual,
             )
         }
+    };
+    let action_context = if let Some(bot) = &bot {
+        let identity = app.state::<crate::bots::Store>().context(bot)?;
+        let (context, board) = crate::bot_actions::prepare(
+            &app,
+            bot,
+            &workspace.display().to_string(),
+            session.task_id.as_deref(),
+            &turn_id,
+        )?;
+        prepared = format!("{identity}{board}\n{prepared}");
+        Some(context)
+    } else {
+        None
     };
     std::fs::write(file, provider.input(&prepared))
         .map_err(|e| format!("failed to stage prompt: {e}"))?;
@@ -624,6 +845,7 @@ pub fn agent_send(
 
     let mut child = child;
     *session.memory.lock().unwrap() = next_memory;
+    *session.shared_memory.lock().unwrap() = next_shared;
     let stdout = child.stdout.take().ok_or_else(|| {
         let _ = child.kill();
         "could not capture agent output".to_string()
@@ -646,6 +868,14 @@ pub fn agent_send(
             .map_err(|_| "agent state is unavailable".to_string())? = Some(child);
     }
     drop(sessions);
+    if let Some(bot) = bot {
+        let identity = bot.identity();
+        let mut previous = session.bot_identity.lock().unwrap();
+        if previous.as_ref() != Some(&identity) {
+            *previous = Some(identity.clone());
+            emit(&app, &id, AgentEvent::BotIdentity { bot: identity });
+        }
+    }
     emit(
         &app,
         &id,
@@ -670,7 +900,10 @@ pub fn agent_send(
         staged,
         stdout,
         stderr,
-        memory_mode,
+        TurnContext {
+            memory_mode,
+            action_context,
+        },
     );
     Ok(TurnInfo { id, turn_id })
 }

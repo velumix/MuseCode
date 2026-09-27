@@ -32,12 +32,14 @@ export default function MemoryPanel({
   readOnly = false,
   openVault,
   seed,
+  ownerName,
 }: {
   request: (request: MemoryRequest) => Promise<MemoryView>;
   onClose: () => void;
   readOnly?: boolean;
   openVault?: () => Promise<unknown>;
   seed?: string;
+  ownerName?: string;
 }) {
   const [view, setView] = useState<MemoryView | null>(null);
   const [excerpt] = useState(() => seedExcerpt(seed || ""));
@@ -189,7 +191,7 @@ export default function MemoryPanel({
         <header className="memory-header">
           <div>
             <span className="memory-eyebrow">Your local vault</span>
-            <h2 id="memory-title">Memory</h2>
+            <h2 id="memory-title">{ownerName ? `${ownerName}'s memory` : 'Memory'}</h2>
           </div>
           <button
             type="button"
@@ -472,7 +474,7 @@ export default function MemoryPanel({
                       }
                     >
                       <option value="project">This project</option>
-                      <option value="shared">Shared across projects</option>
+                      <option value="shared">{ownerName?'Private to this bot · all projects':'Shared across projects'}</option>
                     </select>
                   </label>
                   <label className="memory-check">

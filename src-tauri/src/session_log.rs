@@ -15,6 +15,7 @@ pub struct Entry {
 
 #[derive(Clone, Serialize)]
 pub struct Summary {
+    pub bot: Option<crate::bots::Identity>,
     pub options: crate::provider_models::RunOptions,
     pub provider: crate::providers::Provider,
     pub id: String,
@@ -27,6 +28,7 @@ pub struct Summary {
 
 struct Log {
     summary: Summary,
+    started: bool,
     events: VecDeque<(Entry, usize)>,
     bytes: usize,
 }
@@ -57,6 +59,7 @@ impl SessionLog {
             id.into(),
             Log {
                 summary: Summary {
+                    bot: None,
                     options: crate::provider_models::RunOptions::default(),
                     provider,
                     id: id.into(),
@@ -67,6 +70,7 @@ impl SessionLog {
                     revision: 0,
                 },
                 events: VecDeque::new(),
+                started: false,
                 bytes: 0,
             },
         );
@@ -92,8 +96,12 @@ impl SessionLog {
             return;
         };
         match event {
+            AgentEvent::BotIdentity { bot } => {
+                log.summary.bot = Some(bot.clone());
+            }
             AgentEvent::TurnStart { prompt, .. } => {
-                if log.summary.revision == 0 {
+                if !log.started {
+                    log.started = true;
                     log.summary.title = prompt
                         .split_whitespace()
                         .collect::<Vec<_>>()
@@ -162,6 +170,38 @@ impl SessionLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bot_identity_does_not_prevent_the_first_prompt_from_naming_a_conversation() {
+        let log = SessionLog::default();
+        log.register("bot", "workspace".into());
+        log.record(
+            "bot",
+            &AgentEvent::BotIdentity {
+                bot: crate::bots::Identity {
+                    id: "id".into(),
+                    name: "Grokbot".into(),
+                    avatar: String::new(),
+                    color: "#79a9ff".into(),
+                },
+            },
+        );
+        log.record(
+            "bot",
+            &AgentEvent::TurnStart {
+                prompt: "Review this change".into(),
+                remote: false,
+            },
+        );
+        log.record(
+            "bot",
+            &AgentEvent::TurnStart {
+                prompt: "A follow-up".into(),
+                remote: true,
+            },
+        );
+        assert_eq!(log.summaries()[0].title, "Review this change");
+        assert_eq!(log.summaries()[0].bot.as_ref().unwrap().name, "Grokbot");
+    }
     #[test]
     fn replay_is_ordered_and_tracks_remote_turns_without_cli_echoes() {
         let log = SessionLog::default();

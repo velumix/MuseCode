@@ -2,8 +2,11 @@ import type { PtyStatus } from "./TerminalView";
 import type { AgentStatus } from "./ChatView";
 import Icon from "./Icon";
 import { providerNames, type Provider } from "../providers";
+import type {BotIdentity} from '../bots';
+import BotAvatar from './BotAvatar';
 
 export interface TabInfo {
+  bot?: BotIdentity;
   provider: Provider;
   id: string;
   title: string;
@@ -19,6 +22,7 @@ interface TabBarProps {
   onCommands: () => void;
   onPlugins: () => void;
   onKanban: () => void;
+  onBots: () => void;
   workspace?: string;
 }
 
@@ -35,7 +39,7 @@ function sessionDetail(status: PtyStatus | AgentStatus): string {
   return "Ready when you are";
 }
 
-export default function TabBar({ tabs, activeId, onSelect, onClose, onNew, onCommands, onPlugins, onKanban, workspace }: TabBarProps) {
+export default function TabBar({ tabs, activeId, onSelect, onClose, onNew, onCommands, onPlugins, onKanban, onBots, workspace }: TabBarProps) {
   const project = workspace?.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "Your workspace";
   return (
     <aside className="sidebar" aria-label="Conversations">
@@ -76,8 +80,8 @@ export default function TabBar({ tabs, activeId, onSelect, onClose, onNew, onCom
             if (e.button === 1) onClose(t.id);
           }}
         >
-          <span className="conversation-icon"><Icon name="chat" size={19} /></span>
-          <span className="tab-copy"><span className="tab-title">{conversationTitle(t.title)}</span><span className="tab-detail">{providerNames[t.provider]} · {sessionDetail(t.status)}</span></span>
+          <span className="conversation-icon">{t.bot?<BotAvatar bot={t.bot} size={32}/>:<Icon name="chat" size={19}/>}</span>
+          <span className="tab-copy"><span className="tab-title">{conversationTitle(t.title)}</span><span className="tab-detail">{t.bot?.name||providerNames[t.provider]} · {sessionDetail(t.status)}</span></span>
           {t.status.kind === "running" && <span className="status-dot running" aria-hidden="true" />}
           <span
             className="tab-close"
@@ -94,6 +98,7 @@ export default function TabBar({ tabs, activeId, onSelect, onClose, onNew, onCom
       ))}
       </div>
       <div className="sidebar-footer">
+        <button type="button" onClick={onBots} aria-label="Bots" title="Bots and schedules"><Icon name="chat" size={18}/><span>Bots</span></button>
         <button type="button" onClick={onKanban} disabled={!workspace} aria-label="Kanban" title="Workspace Kanban"><Icon name="board" size={18}/><span>Kanban</span></button>
         <button type="button" onClick={onPlugins} aria-label="Plugins" title="Plugins"><Icon name="code" size={18}/><span>Plugins</span></button>
         <button type="button" onClick={onCommands} aria-label="Command menu" title="Command menu (Ctrl+K)"><Icon name="command" size={18} /><span>Command menu</span><kbd>Ctrl K</kbd></button>

@@ -379,3 +379,4 @@
     transition: none !important;
   }
 }
+.kanban-schedule{padding:16px;border:1px solid #46546a;background:#171e29;border-radius:10px;display:flex;flex-direction:column;gap:14px}.kanban-schedule h3{margin:0;font-size:14px}.kanban-assignee{display:flex;align-items:center;gap:7px;font-size:11px;color:#c1d1e8;margin:12px 0}.kanban-assignee small{margin-left:auto;font-size:10px;color:#a6b8d2}.kanban-card .kanban-bot-update{font-size:11px;color:#b6c8e1;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.kanban-bot-summary{padding:15px;background:#1e2b3e;border-radius:8px;font-size:12px;line-height:1.65}.kanban-bot-summary p{white-space:pre-wrap}

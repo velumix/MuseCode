@@ -1,3 +1,6 @@
+mod automation;
+mod bot_actions;
+mod bots;
 mod desktop;
 mod events;
 mod history;
@@ -36,15 +39,21 @@ pub fn run() {
         .manage(session_log::SessionLog::default())
         .setup(|app| {
             memory::setup(app.handle());
+            bots::setup(app.handle());
             plugins::setup(app.handle());
             plugin_catalog::setup(app.handle());
             kanban::setup(app.handle());
             history::setup(app.handle());
+            automation::setup(app.handle());
             desktop::setup(app)?;
             remote::setup(app)
         })
         .on_window_event(desktop::close_to_tray)
         .invoke_handler(tauri::generate_handler![
+            bots::bots_request,
+            bots::bots_memory,
+            bots::bots_open,
+            automation::automation_request,
             memory::memory_request,
             kanban::kanban_request,
             memory::memory_open,
@@ -97,6 +106,7 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
+                automation::shutdown(app);
                 remote::shutdown(app);
                 desktop::shutdown(app);
                 app.state::<AgentState>().shutdown();

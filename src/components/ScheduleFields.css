@@ -1,0 +1,48 @@
+.schedule-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.schedule-fields > label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.schedule-fields input:not([type="checkbox"]) {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  background: #131a23;
+  color: #e3eaf5;
+  border: 1px solid #45536a;
+  border-radius: 8px;
+  font: inherit;
+  min-height: 38px;
+}
+.schedule-fields .bot-check {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 400;
+}
+.schedule-fields input[type="checkbox"] {
+  accent-color: #a7c8ff;
+  width: 16px;
+  height: 16px;
+}
+.schedule-fields small,
+.schedule-fields .bot-help,
+.kanban-schedule > .bot-help {
+  color: #b7c5da;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+.schedule-fields .bot-error {
+  color: #ffbaba;
+  font-size: 12px;
+}

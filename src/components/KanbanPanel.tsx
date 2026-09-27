@@ -8,6 +8,9 @@ import {
 } from "../kanban";
 import Icon from "./Icon";
 import "./KanbanPanel.css";
+import {assignmentFor,type BotProfile} from '../bots';
+import BotAvatar from './BotAvatar';
+import ScheduleFields from './ScheduleFields';
 
 export default function KanbanPanel({
   workspace,
@@ -15,12 +18,16 @@ export default function KanbanPanel({
   onClose,
   onWork,
   readOnly = false,
+  bots = [],
+  previewSchedule,
 }: {
   workspace: string;
   request: (q: BoardRequest) => Promise<Board>;
   onClose: () => void;
-  onWork?: (card: Card) => void;
+  onWork?: (card: Card) => void | Promise<void>;
   readOnly?: boolean;
+  bots?: BotProfile[];
+  previewSchedule?: (cron:string,timezone:string)=>Promise<{times:number[]}>;
 }) {
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState("");
@@ -246,6 +253,9 @@ export default function KanbanPanel({
                 </select>
               </label>
             </div>
+            <label>Assigned bot<select aria-label="Assigned bot" value={editor.assignment?.bot_id||''} disabled={busy||readOnly} onChange={e=>{const bot=bots.find(b=>b.id===e.target.value);setEditor({...editor,assignment:bot?assignmentFor(bot):null});}}><option value="">Unassigned</option>{bots.filter(b=>b.enabled||b.id===editor.assignment?.bot_id).map(b=><option key={b.id} value={b.id}>{b.name}{b.enabled?'':' (disabled)'}</option>)}{editor.assignment&&!bots.some(b=>b.id===editor.assignment!.bot_id)&&<option value={editor.assignment.bot_id}>Removed bot · choose another</option>}</select></label>
+            {editor.assignment&&<div className="kanban-schedule"><h3>Task schedule</h3><ScheduleFields cron={editor.assignment.cron} timezone={editor.assignment.timezone} automatic={editor.assignment.automatic} disabled={busy||readOnly} preview={previewSchedule} onChange={value=>setEditor({...editor,assignment:{...editor.assignment!,...value}})}/><p className="bot-help">Saving creates or updates this task's job. Unassigning removes it. Manage runs in Bots → Schedules.</p></div>}
+            {editor.last_summary&&<div className="kanban-bot-summary"><strong>Last bot update</strong><p>{editor.last_summary}</p></div>}
             <div className="kanban-editor-actions">
               <button
                 type="submit"
@@ -391,6 +401,8 @@ export default function KanbanPanel({
                             {card.title}
                           </button>
                           {card.description && <p>{card.description}</p>}
+                          {card.assignment&&<div className="kanban-assignee"><BotAvatar bot={bots.find(b=>b.id===card.assignment!.bot_id)||{name:'Removed bot',avatar:'',color:'#92a6c0'}} size={24}/><span>{bots.find(b=>b.id===card.assignment!.bot_id)?.name||'Removed bot'}</span><small>{card.assignment.automatic?'Scheduled':'Approval'}</small></div>}
+                          {card.last_summary&&<p className="kanban-bot-update" title={card.last_summary}>{card.last_summary}</p>}
                           <div className="kanban-card-actions">
                             <select
                               aria-label={`Move ${card.title}`}
@@ -422,12 +434,13 @@ export default function KanbanPanel({
                             <button
                               className="kanban-work"
                               disabled={busy}
-                              onClick={() => {
+                              onClick={async () => {
+                                setBusy(true);
                                 try {
-                                  onWork(card);
+                                  await onWork(card);
                                 } catch (e) {
                                   setError(String(e));
-                                }
+                                } finally { setBusy(false); }
                               }}
                             >
                               Work on this <Icon name="arrow" size={14} />

@@ -386,3 +386,4 @@ kbd { font: inherit; }
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   .starter-btn:hover:not(:disabled), .starter-btn:active:not(:disabled), .starter-btn:hover:not(:disabled) .starter-icon, .starter-btn:hover:not(:disabled) .starter-arrow, .tab-new:active, .composer-btn:hover:not(:disabled), .composer-btn:active:not(:disabled), .latest-btn:active { transform: none; }
 }
+:root .persona-bar{display:flex;align-items:center;gap:14px;padding:7px 22px;border-bottom:1px solid var(--border,#303b4c);flex-shrink:0;min-height:42px}.persona-bar .bot-conversation-picker{display:flex;align-items:center;gap:9px}.persona-bar .choice-field{min-width:165px}.persona-bar .choice-label{display:none}.persona-role{font-size:11px;color:#adbbcf;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40%}.persona-spacer{flex:1}

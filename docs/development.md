@@ -59,6 +59,7 @@ npm run check          # TypeScript + production frontend build + browser tests 
 npm run check:native   # Windows debug build + real WebView2/IPC/ConPTY smoke test
 npm run check:remote   # real Tailscale HTTPS + native app + phone browser (Tailscale sign-in required)
 npm run check:extensions # GitHub plugins, Kanban, permissions and restart/crash recovery (internet required)
+npm run check:bots      # Windows native bot identity, private memory, scheduled handoffs and cancellation (no model calls)
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
 
@@ -72,6 +73,12 @@ for the packaged build, or `node scripts/native-smoke.mjs --installed --notifica
 installing the current bundle to also verify Windows Notification Center delivery and the
 registered COM activation path. These checks use isolated notification preferences.
 Test artifacts are written to ignored `test-results/` and `.qa/` directories.
+
+`scripts/bots-smoke.mjs` substitutes all three CLI protocols, checks identity and private
+recall across providers, runs a Muse → Codex → Antigravity task handoff, and verifies stale
+board rejection, cancellation, non-overlap, bounded history, and restart behavior. Use
+`node scripts/bots-smoke.mjs --release` to exercise the packaged frontend. The [bots guide](bots.md)
+describes the user-facing behavior and the validated response protocol.
 
 The remote smoke test uses the real signed-in Tailscale client and a temporary foreground
 Serve route on 8443. It requires that port to be unused, and refuses to attach to a running

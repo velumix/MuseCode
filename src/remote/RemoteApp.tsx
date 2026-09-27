@@ -4,6 +4,9 @@ import type { MemoryView } from "../memory";
 const MemoryPanel=lazy(()=>import("../components/MemoryPanel"));
 const KanbanPanel=lazy(()=>import("../components/KanbanPanel"));
 import { taskPrompt, type Board } from "../kanban";
+import type {BotProfile,BotView} from '../bots';
+import BotAvatar from '../components/BotAvatar';
+const BotsPanel=lazy(()=>import('../components/BotsPanel'));
 import { providerNames, defaultOptions, type ModelCatalog } from "../providers";
 import Icon, { VelumMark } from "../components/Icon";
 import Markdown from "../components/Markdown";
@@ -53,6 +56,8 @@ export default function RemoteApp() {
   const [drafts, setDrafts] = useState<Record<string, string>>(loadDrafts);
   const [memorySession,setMemorySession]=useState("");
   const [boardSession,setBoardSession]=useState("");
+  const [botsOpen,setBotsOpen]=useState(false);
+  const [bots,setBots]=useState<BotProfile[]>([]);
   const [memorySeed,setMemorySeed]=useState<string>();
   const [listOpen, setListOpen] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -69,7 +74,8 @@ export default function RemoteApp() {
   const view = useMemo(() => transcript(replay?.events || []), [replay]);
   const memoryUsage = useMemo(()=>{const events=replay?.events||[];for(let i=events.length-1;i>=0;i--){if(events[i].event.kind==="memory_context")return events[i].event;}},[replay]);
 
-  const forget = () => { setDevice(null); setSessions([]); setReplay(null); cache.current.clear(); setConnected(false); setDrafts({}); clearDrafts();setMemorySession("");setBoardSession("");setMemorySeed(undefined); saveClaim(""); setClaim(""); };
+  const forget = () => { setDevice(null); setSessions([]); setReplay(null); cache.current.clear(); setConnected(false); setDrafts({}); clearDrafts();setMemorySession("");setBoardSession("");setMemorySeed(undefined);setBotsOpen(false);setBots([]); saveClaim(""); setClaim(""); };
+  useEffect(()=>{if(!device||!connected||(!boardSession&&!botsOpen))return;let alive=true;void api<BotView>('/bots',{action:'list'}).then(v=>{if(alive)setBots(v.profiles||[]);}).catch(e=>{if(alive)setError(String(e));});return()=>{alive=false;};},[device,connected,boardSession,botsOpen]);
   useEffect(()=>{if(device)saveDrafts(drafts);},[drafts,device]);
   useEffect(()=>{if(device&&selected)saveSelection(selected);},[selected,device]);
 
@@ -217,17 +223,16 @@ export default function RemoteApp() {
 
   return <main className="phone-app">
     <header className="phone-header"><VelumMark size={35} /><div><h1>Velum Code</h1><span className={connected ? "phone-online" : "phone-offline"}><i />{connected ? "Desktop connected" : "Reconnecting…"}</span></div>
-      <button className="phone-icon-button phone-memory-button" aria-label="Kanban" disabled={!current||!connected} onClick={()=>setBoardSession(selected)}><Icon name="board" size={21}/></button>
-      <button className="phone-icon-button" aria-label="Memory" disabled={!current||!connected} onClick={()=>{setMemorySeed(undefined);setMemorySession(selected);}}><Icon name="memory" size={21}/></button>
       <button className="phone-icon-button" aria-label="Phone settings" onClick={() => setInstallHelp((value) => !value)}><Icon name="phone" size={21} /></button>
     </header>
+    <nav className="phone-tools" aria-label="Workspace tools"><button disabled={!current||!connected} onClick={()=>setBotsOpen(true)}><Icon name="chat" size={17}/>Bots</button><button aria-label="Kanban" disabled={!current||!connected} onClick={()=>setBoardSession(selected)}><Icon name="board" size={17}/>Kanban</button><button aria-label="Memory" disabled={!current||!connected} onClick={()=>{setMemorySeed(undefined);setMemorySession(selected);}}><Icon name="memory" size={17}/>Memory</button></nav>
     {installHelp && <section className="phone-settings" aria-label="Phone settings"><strong>{device.name}</strong><p>{computer || "Your desktop"}</p><p>{device.control ? "View and control · standard agent permissions" : "View-only access"}</p>
       {install ? <button onClick={() => void install.prompt().then(() => setInstall(null))}>Add to home screen</button> : <p>Use your browser menu → Add to Home screen or Install app.</p>}
       <button onClick={() => setSignout(true)}>Disconnect this phone</button>
       {signout && <div className="phone-signout"><p>You’ll need to scan a new QR code to reconnect.</p><button disabled={busy} onClick={() => void disconnect()}>Disconnect</button><button onClick={() => setSignout(false)}>Keep connected</button></div>}
     </section>}
-    <button className="phone-session-select" aria-expanded={listOpen} aria-controls="phone-sessions" onClick={() => setListOpen((value) => !value)}><span><span className="phone-eyebrow">Conversation</span><strong>{current?.title || "Your conversations"}</strong></span><Icon name="down" size={18} /></button>
-    {listOpen && <nav className="phone-sessions" id="phone-sessions" aria-label="Conversations">{sessions.map((session) => <button key={session.id} aria-current={session.id === selected ? "true" : undefined} onClick={() => { setSelected(session.id); setReplay(cache.current.get(session.id) || null); setListOpen(false); follow.current = true; setError(""); }}><Icon name="chat" size={18} /><span><strong>{session.title}</strong><small>{providerNames[session.provider || "muse"]} · {session.workspace.split(/[\\/]/).filter(Boolean).pop()}</small></span><i className={session.running ? "working" : ""}>{session.running ? "Working" : session.status === "completed" ? "Done" : "Ready"}</i></button>)}</nav>}
+    <button className="phone-session-select" aria-expanded={listOpen} aria-controls="phone-sessions" onClick={() => setListOpen((value) => !value)}>{current?.bot&&<BotAvatar bot={current.bot} size={30}/>}<span><span className="phone-eyebrow">{current?.bot?.name||'Conversation'}</span><strong>{current?.title || "Your conversations"}</strong></span><Icon name="down" size={18} /></button>
+    {listOpen && <nav className="phone-sessions" id="phone-sessions" aria-label="Conversations">{sessions.map((session) => <button key={session.id} aria-current={session.id === selected ? "true" : undefined} onClick={() => { setSelected(session.id); setReplay(cache.current.get(session.id) || null); setListOpen(false); follow.current = true; setError(""); }}>{session.bot?<BotAvatar bot={session.bot} size={28}/>:<Icon name="chat" size={18}/>}<span><strong>{session.title}</strong><small>{session.bot?.name||providerNames[session.provider || "muse"]} · {session.workspace.split(/[\\/]/).filter(Boolean).pop()}</small></span><i className={session.running ? "working" : ""}>{session.running ? "Working" : session.status === "completed" ? "Done" : "Ready"}</i></button>)}</nav>}
     {current && <div className="phone-models"><ModelControls key={current.id} provider={current.provider || "muse"} options={current.options || defaultOptions} disabled={busy || !connected || current.running || !device.control} load={(provider, refresh) => api<ModelCatalog>(`/providers/${provider}/models?refresh=${refresh}`)} onChange={async (options) => {
       const id = current.id;
       setBusy(true);
@@ -241,9 +246,9 @@ export default function RemoteApp() {
     <div className="phone-transcript" ref={scroll} onScroll={() => { const el = scroll.current; if (el) { follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; setLatest(!follow.current); } }}>
       {!sessions.length ? <div className="phone-empty"><Icon name="chat" size={32} /><h2>No conversations yet</h2><p>Open an Agent conversation on your desktop. It will appear here automatically.</p></div> : !view.blocks.length ? <div className="phone-empty"><VelumMark size={64} /><h2>What’s next?</h2><p>Send a message to your desktop agent. Your files and tools stay on your computer.</p></div> : null}
       {replay?.truncated && <p className="phone-history-note">Showing recent activity. Earlier messages remain in the desktop conversation.</p>}
-      {view.blocks.map((block) => block.kind === "tool" ? <details className="phone-tool" key={block.id}><summary><Icon name="code" size={15} /><strong>{block.name}</strong><span>{block.status}</span></summary><pre>{block.text || "Waiting for output…"}</pre></details> : block.kind === "notice" ? <div className="phone-notice" key={block.id}>{block.text}</div> : <article className={`phone-message ${block.kind}`} key={block.id}><div className="phone-message-label">{block.kind === "user" ? "You" : <><VelumMark size={20} />{providerNames[current?.provider || "muse"]}</>}</div>{block.kind === "user" ? <p>{block.text}</p> : <Markdown text={block.text} />}{device.control&&<button type="button" className="phone-remember" aria-label="Remember this message" disabled={!connected||!!current?.running} onClick={()=>{setMemorySeed(block.text);setMemorySession(selected);}}><Icon name="memory" size={14}/>Remember</button>}</article>)}
+      {view.blocks.map((block) => block.kind === "tool" ? <details className="phone-tool" key={block.id}><summary><Icon name="code" size={15} /><strong>{block.name}</strong><span>{block.status}</span></summary><pre>{block.text || "Waiting for output…"}</pre></details> : block.kind === "notice" ? <div className="phone-notice" key={block.id}>{block.text}</div> : <article className={`phone-message ${block.kind}`} key={block.id}><div className="phone-message-label">{block.kind === "user" ? "You" : <>{current?.bot?<BotAvatar bot={current.bot} size={24}/>:<VelumMark size={20}/>}<span>{current?.bot?.name||providerNames[current?.provider || "muse"]}</span></>}</div>{block.kind === "user" ? <p>{block.text}</p> : <Markdown text={block.text} />}{device.control&&<button type="button" className="phone-remember" aria-label="Remember this message" disabled={!connected||!!current?.running} onClick={()=>{setMemorySeed(block.text);setMemorySession(selected);}}><Icon name="memory" size={14}/>Remember</button>}</article>)}
       {view.todos.length > 0 && <details className="phone-todos"><summary>Task checklist <span>{view.todos.filter((todo) => todo.status === "completed").length}/{view.todos.length}</span></summary>{view.todos.map((todo, index) => <p key={index}><Icon name={todo.status === "completed" ? "check" : "code"} size={14} />{todo.text}</p>)}</details>}
-      {current?.running && <div className="phone-working" role="status"><span className="phone-pulse" />{view.activity || `${providerNames[current?.provider || "muse"]} is working…`}</div>}
+      {current?.running && <div className="phone-working" role="status"><span className="phone-pulse" />{view.activity || `${current?.bot?.name||providerNames[current?.provider || "muse"]} is working…`}</div>}
     </div>
     {latest && <button className="phone-latest" onClick={() => { follow.current = true; if (scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight; setLatest(false); }}>Latest activity <Icon name="down" size={15} /></button>}
     <footer className="phone-composer">
@@ -253,11 +258,14 @@ export default function RemoteApp() {
       </form> : <p className="phone-view-only"><Icon name="shield" size={15} />View-only access</p>}
       <span className="phone-composer-note">{current?.workspace.split(/[\\/]/).filter(Boolean).pop() || "Velum Code"} · runs on your desktop{typeof memoryUsage?.bytes==="number"&&memoryUsage.bytes>0?` · Memory ${memoryUsage.bytes.toLocaleString()} B`:""}</span>
     </footer>
-    {memorySession&&<Suspense fallback={null}><MemoryPanel seed={memorySeed} readOnly={!device.control||!connected} request={request=>api<MemoryView>(`/sessions/${encodeURIComponent(memorySession)}/memory`,request)} onClose={()=>{setMemorySession("");setMemorySeed(undefined);}}/></Suspense>}
-    {boardSession&&<Suspense fallback={null}><KanbanPanel workspace={sessions.find(s=>s.id===boardSession)?.workspace||"Workspace"} readOnly={!device.control||!connected} request={request=>api<Board>(`/sessions/${encodeURIComponent(boardSession)}/kanban`,request)} onClose={()=>setBoardSession("")} onWork={card=>{
-      const prompt=[drafts[boardSession],taskPrompt(card)].filter(Boolean).join("\n\n");
+    {memorySession&&<Suspense fallback={null}><MemoryPanel ownerName={sessions.find(s=>s.id===memorySession)?.bot?.name} seed={memorySeed} readOnly={!device.control||!connected} request={request=>{const bot=sessions.find(s=>s.id===memorySession)?.bot;return api<MemoryView>(`/sessions/${encodeURIComponent(memorySession)}/${bot?`bots/${bot.id}/`:''}memory`,request);}} onClose={()=>{setMemorySession("");setMemorySeed(undefined);}}/></Suspense>}
+    {boardSession&&<Suspense fallback={null}><KanbanPanel bots={bots} previewSchedule={(cron,timezone)=>api(`/sessions/${encodeURIComponent(boardSession)}/automation`,{action:'preview',cron,timezone})} workspace={sessions.find(s=>s.id===boardSession)?.workspace||"Workspace"} readOnly={!device.control||!connected} request={request=>api<Board>(`/sessions/${encodeURIComponent(boardSession)}/kanban`,request)} onClose={()=>setBoardSession("")} onWork={async card=>{
+      let target=boardSession;
+      if(card.assignment&&sessions.find(s=>s.id===boardSession)?.bot?.id!==card.assignment.bot_id){const opened=await api<{id:string}>(`/sessions/${encodeURIComponent(boardSession)}/bots/${card.assignment.bot_id}/chat`,{});target=opened.id;await refreshRef.current();}
+      const prompt=[drafts[target],taskPrompt(card)].filter(Boolean).join("\n\n");
       if(prompt.length>16000)throw new Error("Your message is too long. Shorten the current draft first.");
-      setDrafts(drafts=>({...drafts,[boardSession]:prompt}));setSelected(boardSession);setBoardSession("");
+      setDrafts(drafts=>({...drafts,[target]:prompt}));setSelected(target);setBoardSession("");
     }}/></Suspense>}
+    {botsOpen&&current&&<Suspense fallback={null}><BotsPanel workspace={current.workspace} provider={current.provider||'muse'} options={current.options||defaultOptions} readOnly={!device.control||!connected} request={request=>api<BotView>('/bots',request)} automation={request=>api(`/sessions/${encodeURIComponent(selected)}/automation`,request)} memory={(id,request)=>api<MemoryView>(`/sessions/${encodeURIComponent(selected)}/bots/${encodeURIComponent(id)}/memory`,request)} loadModels={(provider,refresh)=>api<ModelCatalog>(`/providers/${provider}/models?refresh=${refresh}`)} onClose={()=>setBotsOpen(false)} onChat={device.control?(async bot=>{const result=await api<{id:string}>(`/sessions/${encodeURIComponent(selected)}/bots/${bot.id}/chat`,{});setSelected(result.id);setReplay(null);setBotsOpen(false);await refreshRef.current();}):undefined}/></Suspense>}
   </main>;
 }

@@ -67,6 +67,22 @@ export async function boot(page: Page, delay = 0) {
         },
         async invoke(cmd: string, args: any = {}) {
           api.calls.push({ cmd, args });
+          if(cmd==='bots_request'){
+            const q=args.request;let profiles=JSON.parse(localStorage.getItem('qa-bots')||'[]');
+            if(q.action==='save'){if(api.botConflict)throw 'This bot was edited elsewhere. Reload before saving.';profiles=[...profiles.filter((b:any)=>b.id!==q.profile.id),{...q.profile,revision:`r${++serial}`}];}
+            if(q.action==='delete')profiles=profiles.filter((b:any)=>b.id!==q.id);
+            localStorage.setItem('qa-bots',JSON.stringify(profiles));return {profiles,root:'C:\\Bots',warnings:[]};
+          }
+          if(cmd==='automation_request'){
+            const q=args.request;api.jobs||={enabled:true,jobs:[],runs:[],warning:null};
+            if(q.action==='preview'){if(q.timezone==='invalid')throw 'Choose an IANA timezone';return {times:[1800000000,1800000900,1800001800]};}
+            if(q.action==='configure')api.jobs.enabled=q.enabled;
+            const job=api.jobs.jobs.find((j:any)=>j.id===q.id);
+            if(q.action==='pause')job.paused=q.paused;
+            if(q.action==='run')job.status='running';
+            if(q.action==='stop'){job.status='cancelled';job.paused=true;}
+            return structuredClone(api.jobs);
+          }
           if (cmd === "kanban_request") {
             const key = `qa-board:${args.workspace}`;
             const board = JSON.parse(localStorage.getItem(key) || '{"revision":0,"cards":[]}');
@@ -80,8 +96,9 @@ export async function boot(page: Page, delay = 0) {
             }
             return structuredClone(board);
           }
-          if (cmd === "memory_request") {
-            api.memory ||= {
+          if (cmd === "memory_request" || cmd==='bots_memory') {
+            const key=cmd==='bots_memory'?`memory:${args.id}`:'memory';
+            api[key] ||= {
               root: "C:\\Documents\\Velum Code\\Memory",
               settings: {
                 enabled: true,
@@ -92,7 +109,7 @@ export async function boot(page: Page, delay = 0) {
               warning: null,
             };
             const q = args.request,
-              m = api.memory;
+              m = api[key];
             if (q.action === "configure") m.settings = q.settings;
             if (q.action === "delete")
               m.notes = m.notes.filter((n: any) => n.id !== q.id);
@@ -248,6 +265,8 @@ export async function boot(page: Page, delay = 0) {
             if (args.workspace?.includes("missing"))
               throw "workspace is not a directory";
             api.sessions.set(args.id, "agent");
+            const bot=JSON.parse(localStorage.getItem('qa-bots')||'[]').find((b:any)=>b.id===args.botId);
+            if(bot)api.emit('agent-event',{id:args.id,event:{kind:'bot_identity',bot}});
             return {
               id: args.id,
               session_id: `native-${args.id}`,

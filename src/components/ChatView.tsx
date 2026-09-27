@@ -7,6 +7,8 @@ import { copyText } from "./clip";
 import Icon, { VelumMark, type IconName } from "./Icon";
 import type { PluginChatHandle } from "../plugins";
 import { readDraft, saveDraft } from "../desktopHistory";
+import type { BotIdentity } from '../bots';
+import BotAvatar from './BotAvatar';
 
 export type AgentStatus =
   | { kind: "starting" }
@@ -51,6 +53,8 @@ interface NewInfo {
 }
 
 interface ChatViewProps {
+  botId?: string;
+  taskId?: string;
   onPluginHandle: (id: string, handle: PluginChatHandle | null) => void;
   onRemember: (text:string)=>void;
   initialWorkspace?: string;
@@ -242,7 +246,8 @@ function ToolBlock({ block }: { block: Extract<Block, { kind: "tool" }> }) {
   );
 }
 
-export default function ChatView({ provider, options, initialWorkspace, sessionId, active, sessionKey, onStatus, onWorkspace, onTitle, onRemember, onPluginHandle }: ChatViewProps) {
+export default function ChatView({ provider, options, initialWorkspace, sessionId, active, sessionKey, onStatus, onWorkspace, onTitle, onRemember, onPluginHandle, botId, taskId }: ChatViewProps) {
+  const [bot,setBot]=useState<BotIdentity|null>(null);
   const optionsRef = useRef(options); optionsRef.current = options;
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [todos, setTodos] = useState<TodoEntry[]>([]);
@@ -480,6 +485,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
           });
           break;
         }
+        case "bot_identity": { setBot(e.bot as unknown as BotIdentity); break; }
         case "todos": {
           const items = Array.isArray(e.items) ? (e.items as TodoEntry[]) : [];
           setTodos(items.filter((t) => t && typeof t.text === "string"));
@@ -525,7 +531,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
         // The listener above filters by session id; register after attaching
         // so no event from our own session can slip past.
         if (disposed) return;
-        const info = await invoke<NewInfo>("agent_new", { id: nativeId, workspace, tabId: sessionId, provider, options: optionsRef.current, resume: !restarting });
+        const info = await invoke<NewInfo>("agent_new", { id: nativeId, workspace, tabId: sessionId, provider, options: optionsRef.current, resume: !restarting, botId:botId||null,taskId:taskId||null });
         if (!disposed) {
           replaying = true;
           if (info.truncated) applyEvent({ id: nativeId, event: { kind: "notice", text: "Earlier display history was trimmed to keep recovery fast. The provider’s saved conversation is still used when continuing." } });
@@ -557,7 +563,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
       }).catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, sessionKey, workspace, retry, provider]);
+  }, [sessionId, sessionKey, workspace, retry, provider,botId,taskId]);
 
   // Focus requests from App (palette / Ctrl+L), targeted by session id.
   useEffect(() => {
@@ -699,9 +705,9 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
       <div ref={scrollRef} className="chat-scroll" onScroll={onScroll}>
         {blocks.length === 0 && (
           <div className="chat-empty">
-            <div className="welcome-mark"><VelumMark size={100} /></div>
+            <div className="welcome-mark">{bot?<BotAvatar bot={bot} size={84}/>:<VelumMark size={100}/>}</div>
             <span className="welcome-eyebrow">A fresh conversation</span>
-            <h2>What are we building?</h2>
+            <h2>{bot?`${bot.name}, ready to help.`:'What are we building?'}</h2>
             <p>A fresh set of eyes for your code.<br />Start with an idea. We’ll take it from there.</p>
             <div className="chat-starters">
               {STARTERS.map((s) => (
@@ -739,8 +745,8 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
               return (
                 <div key={b.id} className="msg assistant">
                   <div className="message-header">
-                    <span className="message-avatar muse-avatar"><VelumMark size={38} /></span>
-                    <div className="message-author"><strong>{providerNames[provider]}<span className="assistant-badge">AI</span></strong></div>
+                    <span className="message-avatar muse-avatar">{bot?<BotAvatar bot={bot} size={38}/>:<VelumMark size={38}/>}</span>
+                    <div className="message-author"><strong>{bot?.name||providerNames[provider]}<span className="assistant-badge">{bot?providerNames[provider]:'AI'}</span></strong></div>
                     <CopyButton text={b.text} />
                     <button type="button" className="memory-usage" aria-label="Remember this answer" onClick={()=>onRemember(b.text)}><Icon name="memory" size={15}/></button>
                   </div>
@@ -801,8 +807,8 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
           ref={composerRef}
           value={input}
           rows={2}
-          placeholder={ready ? `What’s on your mind? Ask ${providerNames[provider]}…` : "Getting ready…"}
-          aria-label={`Message ${providerNames[provider]}`}
+          placeholder={ready ? `What’s on your mind? Ask ${bot?.name||providerNames[provider]}…` : "Getting ready…"}
+          aria-label={`Message ${bot?.name||providerNames[provider]}`}
           disabled={!ready || applying}
           onChange={(e) => {
             setHistIdx(null);

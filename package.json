@@ -1,7 +1,7 @@
 {
   "name": "velum-code",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,7 +14,8 @@
     "check:extensions": "cargo build --manifest-path src-tauri/Cargo.toml && node scripts/extensions-smoke.mjs",
     "check:native": "cargo build --manifest-path src-tauri/Cargo.toml && node scripts/native-smoke.mjs",
     "check:remote": "npm run build && cargo build --manifest-path src-tauri/Cargo.toml && node scripts/remote-smoke.mjs",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "check:bots": "cargo build --manifest-path src-tauri/Cargo.toml && node scripts/bots-smoke.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

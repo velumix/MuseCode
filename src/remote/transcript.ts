@@ -1,7 +1,7 @@
 export interface AgentEvent { kind: string; [key: string]: unknown }
 export interface Entry { seq: number; event: AgentEvent }
 import type { Provider, RunOptions } from "../providers";
-export interface Session { options?: RunOptions; provider?: Provider; id: string; title: string; workspace: string; running: boolean; status: string; revision: number }
+export interface Session { bot?: import('../bots').BotIdentity|null;options?: RunOptions; provider?: Provider; id: string; title: string; workspace: string; running: boolean; status: string; revision: number }
 export interface Replay { session: Session; events: Entry[]; truncated: boolean }
 export interface Block { id: number; kind: "user" | "assistant" | "tool" | "notice"; text: string; name?: string; task?: string; status?: string }
 

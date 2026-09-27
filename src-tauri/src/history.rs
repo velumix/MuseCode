@@ -16,6 +16,8 @@ use tauri::{Emitter, Manager, State};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Saved {
+    #[serde(default)]
+    pub bot_id: Option<String>,
     pub version: u32,
     pub workspace: String,
     pub provider: Provider,
@@ -24,6 +26,7 @@ pub struct Saved {
     pub truncated: bool,
 }
 struct Binding {
+    bot_id: Option<String>,
     tab: String,
     workspace: String,
     provider: Provider,
@@ -127,6 +130,7 @@ impl HistoryState {
         self.bindings.lock().unwrap().insert(
             id.into(),
             Binding {
+                bot_id: None,
                 tab,
                 workspace,
                 provider,
@@ -155,6 +159,12 @@ impl HistoryState {
             }
         }
     }
+    pub fn bind_bot(&self, id: &str, bot_id: Option<String>) {
+        if let Some(binding) = self.bindings.lock().unwrap().get_mut(id) {
+            binding.bot_id = bot_id;
+            binding.dirty = true;
+        }
+    }
     pub fn flush(&self, logs: &SessionLog) -> Result<(), String> {
         let _io = self.io.lock().unwrap();
         let pending: Vec<_> = self
@@ -172,6 +182,7 @@ impl HistoryState {
                     id.clone(),
                     b.tab.clone(),
                     Saved {
+                        bot_id: b.bot_id.clone(),
                         version: 1,
                         workspace: b.workspace.clone(),
                         provider: b.provider,

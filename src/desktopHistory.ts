@@ -1,6 +1,8 @@
 import type { Provider, RunOptions } from "./providers";
 import { invoke } from "@tauri-apps/api/core";
 export interface SavedTab {
+  bot_id?: string;
+  task_id?: string;
   id: string;
   title: string;
   workspace?: string;
@@ -76,6 +78,8 @@ export function loadDesktop(): { tabs: SavedTab[]; activeId: string } {
         return true;
       })
       .map((t: SavedTab) => ({
+        bot_id:typeof t.bot_id==='string'&&/^[a-f0-9-]{36}$/i.test(t.bot_id)?t.bot_id:undefined,
+        task_id:typeof t.task_id==='string'&&/^[a-f0-9-]{36}$/i.test(t.task_id)?t.task_id:undefined,
         id: t.id,
         title: t.title,
         workspace: t.workspace,
@@ -100,7 +104,8 @@ export function loadDesktop(): { tabs: SavedTab[]; activeId: string } {
 }
 export function saveDesktop(tabs: SavedTab[], activeId: string) {
   const data = JSON.stringify({
-    tabs: tabs.map(({ id, title, workspace, provider, options }) => ({
+    tabs: tabs.map(({ id, title, workspace, provider, options,bot_id,task_id }) => ({
+      bot_id,task_id,
       id,
       title,
       workspace,

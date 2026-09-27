@@ -12,6 +12,12 @@ pub struct Card {
     pub description: String,
     pub column: String,
     pub priority: String,
+    #[serde(default)]
+    pub assignment: Option<crate::automation::Assignment>,
+    #[serde(default)]
+    pub last_summary: String,
+    #[serde(default)]
+    pub last_run: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -24,6 +30,11 @@ pub struct Board {
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
+    #[serde(skip)]
+    Replace {
+        revision: u64,
+        cards: Vec<Card>,
+    },
     Load {},
     Save {
         revision: u64,
@@ -49,6 +60,15 @@ fn valid_column(column: &str) -> bool {
     matches!(column, "backlog" | "progress" | "review" | "done")
 }
 fn validate(card: &Card) -> Result<(), String> {
+    if card.last_summary.len() > 4000 || card.last_run.as_ref().is_some_and(|id| id.len() > 150) {
+        return Err("Task update exceeds its limit.".into());
+    }
+    if let Some(a) = &card.assignment {
+        if !crate::bots::valid_id(&a.bot_id) {
+            return Err("Choose a valid bot.".into());
+        }
+        crate::automation::next_due(&a.cron, &a.timezone, crate::automation::now())?;
+    }
     if uuid::Uuid::parse_str(&card.id).is_err()
         || card.title.trim().is_empty()
         || card.title.chars().count() > 160
@@ -103,6 +123,7 @@ impl Store {
         let revision = match &request {
             Request::Load {} => return Ok(board),
             Request::Save { revision, .. }
+            | Request::Replace { revision, .. }
             | Request::Move { revision, .. }
             | Request::Delete { revision, .. } => *revision,
         };
@@ -110,6 +131,19 @@ impl Store {
             return Err("This board changed on another screen. Refresh the board before trying again. Your unsaved card is still here.".into());
         }
         match request {
+            Request::Replace { cards, .. } => {
+                if cards.len() > 300 {
+                    return Err("This board is full (300 maximum).".into());
+                }
+                let mut ids = std::collections::HashSet::new();
+                for card in &cards {
+                    validate(card)?;
+                    if !ids.insert(&card.id) {
+                        return Err("Duplicate task ID.".into());
+                    }
+                }
+                board.cards = cards;
+            }
             Request::Save { mut card, .. } => {
                 card.title = card.title.trim().into();
                 validate(&card)?;
@@ -182,9 +216,19 @@ pub async fn kanban_request(
     workspace: String,
     request: Request,
 ) -> Result<Board, String> {
-    tauri::async_runtime::spawn_blocking(move || app.state::<Store>().request(&workspace, request))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Request::Save { card, .. } = &request {
+            if let Some(a) = &card.assignment {
+                app.state::<crate::bots::Store>().get(&a.bot_id)?;
+            }
+        }
+        let board = app.state::<Store>().request(&workspace, request)?;
+        crate::automation::sync(&app, &workspace, &board)
+            .map_err(|e| format!("Board saved, but its schedule could not be updated: {e}"))?;
+        Ok(board)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -206,6 +250,9 @@ mod tests {
             description: "Details".into(),
             column: "backlog".into(),
             priority: "high".into(),
+            assignment: None,
+            last_summary: String::new(),
+            last_run: None,
         };
         let board = store
             .request(
@@ -304,6 +351,9 @@ mod tests {
             description: String::new(),
             column: "review".into(),
             priority: "normal".into(),
+            assignment: None,
+            last_summary: String::new(),
+            last_run: None,
         };
         validate(&card).unwrap();
         card.title = " ".into();

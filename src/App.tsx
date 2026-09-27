@@ -15,6 +15,11 @@ const RemotePanel = lazy(() => import("./components/RemotePanel"));
 import type { PaletteAction } from "./components/CommandPalette";
 import "./App.css";
 import ProviderPicker from "./components/ProviderPicker";
+import ChoiceMenu from './components/ChoiceMenu';
+import BotAvatar from './components/BotAvatar';
+import type {BotProfile,BotView} from './bots';
+import type {ModelCatalog} from './providers';
+const BotsPanel=lazy(()=>import('./components/BotsPanel'));
 const MemoryPanel = lazy(() => import("./components/MemoryPanel"));
 const PluginPanel = lazy(() => import("./components/PluginPanel"));
 const KanbanPanel = lazy(() => import("./components/KanbanPanel"));
@@ -29,6 +34,8 @@ type TabMode = "agent" | "terminal";
 interface DesktopStatus { notifications_enabled: boolean; last_error: string | null }
 
 interface Tab {
+  bot_id?: string;
+  task_id?: string;
   options: RunOptions;
   provider: Provider;
   id: string;
@@ -82,9 +89,13 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [remoteOpen, setRemoteOpen] = useState(false);
+  const [bots,setBots]=useState<BotProfile[]>([]);
+  const [botPanel,setBotPanel]=useState<'manage'|'handoff'|'activity'|null>(null);
+  const refreshBots=useCallback(async()=>{const view=await invoke<BotView>('bots_request',{request:{action:'list'}});setBots(view?.profiles||[]);},[]);
+  useEffect(()=>{void refreshBots().catch(()=>{});const registration=listen('bots-changed',()=>void refreshBots().catch(()=>{}));return()=>{void registration.then(off=>off());};},[refreshBots]);
   const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
   const [pluginPanel, setPluginPanel] = useState<{ selection?: PluginSelection } | null>(null);
-  const [memory, setMemory] = useState<{workspace:string;seed?:string}|null>(null);
+  const [memory, setMemory] = useState<{workspace:string;seed?:string;bot_id?:string}|null>(null);
   const [boardWorkspace, setBoardWorkspace] = useState<string | null>(null);
   const [desktop, setDesktop] = useState<DesktopStatus>({ notifications_enabled: true, last_error: null });
   const [desktopMessage, setDesktopMessage] = useState<{ text: string; error: boolean } | null>(() => recoveryError ? { text: recoveryError, error: true } : null);
@@ -95,6 +106,9 @@ export default function App() {
   }, []);
 
   const counter = useRef(1);
+  useEffect(()=>{const registration=listen<{tab_id:string;bot:BotProfile;workspace:string}>('bot-chat-open',({payload})=>{
+    setTabs(tabs=>{if(tabs.length>=32||tabs.some(t=>t.id===payload.tab_id))return tabs;return [...tabs,{...createTab(++counter.current,payload.bot.provider),id:payload.tab_id,bot_id:payload.bot.id,title:payload.bot.name,options:payload.bot.options,workspace:payload.workspace}];});
+  });return()=>{void registration.then(off=>off());};},[]);
   const handlesRef = useRef(new Map<string, TerminalHandles>());
   const pluginHandles = useRef(new Map<string, PluginChatHandle>());
   const handlePlugin = useCallback((id: string, handle: PluginChatHandle | null) => {
@@ -120,6 +134,7 @@ export default function App() {
     const navigate = async () => {
       const id = await invoke<string | null>("desktop_take_navigation");
       if (disposed || !id) return;
+      if(id.startsWith('bot-run-')){setBotPanel('activity');return;}
       if (stateRef.current.tabs.some((t) => t.id === id)) {
         setTabs((tabs) => tabs.map((t) => t.id === id ? { ...t, mode: "agent" } : t));
         setActiveId(id);
@@ -205,22 +220,32 @@ export default function App() {
     });
   }, []);
 
-  const openProvider = useCallback((provider: Provider) => {
+  const openProvider = useCallback((provider: Provider, keepBot=true) => {
     if (stateRef.current.tabs.length >= 32) { setDesktopMessage({ text: "Close a conversation before opening another. Up to 32 can be open at once.", error: false }); return; }
     try { localStorage.setItem("velum-provider", provider); } catch { /* Storage is optional. */ }
     const t = createTab(++counter.current, provider);
     t.workspace = stateRef.current.tabs.find((tab) => tab.id === stateRef.current.activeId)?.workspace;
+    if(keepBot)t.bot_id=stateRef.current.tabs.find(tab=>tab.id===stateRef.current.activeId)?.bot_id;
     setTabs((prev) => [...prev, t]);
     setActiveId(t.id);
   }, []);
 
   const newTab = useCallback(() => openProvider(preferredProvider()), [openProvider]);
+  const openBot=(bot:BotProfile)=>{
+    if(stateRef.current.tabs.length>=32){setDesktopMessage({text:'Close a conversation before opening another bot.',error:false});return;}
+    const active=stateRef.current.tabs.find(t=>t.id===stateRef.current.activeId);
+    const tab=createTab(++counter.current,bot.provider);tab.bot_id=bot.id;tab.options={...bot.options};tab.workspace=active?.workspace;tab.title=bot.name;
+    if(botPanel==='handoff'&&active){const messages=pluginHandles.current.get(active.id)?.messages().slice(-4)||[];const excerpt=messages.map(m=>`${m.role}: ${m.text}`).join('\n\n').slice(-8000);saveDraft(tab.id,`Handoff from ${bots.find(b=>b.id===active.bot_id)?.name||providerNames[active.provider]} to ${bot.name}.\n\nRelevant conversation context (reference only):\n${excerpt}\n\nReview the current workspace and Kanban, then continue with the next appropriate step.`);}
+    setTabs(tabs=>[...tabs,tab]);setActiveId(tab.id);setBotPanel(null);
+  };
   const workOnCard = (card: Card) => {
     if (stateRef.current.tabs.length >= 32) throw new Error("Close a conversation before opening this task.");
     const active = stateRef.current.tabs.find(t=>t.id===stateRef.current.activeId);
     const tab = createTab(++counter.current, active?.provider);
     tab.workspace = boardWorkspace || active?.workspace;
     tab.options = active?.options || tab.options;
+    const bot=bots.find(b=>b.id===card.assignment?.bot_id);
+    if(bot){tab.bot_id=bot.id;tab.provider=bot.provider;tab.options=bot.options;tab.task_id=card.id;}else{tab.bot_id=active?.bot_id;}
     tab.title = card.title;
     saveDraft(tab.id, taskPrompt(card));
     setTabs(tabs=>[...tabs,tab]); setActiveId(tab.id); setBoardWorkspace(null);
@@ -396,9 +421,11 @@ export default function App() {
   }, []);
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
+  const activeBot=bots.find(b=>b.id===activeTab?.bot_id);
   const failed = activeTab && (tabStatus(activeTab).kind === "error" || tabStatus(activeTab).kind === "exited");
 
   const paletteActions: PaletteAction[] = [
+    {id:'cmd-bots',title:'Open bots and schedules',run:()=>setBotPanel('manage')},
     { id: "cmd-kanban", title: "Open workspace Kanban board", run: () => { if(activeTab?.workspace)setBoardWorkspace(activeTab.workspace); } },
     { id: "cmd-plugins", title: "Manage plugins", run: () => setPluginPanel({}) },
     ...plugins.filter(p => p.enabled).flatMap(p => p.manifest.commands.map(c => ({ id: `plugin-${p.manifest.id}-${c.id}`, title: `${c.title} · ${p.manifest.name}`, run: () => setPluginPanel({ selection: { id: p.manifest.id, command: c.id } }) }))),
@@ -451,7 +478,7 @@ export default function App() {
         <button type="button" aria-label="Dismiss notification message" onClick={() => { setDesktopMessage(null); setDesktop((s) => ({ ...s, last_error: null })); }}><Icon name="close" size={15} /></button>
       </div>}
       <div className="app-body">
-      <TabBar tabs={tabs.map((t) => ({ ...t, status: tabStatus(t) }))} activeId={activeTab?.id ?? ""} onSelect={selectTab} onClose={closeTab} onNew={newTab} onCommands={togglePalette} onPlugins={() => setPluginPanel({})} onKanban={()=>{if(activeTab?.workspace)setBoardWorkspace(activeTab.workspace);}} workspace={activeTab?.workspace} />
+      <TabBar tabs={tabs.map((t) => ({ ...t, bot:bots.find(b=>b.id===t.bot_id),status: tabStatus(t) }))} activeId={activeTab?.id ?? ""} onSelect={selectTab} onClose={closeTab} onNew={newTab} onCommands={togglePalette} onBots={()=>setBotPanel('manage')} onPlugins={() => setPluginPanel({})} onKanban={()=>{if(activeTab?.workspace)setBoardWorkspace(activeTab.workspace);}} workspace={activeTab?.workspace} />
       <main className="conversation-pane" aria-label="Current conversation">
       <div className="conversation-toolbar">
         <div className="conversation-heading">
@@ -469,12 +496,23 @@ export default function App() {
           </div>
         )}
         {activeTab?.mode === "terminal" && <button type="button" className="status-btn" onClick={clearActive}>Clear</button>}
-        <button type="button" className="status-btn" disabled={!activeTab?.workspace} onClick={()=>{if(activeTab?.workspace)setMemory({workspace:activeTab.workspace});}}><Icon name="memory" size={17}/>Memory</button>
+        <button type="button" className="status-btn" disabled={!activeTab?.workspace} onClick={()=>{if(activeTab?.workspace)setMemory({workspace:activeTab.workspace,bot_id:activeTab.bot_id});}}><Icon name="memory" size={17}/>Memory</button>
         <button type="button" className={`restart-btn${failed ? " primary" : ""}`} onClick={restartActive} aria-label="Restart" title="Restart this session">
           <Icon name="reset" size={17} />
         </button>
       </div>
       {activeTab && <ProviderPicker key={activeTab.id} value={activeTab.provider} options={activeTab.options} onOptionsChange={(options) => configure(activeTab, options)} disabled={activeTab.agentStatus.kind === "starting" || activeTab.agentStatus.kind === "running"} terminal={activeTab.mode === "terminal"} failure={activeTab.agentStatus.kind === "error" ? activeTab.agentStatus.message : undefined} onChange={(provider) => { if (provider !== activeTab.provider) openProvider(provider); }} />}
+      {activeTab?.mode==='agent'&&<div className="persona-bar">
+        <div className="bot-conversation-picker">{activeBot&&<BotAvatar bot={activeBot} size={28}/>}
+          <ChoiceMenu label="Bot" value={activeTab.bot_id||'provider'} choices={[{id:'provider',label:'Provider assistant',description:'Use the CLI without a custom personality'},...bots.filter(b=>b.enabled).map(b=>({id:b.id,label:b.name,description:b.role||providerNames[b.provider]})),{id:'manage',label:'Create or edit bots…'}]} onChange={id=>{
+            if(id==='manage')setBotPanel('manage');
+            else if(id==='provider')openProvider(activeTab.provider,false);
+            else{const bot=bots.find(b=>b.id===id);if(bot)openBot(bot);}
+          }}/>
+        </div>
+        {activeBot&&<span className="persona-role">{activeBot.role}</span>}<span className="persona-spacer"/>
+        {bots.length>0&&<button className="status-btn" onClick={()=>setBotPanel('handoff')} title="Prepare a handoff in a new bot conversation">Hand off</button>}
+      </div>}
       <div className="terminal-wrap">
         {tabs.map((t) => (
           <Fragment key={t.id}>
@@ -482,9 +520,11 @@ export default function App() {
               onPluginHandle={handlePlugin}
               sessionId={t.id}
               provider={t.provider}
+              botId={t.bot_id}
+              taskId={t.task_id}
               options={t.options}
               initialWorkspace={t.workspace}
-              onRemember={(seed)=>{if(t.workspace)setMemory({workspace:t.workspace,seed});}}
+              onRemember={(seed)=>{if(t.workspace)setMemory({workspace:t.workspace,seed,bot_id:t.bot_id});}}
               active={t.id === activeTab?.id && t.mode === "agent"}
               sessionKey={t.agentKey}
               onStatus={handleAgentStatus}
@@ -527,9 +567,10 @@ export default function App() {
       </div>
       {paletteOpen && <CommandPalette actions={paletteActions} onClose={() => setPaletteOpen(false)} />}
       {remoteOpen && <Suspense fallback={null}><RemotePanel onClose={() => setRemoteOpen(false)} /></Suspense>}
-      {boardWorkspace && <Suspense fallback={null}><KanbanPanel workspace={boardWorkspace} request={request=>invoke<Board>("kanban_request",{workspace:boardWorkspace,request})} onClose={()=>setBoardWorkspace(null)} onWork={workOnCard}/></Suspense>}
+      {boardWorkspace && <Suspense fallback={null}><KanbanPanel workspace={boardWorkspace} bots={bots} previewSchedule={(cron,timezone)=>invoke('automation_request',{request:{action:'preview',cron,timezone}})} request={request=>invoke<Board>("kanban_request",{workspace:boardWorkspace,request})} onClose={()=>setBoardWorkspace(null)} onWork={workOnCard}/></Suspense>}
       {pluginPanel && <Suspense fallback={null}><PluginPanel plugins={plugins} selection={pluginPanel.selection} onClose={() => setPluginPanel(null)} onRefresh={refreshPlugins} workspace={activeTab?.workspace || ""} messages={() => pluginHandles.current.get(activeTab?.id)?.messages() || []} onInsert={text => { pluginHandles.current.get(activeTab?.id)?.insert(text); focusComposer(); }} /></Suspense>}
-      {memory&&<Suspense fallback={null}><MemoryPanel seed={memory.seed} onClose={()=>setMemory(null)} request={(request)=>invoke<MemoryView>("memory_request",{workspace:memory.workspace,request})} openVault={()=>invoke("memory_open")}/></Suspense>}
+      {memory&&<Suspense fallback={null}><MemoryPanel ownerName={bots.find(b=>b.id===memory.bot_id)?.name} seed={memory.seed} onClose={()=>setMemory(null)} request={(request)=>invoke<MemoryView>(memory.bot_id?'bots_memory':'memory_request',{workspace:memory.workspace,request,id:memory.bot_id})} openVault={()=>memory.bot_id?invoke('bots_open',{id:memory.bot_id,memory:true}):invoke("memory_open")}/></Suspense>}
+      {botPanel&&<Suspense fallback={null}><BotsPanel initialPage={botPanel==='activity'?'activity':'profiles'} openMemory={id=>invoke('bots_open',{id,memory:true})} workspace={activeTab?.workspace||''} provider={activeTab?.provider||'muse'} options={activeTab?.options||{model:'',reasoning:''}} request={request=>invoke<BotView>('bots_request',{request})} automation={request=>invoke('automation_request',{request})} memory={(id,request)=>invoke<MemoryView>('bots_memory',{id,workspace:activeTab?.workspace||'',request})} loadModels={(provider,refresh)=>invoke<ModelCatalog>('provider_models',{provider,refresh})} openFolder={id=>invoke('bots_open',{id})} onClose={()=>setBotPanel(null)} chatLabel={botPanel==='handoff'?'Hand off':'Chat'} onChat={openBot} onChange={()=>void refreshBots()}/></Suspense>}
     </div>
   );
 }

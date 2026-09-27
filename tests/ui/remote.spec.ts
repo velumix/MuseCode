@@ -6,6 +6,7 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
     paired, control, pending: false, failSend: false, revoked: false, sends: [] as string[],
     memory: {root:"C:\\Vault",settings:{enabled:true,capture:"review",budget_bytes:3000},notes:[] as any[],warning:null},
     board: {revision:0,cards:[] as any[]},
+    bots:{profiles:[] as any[],root:'C:\\Bots',warnings:[]},jobs:{enabled:true,jobs:[] as any[],runs:[] as any[],warning:null},
     sessions: [{ provider, options: { model: "", reasoning: "" }, id: "session-one", title: "Review the project", workspace: "C:\\Projects\\VelumCode", running: false, status: "completed", revision: 3 }],
     entries: [
       { seq: 1, event: { kind: "turn_start", prompt: "Review the project", remote: false } },
@@ -33,6 +34,13 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
     if (url.pathname === "/api/pair/finish") return answer(remote.paired ? { status: "paired", device: { id: "phone", name: "My phone", control } } : { status: "pending", pending: { name: "My phone", code: "482196", expires_at: Math.floor(Date.now() / 1000) + 120 } });
     if (!remote.paired || remote.revoked) return answer({ error: "Pair again" }, 401);
     if (url.pathname === "/api/me") return answer({ device: { id: "phone", name: "My phone", control }, computer: "desktop.tail.ts.net" });
+    if(url.pathname==='/api/bots'){
+      if(body.action!=='list'&&!control)return answer({error:'View only'},403);
+      if(body.action==='save')remote.bots.profiles=[...remote.bots.profiles.filter(b=>b.id!==body.profile.id),{...body.profile,revision:'saved'}];
+      return answer(remote.bots);
+    }
+    if(url.pathname.endsWith('/automation'))return answer(body.action==='preview'?{times:[1800000000,1800000900]}:remote.jobs);
+    if(url.pathname.endsWith('/chat')){if(!control)return answer({error:'View only'},403);const id=url.pathname.split('/').at(-2);const bot=remote.bots.profiles.find(b=>b.id===id);const session={...remote.sessions[0],id:'bot-conversation',bot,provider:bot.provider};remote.sessions.push(session);return answer({id:session.id});}
     if (url.pathname === "/api/sessions") return answer({ sessions: remote.sessions });
     if(url.pathname.endsWith("/memory")) {
       expect(request.headers()["x-muse-request"]).toBe("1");
@@ -68,11 +76,27 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
     }
     if (url.pathname === "/api/logout") { remote.revoked = true; return answer({ ok: true }); }
     if (url.pathname === "/api/sessions/session-one") return answer({ session: remote.sessions[0], events: remote.entries.filter((e) => e.seq > Number(url.searchParams.get("after") || 0)), truncated: false });
+    if (url.pathname === "/api/sessions/bot-conversation") return answer({session:remote.sessions.find(s=>s.id==='bot-conversation'),events:[],truncated:false});
     return answer({ error: "Not found" }, 404);
   });
   await page.goto(`/remote.html${paired ? "" : "#pair=one-use-test-invitation"}`);
   return remote;
 }
+
+test('phone creates a bot with personality, model and schedule controls',async({page})=>{
+  const remote=await boot(page);await expect(page.locator('.phone-online')).toBeVisible();await page.getByRole('button',{name:'Bots',exact:true}).click();await page.getByRole('button',{name:'New bot',exact:true}).click();await page.getByLabel('Bot name',{exact:true}).fill('Grokbot');
+  await expect(page.locator('.bots-panel').getByRole('button',{name:'Model: Phone model',exact:true})).toBeEnabled();await page.locator('.bots-panel').getByRole('button',{name:'Reasoning: Low',exact:true}).click();await page.getByRole('option',{name:/^High/}).click();
+  await page.getByRole('button',{name:'Personality & instructions'}).click();await page.getByLabel('soul.md',{exact:true}).fill('You are {{name}}. Keep answers clear.');
+  expect((await new AxeBuilder({page}).include('.bots-panel').analyze()).violations).toEqual([]);
+  await page.screenshot({path:'.qa/bots-phone-editor.png'});
+  await page.getByRole('button',{name:'Automation',exact:true}).click();await page.getByLabel('Run automatically on schedule').uncheck();await expect(page.getByText(/Next runs:/)).toBeVisible();
+  await page.getByRole('button',{name:'Save bot',exact:true}).click();expect(remote.bots.profiles[0]).toMatchObject({name:'Grokbot',automatic:false,options:{model:'phone-model',reasoning:'high'}});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:'.qa/bots-phone.png'});
+  await page.locator('.bot-card').getByRole('button',{name:'Chat',exact:true}).click();await expect(page.locator('.bots-panel')).toHaveCount(0);await expect(page.locator('.phone-session-select')).toContainText('Grokbot');await expect(page.locator('.phone-online')).toBeVisible();expect(remote.sends).toEqual([]);
+});
+test('view-only phone bots expose profiles without write or chat controls',async({page})=>{
+  await boot(page,true,false);await expect(page.locator('.phone-online')).toBeVisible();await page.getByRole('button',{name:'Bots',exact:true}).click();await expect(page.getByRole('button',{name:'New bot',exact:true})).toHaveCount(0);await page.getByRole('button',{name:'Schedules',exact:true}).click();await expect(page.getByRole('button',{name:'Pause scheduling'})).toBeDisabled();
+});
 
 test("phone Kanban edits shared cards and prepares a draft with accessible touch controls",async({page})=>{
   const remote=await boot(page);await expect(page.locator(".phone-online")).toBeVisible();
@@ -86,7 +110,7 @@ test("phone Kanban edits shared cards and prepares a draft with accessible touch
   expect((await new AxeBuilder({page}).include(".kanban-panel").analyze()).violations).toEqual([]);
   await page.locator(".progress").scrollIntoViewIfNeeded();await page.screenshot({path:".qa/kanban-phone.png",animations:"disabled"});
   await page.getByRole("button",{name:"Work on this",exact:false}).click();
-  await expect(page.getByLabel("Message your desktop agent")).toHaveValue("Existing phone draft\n\nWork on this task: Check the phone layout\n\nKeep touch targets comfortable.");expect(remote.sends).toEqual([]);
+  await expect(page.getByLabel("Message your desktop agent")).toHaveValue(`Existing phone draft\n\nWork on this task: Check the phone layout\nTask ID: ${remote.board.cards[0].id}\n\nKeep touch targets comfortable.`);expect(remote.sends).toEqual([]);
 });
 test("view-only phone Kanban cannot mutate cards",async({page})=>{
   const remote=await boot(page,true,false);remote.board.cards=[{id:"one",title:"Read only",description:"",column:"backlog",priority:"normal"}];

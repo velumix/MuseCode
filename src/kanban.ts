@@ -6,6 +6,9 @@ export const columns = [
 ] as const;
 export type Column = (typeof columns)[number]["id"];
 export interface Card {
+  assignment?: import('./bots').Assignment|null;
+  last_summary?: string;
+  last_run?: string|null;
   id: string;
   title: string;
   description: string;
@@ -28,5 +31,5 @@ export type BoardRequest =
     }
   | { action: "delete"; revision: number; id: string };
 export function taskPrompt(card: Card) {
-  return `Work on this task: ${card.title}${card.description ? `\n\n${card.description}` : ""}`;
+  return `Work on this task: ${card.title}\nTask ID: ${card.id}${card.description ? `\n\n${card.description}` : ""}`;
 }

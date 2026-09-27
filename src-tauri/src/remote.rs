@@ -525,10 +525,14 @@ fn router(state: WebState) -> Router {
         .route("/api/sessions/{id}/options", post(configure))
         .route("/api/sessions/{id}/memory", post(memory_request))
         .route("/api/sessions/{id}/kanban", post(kanban_request))
+        .route("/api/bots", post(bots_request))
+        .route("/api/sessions/{id}/bots/{bot}/memory", post(bot_memory))
+        .route("/api/sessions/{id}/bots/{bot}/chat", post(bot_chat))
+        .route("/api/sessions/{id}/automation", post(automation_request))
         .route("/api/providers/{provider}/models", get(models))
         .route("/api/events", get(events))
         .fallback(asset)
-        .layer(DefaultBodyLimit::max(64 * 1024))
+        .layer(DefaultBodyLimit::max(256 * 1024))
         .layer(middleware::from_fn_with_state(state.clone(), boundary))
         .with_state(state)
 }
@@ -813,6 +817,154 @@ async fn configure(
     Ok(Json(json!({"ok":true})))
 }
 
+fn session_workspace(app: &tauri::AppHandle, id: &str) -> Result<String, ApiError> {
+    app.state::<SessionLog>()
+        .summaries()
+        .into_iter()
+        .find(|s| s.id == id)
+        .map(|s| s.workspace)
+        .ok_or(ApiError(
+            StatusCode::NOT_FOUND,
+            "This conversation is closed.".into(),
+        ))
+}
+async fn bots_request(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Json(request): Json<crate::bots::Request>,
+) -> ApiResult {
+    authenticate(
+        &state,
+        &headers,
+        !matches!(&request, crate::bots::Request::List {}),
+    )?;
+    let app = state.app.ok_or_else(|| bad("Desktop unavailable."))?;
+    let view = crate::bots::bots_request(app, request)
+        .await
+        .map_err(|e| ApiError(StatusCode::CONFLICT, e))?;
+    Ok(Json(json!(view)))
+}
+async fn bot_memory(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Path((id, bot)): Path<(String, String)>,
+    Json(request): Json<crate::memory::Request>,
+) -> ApiResult {
+    authenticate(
+        &state,
+        &headers,
+        !matches!(&request, crate::memory::Request::List { .. }),
+    )?;
+    let app = state.app.ok_or_else(|| bad("Desktop unavailable."))?;
+    let workspace = session_workspace(&app, &id)?;
+    let view = crate::bots::bots_memory(app, bot, workspace, request)
+        .await
+        .map_err(|e| ApiError(StatusCode::CONFLICT, e))?;
+    Ok(Json(json!(view)))
+}
+async fn bot_chat(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Path((id, bot)): Path<(String, String)>,
+) -> ApiResult {
+    authenticate(&state, &headers, true)?;
+    let app = state.app.ok_or_else(|| bad("Desktop unavailable."))?;
+    let workspace = session_workspace(&app, &id)?;
+    let profile = app.state::<crate::bots::Store>().get(&bot).map_err(bad)?;
+    if !profile.enabled {
+        return Err(bad("This bot is disabled."));
+    }
+    let sessions = app.state::<SessionLog>().summaries();
+    if let Some(existing) = sessions.iter().find(|s| {
+        s.bot.as_ref().is_some_and(|b| b.id == bot)
+            && s.workspace == workspace
+            && !s.id.starts_with("bot-run-")
+    }) {
+        return Ok(Json(json!({"id":existing.id})));
+    }
+    if sessions.len() >= 32 {
+        return Err(bad(
+            "Close a desktop conversation before opening another bot.",
+        ));
+    }
+    let tab = uuid::Uuid::new_v4().to_string();
+    app.emit(
+        "bot-chat-open",
+        json!({"tab_id":tab,"bot":profile,"workspace":workspace}),
+    )
+    .map_err(|e| bad(e.to_string()))?;
+    for _ in 0..50 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if let Some(session) = app
+            .state::<SessionLog>()
+            .summaries()
+            .into_iter()
+            .find(|s| s.id.starts_with(&format!("{tab}-agent-")))
+        {
+            return Ok(Json(json!({"id":session.id})));
+        }
+    }
+    Err(bad("The desktop has not opened the bot conversation yet. Check Velum on your desktop before trying again."))
+}
+async fn automation_request(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<crate::automation::Request>,
+) -> ApiResult {
+    authenticate(
+        &state,
+        &headers,
+        !matches!(
+            &request,
+            crate::automation::Request::List {} | crate::automation::Request::Preview { .. }
+        ),
+    )?;
+    let app = state.app.ok_or_else(|| bad("Desktop unavailable."))?;
+    let workspace = session_workspace(&app, &id)?;
+    if let crate::automation::Request::Run { id }
+    | crate::automation::Request::Pause { id, .. }
+    | crate::automation::Request::Stop { id } = &request
+    {
+        let view = app.state::<crate::automation::Store>().view();
+        let path = std::path::PathBuf::from(&workspace)
+            .canonicalize()
+            .map_err(|e| bad(e.to_string()))?;
+        if !view.snapshot.jobs.iter().any(|j| {
+            &j.id == id
+                && std::path::PathBuf::from(&j.workspace).canonicalize().ok() == Some(path.clone())
+        }) {
+            return Err(ApiError(
+                StatusCode::FORBIDDEN,
+                "This job belongs to another workspace.".into(),
+            ));
+        }
+    }
+    let mut value = crate::automation::automation_request(app, request)
+        .await
+        .map_err(|e| ApiError(StatusCode::CONFLICT, e))?;
+    if let Some(jobs) = value.get_mut("jobs").and_then(|v| v.as_array_mut()) {
+        let workspace = std::path::PathBuf::from(workspace).canonicalize().ok();
+        jobs.retain(|j| {
+            j["workspace"]
+                .as_str()
+                .and_then(|s| std::path::PathBuf::from(s).canonicalize().ok())
+                == workspace
+        });
+        let ids = jobs
+            .iter()
+            .filter_map(|j| j["id"].as_str().map(str::to_owned))
+            .collect::<Vec<_>>();
+        if let Some(runs) = value.get_mut("runs").and_then(|v| v.as_array_mut()) {
+            runs.retain(|r| {
+                r["job_id"]
+                    .as_str()
+                    .is_some_and(|id| ids.iter().any(|v| v == id))
+            });
+        }
+    }
+    Ok(Json(value))
+}
 async fn kanban_request(
     State(state): State<WebState>,
     headers: HeaderMap,
@@ -1165,6 +1317,70 @@ mod tests {
                     .unwrap()
                     .status(),
                 expected
+            );
+        }
+    }
+    #[tokio::test]
+    async fn bot_and_schedule_controls_require_pairing_and_write_access() {
+        let (state, token) = fixture(false);
+        for (path, payload, auth, expected) in [
+            (
+                "/api/bots",
+                json!({"action":"list"}),
+                None,
+                StatusCode::UNAUTHORIZED,
+            ),
+            (
+                "/api/bots",
+                json!({"action":"delete","id":"bot","revision":"r1"}),
+                Some(token.as_str()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "/api/sessions/one/bots/bot/chat",
+                json!({}),
+                Some(token.as_str()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "/api/sessions/one/bots/bot/memory",
+                json!({"action":"list","query":""}),
+                None,
+                StatusCode::UNAUTHORIZED,
+            ),
+            (
+                "/api/sessions/one/bots/bot/memory",
+                json!({"action":"configure","settings":{"enabled":false,"capture":"manual","budget_bytes":1000}}),
+                Some(token.as_str()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "/api/sessions/one/automation",
+                json!({"action":"run","id":"job"}),
+                Some(token.as_str()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "/api/sessions/one/automation",
+                json!({"action":"configure","enabled":true}),
+                Some(token.as_str()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "/api/sessions/one/automation",
+                json!({"action":"list","workspace":"C:\\elsewhere"}),
+                Some(token.as_str()),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+        ] {
+            assert_eq!(
+                router(state.clone())
+                    .oneshot(request(path, auth, Some(payload)))
+                    .await
+                    .unwrap()
+                    .status(),
+                expected,
+                "{path}"
             );
         }
     }
