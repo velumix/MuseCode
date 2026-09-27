@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
-import Icon, { MuseMark } from "./Icon";
+import Icon, { VelumMark } from "./Icon";
 
 function MinimizeIcon() {
   return (
@@ -71,7 +71,7 @@ export default function TitleBar({ onCommands }: { onCommands: () => void }) {
       }}
     >
       <div className="titlebar-brand">
-        <MuseMark />
+        <VelumMark />
         <span>velum<span className="brand-suffix">code</span></span>
       </div>
       <button type="button" className="global-search" onClick={onCommands} aria-label="Search commands and conversations">

@@ -26,7 +26,7 @@ $product = $conf.productName
 $version = $conf.version
 $installer = Join-Path $root "src-tauri\target\release\bundle\nsis\$product`_$version`_x64-setup.exe"
 $installDir = Join-Path $env:LOCALAPPDATA $product
-$exe = Join-Path $installDir 'muse-code-app.exe'
+$exe = Join-Path $installDir 'velum-code.exe'
 
 if ($Uninstall) {
   $un = Join-Path $installDir 'uninstall.exe'

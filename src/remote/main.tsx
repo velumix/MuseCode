@@ -6,5 +6,6 @@ import "./remote.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(<React.StrictMode><RemoteApp /></React.StrictMode>);
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
-  void navigator.serviceWorker.register("/sw.js").catch(() => {});
+  // Activate fresh assets on the next navigation without discarding a draft.
+  void navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).catch(() => {});
 }

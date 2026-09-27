@@ -10,7 +10,8 @@ async function boot(page: Page, delay = 0) {
     const callbacks = new Map();
     const listeners = new Map();
     let serial = 0;
-    const api = w.qa = { calls: [] as any[], sessions: new Map(), failSend: false,
+    const api = w.qa = { calls: [] as any[], sessions: new Map(), failSend: false, antigravityInstalled: false,
+      auth: { phase: "code", url: "https://accounts.google.com/o/oauth2/auth?state=fixture&code_challenge=test", message: "Sign in with Google, then paste the code from your browser." },
       remote: { enabled: false, url: null as string | null, error: null, devices: [] as any[], pending: null as any, usb: null as any,
         tailscale: { installed: true, connected: true, hostname: "desktop.tail.ts.net", message: "Connected to your private network." } },
       desktop: { notifications_enabled: true, last_error: null }, pendingNavigation: null as string | null,
@@ -31,7 +32,9 @@ async function boot(page: Page, delay = 0) {
       unregisterCallback(id: number) { callbacks.delete(id); },
       async invoke(cmd: string, args: any = {}) {
         api.calls.push({ cmd, args });
-        if (cmd === "provider_status") return ["muse", "codex", "antigravity"].map((id) => ({ id, installed: id !== "antigravity", setup_url: "https://antigravity.google/docs/getting-started?tab=cli" }));
+        if (cmd === "provider_status") return ["muse", "codex", "antigravity"].map((id) => ({ id, installed: id !== "antigravity" || api.antigravityInstalled, setup_url: "https://antigravity.google/docs/getting-started?tab=cli" }));
+        if (cmd === "antigravity_login_status") return { ...api.auth };
+        if (cmd === "antigravity_login_submit") { api.auth = { phase: "complete", url: "", message: "Antigravity is connected." }; return; }
         if (cmd === "remote_status" || cmd === "remote_check_tailscale") return { ...api.remote };
         if (cmd === "remote_usb_devices") return [{ serial: "PIXEL_TEST", name: "Pixel 7 Pro", authorized: true }, { serial: "LOCKED", name: "Android phone", authorized: false }];
         if (cmd === "remote_usb_connect") { api.remote.usb = { serial: args.serial, name: "Pixel 7 Pro", authorized: true }; return { ...api.remote }; }
@@ -80,6 +83,41 @@ async function boot(page: Page, delay = 0) {
 }
 
 const composer = (page: Page) => page.locator(".chat-wrap:not(.hidden) textarea");
+
+test("Antigravity sign-in keeps codes out of conversations and preserves drafts", async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => { (window as any).qa.antigravityInstalled = true; });
+  await page.getByLabel("Refresh installed providers").click();
+  await page.getByLabel("AI provider").selectOption("antigravity");
+  await composer(page).fill("Keep this draft");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Connect Antigravity" });
+  await expect(dialog.getByLabel("Paste your authorization code")).toBeFocused();
+  await expect(dialog.getByRole("button", { name: "Connect account" })).toBeDisabled();
+  await expect(dialog.getByLabel("Paste your authorization code")).toHaveAttribute("type", "password");
+  expect((await new AxeBuilder({ page }).include(".auth-dialog").analyze()).violations).toEqual([]);
+  await dialog.screenshot({ path: ".qa/antigravity-sign-in.png" });
+  await dialog.getByLabel("Paste your authorization code").fill("4/fixture-only-code");
+  await dialog.getByRole("button", { name: "Connect account" }).click();
+  await page.getByRole("button", { name: "Back to conversation" }).click();
+  await expect(composer(page)).toHaveValue("Keep this draft");
+  expect(await page.evaluate(() => (window as any).qa.calls.filter((c: any) => c.cmd === "agent_send"))).toHaveLength(0);
+  await expect.poll(() => page.evaluate(() => (window as any).qa.calls.some((c: any) => c.cmd === "antigravity_login_cancel"))).toBe(true);
+});
+
+test("Antigravity authentication errors open sign-in and retries replace the session", async ({ page }) => {
+  await boot(page);
+  await page.getByLabel("AI provider").selectOption("antigravity");
+  await composer(page).fill("Start task"); await composer(page).press("Enter");
+  await page.evaluate(() => (window as any).qa.agent({ kind: "turn_end", status: "failed", reason: "Please sign in to use Antigravity" }));
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.evaluate(() => { (window as any).qa.auth = { phase: "error", url: null, message: "Code expired. Start again." }; });
+  await expect(page.getByRole("alert")).toContainText("Code expired");
+  await page.getByRole("button", { name: "Start again" }).click();
+  await expect.poll(() => page.evaluate(() => new Set((window as any).qa.calls.filter((c: any) => c.cmd === "antigravity_login_start").map((c: any) => c.args.id)).size)).toBeGreaterThan(1);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
 
 test("providers keep separate conversations, drafts and terminal sessions", async ({ page }) => {
   await boot(page);
@@ -254,7 +292,7 @@ test("StrictMode and closing during delayed initialization leave no ghost sessio
   const initial = await page.evaluate(() => ({ count: (window as any).qa.sessions.size, listeners: (window as any).qa.listenerCount() }));
   expect(initial.count).toBe(1);
   await page.getByRole("button", { name: "New session (Ctrl+T)", exact: true }).click();
-  await page.getByTitle("Close muse 2", { exact: true }).click();
+  await page.getByRole("tab", { selected: true }).getByTitle("Close New conversation", { exact: true }).click();
   await page.waitForTimeout(650);
   expect(await page.evaluate(() => (window as any).qa.sessions.size)).toBe(1);
   expect(await page.evaluate(() => (window as any).qa.listenerCount())).toBe(initial.listeners);

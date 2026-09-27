@@ -15,7 +15,7 @@
         <ScrollView android:id="@+id/welcome" android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true">
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
                 android:gravity="center_vertical" android:paddingStart="28dp" android:paddingEnd="28dp" android:paddingTop="32dp" android:paddingBottom="32dp">
-                <ImageView android:layout_width="72dp" android:layout_height="72dp" android:src="@drawable/muse_mark" android:contentDescription="@string/app_name" />
+                <ImageView android:layout_width="72dp" android:layout_height="72dp" android:src="@drawable/velum_mark" android:contentDescription="@string/app_name" />
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="32dp"
                     android:text="@string/home_eyebrow" android:textColor="@color/muse_blue" android:textSize="11sp" android:letterSpacing="0.12" android:fontFamily="sans-serif-medium" />
                 <TextView android:id="@+id/welcome_title" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"

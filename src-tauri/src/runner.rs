@@ -94,7 +94,7 @@ fn safe_fragment(id: &str) -> String {
 
 fn prompt_file(id: &str) -> std::path::PathBuf {
     std::env::temp_dir()
-        .join(format!("muse-code-app-{}", safe_fragment(id)))
+        .join(format!("velum-code-{}", safe_fragment(id)))
         .join("prompt.txt")
 }
 
@@ -539,11 +539,11 @@ mod tests {
             tmp
         );
         let missing = tmp.join(format!(
-            "muse-code-app-no-such-workspace-{}",
+            "velum-code-no-such-workspace-{}",
             std::process::id()
         ));
         assert!(resolve_workspace(Some(missing.display().to_string())).is_err());
-        let probe = tmp.join(format!("muse-code-app-ws-probe-{}", std::process::id()));
+        let probe = tmp.join(format!("velum-code-ws-probe-{}", std::process::id()));
         std::fs::write(&probe, b"probe").unwrap();
         assert!(resolve_workspace(Some(probe.display().to_string())).is_err());
         let _ = std::fs::remove_file(&probe);

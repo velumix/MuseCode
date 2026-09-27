@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="src/assets/muse-mark.png" alt="Velum Code's folded blue V" width="112" />
+  <img src="src/assets/velum-mark.png" alt="Velum Code's folded blue V" width="112" />
   <h1>Velum Code</h1>
   <p><strong>Your coding agents. One place to build.</strong></p>
   <p>A Windows home for Muse, Codex and Google Antigravity.<br />Created by <a href="https://github.com/velumix"><strong>Velumix</strong></a>.</p>
@@ -62,7 +62,7 @@ So I made it. **Velum Code is the app I built around that idea.** It started as 
 
 1. Open [Windows CI](https://github.com/velumix/VelumCode/actions/workflows/windows.yml) and choose the latest successful run.
 2. Download **VelumCode-windows-x64** from **Artifacts** and extract the ZIP.
-3. Run **Velum Code_0.3.0_x64-setup.exe**, then launch **Velum Code** from your desktop or Start menu.
+3. Run **Velum Code_0.3.1_x64-setup.exe**, then launch **Velum Code** from your desktop or Start menu.
 
 CI artifacts require a GitHub sign-in and are retained for 14 days. These are unsigned development builds. Install the bundle so Windows can register the app's notification identity and click handler.
 
@@ -74,12 +74,21 @@ Prefer to build it yourself? See [Build from source](#build-from-source) below.
 | :-- | :-- | :-- |
 | **Muse** | `muse` | Your existing Muse CLI installation and account. |
 | **Codex · ChatGPT** | `codex` | [Install Codex CLI](https://developers.openai.com/codex/cli/), then sign in with ChatGPT or your existing Codex credentials. |
-| **Google Antigravity** | `agy` | [Install Antigravity CLI](https://antigravity.google/docs/getting-started?tab=cli), launch it in Terminal, and complete Google sign-in. |
+| **Google Antigravity** | `agy` | [Install Antigravity CLI](https://antigravity.google/docs/getting-started?tab=cli), choose Antigravity, then click **Sign in**. |
 
 Choosing another provider opens a new conversation in the current workspace. Existing
 conversations, running tasks and drafts stay with their original provider. Each provider
 resumes its own CLI session and uses its configured model; Velum Code does not collect API keys.
 The embedded Terminal starts that tab's provider for sign-in and interactive approvals.
+
+Antigravity has a dedicated Google sign-in screen. Open the browser from that screen,
+copy Google's one-time authorization code, and paste it into **Connect account**.
+Keep the screen open while signing in; **Start again** creates a fresh attempt if a
+code expires. The app verifies access before showing connected, and leaves credential
+storage to the CLI. Codes are never saved in conversations. First-launch theme or
+workspace prompts, if present, can be completed in Terminal before signing in.
+
+<p align="center"><img src="docs/images/antigravity-sign-in.png" alt="Antigravity Google sign-in with a dedicated authorization code field" width="360" /></p>
 
 Agent view runs without interactive prompts. Codex uses its workspace-write sandbox with
 approvals disabled; Antigravity follows its configured policy and denies requests that need
@@ -168,7 +177,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Build
 
 The app uses **Tauri 2 + Rust**, **React 19 + TypeScript**, and **xterm.js over Windows ConPTY**. Chat translates each CLI’s structured output into shared messages, tool cards and turn status. Tray lifetime and notification delivery run in the native backend.
 
-See the [development guide](docs/development.md) for tests, native smoke checks, installer commands, and the project layout. The [0.3.0 QA report](docs/qa-0.3.0.md) records the verified behavior and remaining work; the [brand notes](docs/brand.md) cover the logo and assets.
+See the [development guide](docs/development.md) for tests, native smoke checks, installer commands, and the project layout. The [0.3.1 QA report](docs/qa-0.3.1.md) records the verified behavior and remaining work; the [brand notes](docs/brand.md) cover the logo and assets.
 
 ## Where it stands
 

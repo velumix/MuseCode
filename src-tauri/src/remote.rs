@@ -815,9 +815,9 @@ async fn asset(State(state): State<WebState>, uri: axum::http::Uri) -> Response 
         "remote.html"
             | "manifest.webmanifest"
             | "sw.js"
-            | "muse-icon.png"
-            | "pwa-192.png"
-            | "pwa-512.png"
+            | "velum-icon.png"
+            | "velum-192.png"
+            | "velum-512.png"
     ) || name.strip_prefix("assets/").is_some_and(|s| {
         !s.is_empty()
             && s.bytes()

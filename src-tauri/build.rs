@@ -9,6 +9,6 @@ fn main() {
         println!("cargo:rustc-link-arg=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'");
         // Tauri already embeds the full application manifest in resource.lib.
         // Suppress the linker's extra copy for the desktop executable only.
-        println!("cargo:rustc-link-arg-bin=muse-code-app=/MANIFEST:NO");
+        println!("cargo:rustc-link-arg-bin=velum-code=/MANIFEST:NO");
     }
 }

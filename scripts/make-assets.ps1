@@ -16,11 +16,11 @@ try {
   & npx.cmd tauri icon $masterPath
   if ($LASTEXITCODE -ne 0) { throw 'Tauri icon export failed.' }
   New-Item -ItemType Directory -Force -Path 'src/assets', 'public', 'src-tauri/nsis' | Out-Null
-  Copy-Item -LiteralPath 'src-tauri/icons/128x128@2x.png' -Destination 'src/assets/muse-mark.png'
-  Copy-Item -LiteralPath 'src-tauri/icons/32x32.png' -Destination 'public/muse-icon.png'
+  Copy-Item -LiteralPath 'src-tauri/icons/128x128@2x.png' -Destination 'src/assets/velum-mark.png'
+  Copy-Item -LiteralPath 'src-tauri/icons/32x32.png' -Destination 'public/velum-icon.png'
 
   $mark = [Drawing.Image]::FromFile((Join-Path $projectRoot 'src-tauri/icons/icon.png'))
-  Copy-Item -LiteralPath 'src/assets/muse-mark.png' -Destination 'android/app/src/main/res/drawable-nodpi/muse_mark.png'
+  Copy-Item -LiteralPath 'src/assets/velum-mark.png' -Destination 'android/app/src/main/res/drawable-nodpi/velum_mark.png'
   foreach ($size in @(192, 512)) {
     $pwa = [Drawing.Bitmap]::new($size, $size)
     $g = [Drawing.Graphics]::FromImage($pwa)
@@ -28,7 +28,7 @@ try {
       $g.Clear([Drawing.ColorTranslator]::FromHtml('#191c21'))
       $g.InterpolationMode = 'HighQualityBicubic'
       $g.DrawImage($mark, [int]($size * .12), [int]($size * .12), [int]($size * .76), [int]($size * .76))
-      $pwa.Save((Join-Path $projectRoot "public/pwa-$size.png"), [Drawing.Imaging.ImageFormat]::Png)
+      $pwa.Save((Join-Path $projectRoot "public/velum-$size.png"), [Drawing.Imaging.ImageFormat]::Png)
     } finally { $g.Dispose(); $pwa.Dispose() }
   }
   $ink = [Drawing.ColorTranslator]::FromHtml('#202122')

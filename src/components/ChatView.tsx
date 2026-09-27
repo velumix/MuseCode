@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import Markdown from "./Markdown";
 import { providerNames, type Provider } from "../providers";
 import { copyText } from "./clip";
-import Icon, { MuseMark, type IconName } from "./Icon";
+import Icon, { VelumMark, type IconName } from "./Icon";
 
 export type AgentStatus =
   | { kind: "starting" }
@@ -662,7 +662,7 @@ export default function ChatView({ provider, initialWorkspace, sessionId, active
       <div ref={scrollRef} className="chat-scroll" onScroll={onScroll}>
         {blocks.length === 0 && (
           <div className="chat-empty">
-            <div className="welcome-mark"><MuseMark size={100} /></div>
+            <div className="welcome-mark"><VelumMark size={100} /></div>
             <span className="welcome-eyebrow">A fresh conversation</span>
             <h2>What are we building?</h2>
             <p>A fresh set of eyes for your code.<br />Start with an idea. We’ll take it from there.</p>
@@ -701,7 +701,7 @@ export default function ChatView({ provider, initialWorkspace, sessionId, active
               return (
                 <div key={b.id} className="msg assistant">
                   <div className="message-header">
-                    <span className="message-avatar muse-avatar"><MuseMark size={38} /></span>
+                    <span className="message-avatar muse-avatar"><VelumMark size={38} /></span>
                     <div className="message-author"><strong>{providerNames[provider]}<span className="assistant-badge">AI</span></strong></div>
                     <CopyButton text={b.text} />
                   </div>

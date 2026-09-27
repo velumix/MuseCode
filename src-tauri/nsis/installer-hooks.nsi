@@ -25,14 +25,19 @@ BrandingText "Velum Code Setup"
   Delete "$LOCALAPPDATA\Muse Code\uninstall.exe"
   RMDir "$LOCALAPPDATA\Muse Code"
   velum_migration_done:
+  ; This orphaned custom icon was not owned by the old uninstaller.
+  Delete "$LOCALAPPDATA\Muse Code\muse-folded-m.ico"
+  RMDir "$LOCALAPPDATA\Muse Code"
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
+  ; Silent upgrades keep old resource files unless explicitly removed.
+  Delete "$INSTDIR\muse-notification.png"
   ; Native toast identity and COM activation, including Notification Center.
   ; NSIS runs as a 32-bit process; the COM server is the 64-bit app.
   SetRegView 64
   WriteRegStr HKCU "Software\Classes\AppUserModelId\com.velumix.musecode" "DisplayName" "Velum Code"
-  WriteRegStr HKCU "Software\Classes\AppUserModelId\com.velumix.musecode" "IconUri" "$INSTDIR\muse-notification.png"
+  WriteRegStr HKCU "Software\Classes\AppUserModelId\com.velumix.musecode" "IconUri" "$INSTDIR\velum-notification.png"
   WriteRegStr HKCU "Software\Classes\AppUserModelId\com.velumix.musecode" "CustomActivator" "{31C4BDC3-41CE-4B6E-99AB-502F4549295F}"
   WriteRegStr HKCU "Software\Classes\CLSID\{31C4BDC3-41CE-4B6E-99AB-502F4549295F}\LocalServer32" "" '$\"$INSTDIR\${MAINBINARYNAME}.exe$\" --toast-activated'
   SetRegView lastused

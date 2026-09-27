@@ -1,6 +1,6 @@
 [package]
-name = "muse-code-app"
-version = "0.3.0"
+name = "velum-code"
+version = "0.3.1"
 description = "Velum Code — a desktop home for Muse, Codex and Antigravity"
 authors = ["velumix"]
 edition = "2021"
@@ -11,7 +11,7 @@ edition = "2021"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "muse_code_app_lib"
+name = "velum_code_lib"
 # Windows links this library into the executable. The Android companion is a
 # separate native app; it does not consume Tauri's mobile library outputs.
 crate-type = ["rlib"]
@@ -32,6 +32,7 @@ tokio = { version = "1", features = ["net", "sync", "time", "process", "io-util"
 async-stream = "0.3"
 sha2 = "0.10"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+vt100 = "0.16"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

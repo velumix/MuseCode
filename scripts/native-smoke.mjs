@@ -13,7 +13,7 @@ const notifications = process.argv.includes("--notifications");
 // Native notification checks require the bundle's COM registration. A running
 // debug build can serve that same class; --installed also verifies the packaged app.
 const existing = execFileSync("powershell.exe", ["-NoProfile", "-Command",
-  "@(Get-Process muse-code-app -ErrorAction SilentlyContinue).Count"], { encoding: "utf8", windowsHide: true }).trim();
+  "@(Get-Process velum-code -ErrorAction SilentlyContinue).Count"], { encoding: "utf8", windowsHide: true }).trim();
 assert.equal(existing, "0", "Quit Velum Code before native tests; single-instance tests must not attach to your conversations");
 let vite;
 if (!release) {
@@ -39,8 +39,8 @@ for (const [provider, command] of [["codex", "codex"], ["antigravity", "agy"]]) 
   writeFileSync(path.join(runDir, `${command}.cmd`), `@echo off\r\n"${process.execPath}" "${path.join(root, "tests/fixtures/provider-cli.cjs")}" ${provider} %*\r\n`);
 }
 const port = 19422;
-const appPath = installed ? path.join(process.env.LOCALAPPDATA, "Velum Code/muse-code-app.exe")
-  : path.join(root, `src-tauri/target/${release ? "release" : "debug"}/muse-code-app.exe`);
+const appPath = installed ? path.join(process.env.LOCALAPPDATA, "Velum Code/velum-code.exe")
+  : path.join(root, `src-tauri/target/${release ? "release" : "debug"}/velum-code.exe`);
 const appEnv = { ...process.env, PATH: `${runDir};${process.env.PATH}`, MUSE_QA_LOG: logPath,
   MUSE_CODE_CONFIG_DIR: path.join(runDir, "settings"),
   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
@@ -208,6 +208,22 @@ try {
   for (let i = 0; i < 100 && records().some((r) => alive(r.pid)); i++) await sleep(50);
   assert(records().every((r) => !alive(r.pid)), "Closing the tab left native children running");
   console.log("PASS: closing a busy tab cleans up both sessions and opens a usable replacement");
+  // Exercise the real ConPTY login bridge, nonce handling and account check.
+  await page.getByLabel("AI provider").selectOption("antigravity");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByLabel("Paste your authorization code").waitFor();
+  await page.getByLabel("Paste your authorization code").fill("4/invalid-fixture-code");
+  await page.getByRole("button", { name: "Connect account", exact: true }).click();
+  await page.getByRole("alert").filter({ hasText: "Google could not accept" }).waitFor();
+  await page.getByRole("button", { name: "Start again", exact: true }).click();
+  await page.getByLabel("Paste your authorization code").waitFor();
+  await page.getByLabel("Paste your authorization code").fill("4/valid-fixture-code");
+  await page.getByRole("button", { name: "Connect account", exact: true }).click();
+  await page.getByRole("button", { name: "Back to conversation", exact: true }).click();
+  for (let i = 0; i < 100 && records().filter((r) => r.kind === "auth").some((r) => alive(r.pid)); i++) await sleep(50);
+  assert(records().filter((r) => r.kind === "auth").every((r) => !alive(r.pid)), "Login child survived success/retry");
+  assert(!readFileSync(logPath, "utf8").includes("fixture-code"), "Login code was logged");
+  console.log("PASS: dedicated Antigravity login, rejected code, fresh retry, verified success and process cleanup");
   for (const provider of ["codex", "antigravity"]) {
     await page.getByLabel("AI provider").selectOption(provider);
     await composer.waitFor({ state: "visible" });

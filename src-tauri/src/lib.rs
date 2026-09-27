@@ -1,5 +1,6 @@
 mod desktop;
 mod events;
+mod provider_auth;
 mod provider_events;
 mod providers;
 mod pty;
@@ -22,6 +23,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .manage(PtyState::default())
+        .manage(provider_auth::AuthState::default())
         .manage(AgentState::default())
         .manage(session_log::SessionLog::default())
         .setup(|app| {
@@ -32,6 +34,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             pty::pty_spawn,
             providers::provider_status,
+            provider_auth::antigravity_login_start,
+            provider_auth::antigravity_login_status,
+            provider_auth::antigravity_login_submit,
+            provider_auth::antigravity_login_cancel,
             pty::pty_write,
             pty::pty_resize,
             pty::pty_kill,
@@ -65,6 +71,7 @@ pub fn run() {
                 desktop::shutdown(app);
                 app.state::<AgentState>().shutdown();
                 app.state::<PtyState>().shutdown();
+                app.state::<provider_auth::AuthState>().shutdown();
             }
         });
 }

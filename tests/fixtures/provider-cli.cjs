@@ -4,7 +4,27 @@ const { spawn } = require("node:child_process");
 const provider = process.argv[2];
 const args = process.argv.slice(3);
 const log = (entry) => fs.appendFileSync(process.env.MUSE_QA_LOG, JSON.stringify({ provider, pid: process.pid, ...entry }) + "\n");
-if (args[0] === "--descendant") {
+if (provider === "antigravity" && args[0] === "models") {
+  process.exitCode = fs.existsSync(process.env.MUSE_QA_LOG + ".auth") ? 0 : 1;
+} else if (provider === "antigravity" && args.includes("--log-file")) {
+  log({ kind: "auth" });
+  let selected = false;
+  let input = "";
+  process.stdout.write("Select login method:\r\n> 1. Google OAuth\r\n");
+  process.stdin.on("data", (chunk) => {
+    input += chunk.toString();
+    if (!input.includes("\r") && !input.includes("\n")) return;
+    if (!selected) {
+      selected = true;
+      process.stdout.write("\x1b[2J\x1b[HOpen the URL below in your browser:\r\nhttps://accounts.google.com/o/oauth2/auth?state=fixture&code_challenge=test\r\n\r\nauthorization code...\r\n");
+    } else if (input.includes("4/valid-fixture-code")) {
+      fs.writeFileSync(process.env.MUSE_QA_LOG + ".auth", "verified");
+      process.stdout.write("\x1b[2J\x1b[HSigned in.\r\n");
+    } else process.stdout.write("\x1b[2J\x1b[HGot an error: token exchange failed: invalid_grant\r\n");
+    input = "";
+  });
+  setInterval(() => {}, 1000);
+} else if (args[0] === "--descendant") {
   log({ kind: "descendant" }); setInterval(() => {}, 1000);
 } else if (!args.includes("exec") && !args.includes("--input-format")) {
   log({ kind: "terminal", cwd: process.cwd() });

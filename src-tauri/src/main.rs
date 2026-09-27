@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    muse_code_app_lib::run()
+    velum_code_lib::run()
 }

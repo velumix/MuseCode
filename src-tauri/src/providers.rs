@@ -57,6 +57,9 @@ impl Provider {
         None
     }
     pub fn missing(self) -> String {
+        if self == Self::Antigravity {
+            return "Antigravity CLI was not found. Install `agy`, refresh providers, then choose Sign in.".into();
+        }
         format!("{} CLI was not found. Install `{}` and sign in using the Terminal view, then try again.", self.label(), self.command())
     }
     pub fn input(self, prompt: &str) -> String {

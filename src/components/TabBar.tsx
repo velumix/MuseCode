@@ -21,7 +21,7 @@ interface TabBarProps {
 }
 
 export function conversationTitle(title: string): string {
-  return /^muse \d+$/.test(title) ? "New conversation" : title;
+  return /^(?:muse|New conversation) \d+$/.test(title) ? "New conversation" : title;
 }
 
 function sessionDetail(status: PtyStatus | AgentStatus): string {
@@ -79,7 +79,7 @@ export default function TabBar({ tabs, activeId, onSelect, onClose, onNew, onCom
           {t.status.kind === "running" && <span className="status-dot running" aria-hidden="true" />}
           <span
             className="tab-close"
-            title={`Close ${t.title}`}
+            title={`Close ${conversationTitle(t.title)}`}
             aria-hidden="true"
             onClick={(e) => {
               e.stopPropagation();

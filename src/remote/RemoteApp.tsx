@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { providerNames } from "../providers";
-import Icon, { MuseMark } from "../components/Icon";
+import Icon, { VelumMark } from "../components/Icon";
 import Markdown from "../components/Markdown";
 import { transcript, type Replay, type Session } from "./transcript";
 
@@ -187,7 +187,7 @@ export default function RemoteApp() {
   };
 
   if (!device) return <main className="phone-entry">
-    <div className="phone-entry-brand"><MuseMark size={52} /><span>Velum Code</span></div>
+    <div className="phone-entry-brand"><VelumMark size={52} /><span>Velum Code</span></div>
     <div className="phone-entry-card">
       <div className="phone-eyebrow"><Icon name="shield" size={15} />Your private workspace</div>
       <h1>{loading ? "Finding your desktop…" : claim ? "One last check." : invitation ? "Meet your desktop, here." : "Your desktop. In your pocket."}</h1>
@@ -203,7 +203,7 @@ export default function RemoteApp() {
   </main>;
 
   return <main className="phone-app">
-    <header className="phone-header"><MuseMark size={35} /><div><h1>Velum Code</h1><span className={connected ? "phone-online" : "phone-offline"}><i />{connected ? "Desktop connected" : "Reconnecting…"}</span></div>
+    <header className="phone-header"><VelumMark size={35} /><div><h1>Velum Code</h1><span className={connected ? "phone-online" : "phone-offline"}><i />{connected ? "Desktop connected" : "Reconnecting…"}</span></div>
       <button className="phone-icon-button" aria-label="Phone settings" onClick={() => setInstallHelp((value) => !value)}><Icon name="phone" size={21} /></button>
     </header>
     {installHelp && <section className="phone-settings" aria-label="Phone settings"><strong>{device.name}</strong><p>{computer || "Your desktop"}</p><p>{device.control ? "View and control · standard agent permissions" : "View-only access"}</p>
@@ -215,9 +215,9 @@ export default function RemoteApp() {
     {listOpen && <nav className="phone-sessions" id="phone-sessions" aria-label="Conversations">{sessions.map((session) => <button key={session.id} aria-current={session.id === selected ? "true" : undefined} onClick={() => { setSelected(session.id); setReplay(cache.current.get(session.id) || null); setListOpen(false); follow.current = true; setError(""); }}><Icon name="chat" size={18} /><span><strong>{session.title}</strong><small>{providerNames[session.provider || "muse"]} · {session.workspace.split(/[\\/]/).filter(Boolean).pop()}</small></span><i className={session.running ? "working" : ""}>{session.running ? "Working" : session.status === "completed" ? "Done" : "Ready"}</i></button>)}</nav>}
     {!connected && <div className="phone-reconnect" role="status">{usb ? "Check your USB cable and keep your desktop awake." : "Reconnect Tailscale and keep your desktop awake."} Your draft is safe.<button onClick={() => void refreshRef.current()}>Retry</button></div>}
     <div className="phone-transcript" ref={scroll} onScroll={() => { const el = scroll.current; if (el) { follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; setLatest(!follow.current); } }}>
-      {!sessions.length ? <div className="phone-empty"><Icon name="chat" size={32} /><h2>No conversations yet</h2><p>Open an Agent conversation on your desktop. It will appear here automatically.</p></div> : !view.blocks.length ? <div className="phone-empty"><MuseMark size={64} /><h2>What’s next?</h2><p>Send a message to your desktop agent. Your files and tools stay on your computer.</p></div> : null}
+      {!sessions.length ? <div className="phone-empty"><Icon name="chat" size={32} /><h2>No conversations yet</h2><p>Open an Agent conversation on your desktop. It will appear here automatically.</p></div> : !view.blocks.length ? <div className="phone-empty"><VelumMark size={64} /><h2>What’s next?</h2><p>Send a message to your desktop agent. Your files and tools stay on your computer.</p></div> : null}
       {replay?.truncated && <p className="phone-history-note">Showing recent activity. Earlier messages remain in the desktop conversation.</p>}
-      {view.blocks.map((block) => block.kind === "tool" ? <details className="phone-tool" key={block.id}><summary><Icon name="code" size={15} /><strong>{block.name}</strong><span>{block.status}</span></summary><pre>{block.text || "Waiting for output…"}</pre></details> : block.kind === "notice" ? <div className="phone-notice" key={block.id}>{block.text}</div> : <article className={`phone-message ${block.kind}`} key={block.id}><div className="phone-message-label">{block.kind === "user" ? "You" : <><MuseMark size={20} />{providerNames[current?.provider || "muse"]}</>}</div>{block.kind === "user" ? <p>{block.text}</p> : <Markdown text={block.text} />}</article>)}
+      {view.blocks.map((block) => block.kind === "tool" ? <details className="phone-tool" key={block.id}><summary><Icon name="code" size={15} /><strong>{block.name}</strong><span>{block.status}</span></summary><pre>{block.text || "Waiting for output…"}</pre></details> : block.kind === "notice" ? <div className="phone-notice" key={block.id}>{block.text}</div> : <article className={`phone-message ${block.kind}`} key={block.id}><div className="phone-message-label">{block.kind === "user" ? "You" : <><VelumMark size={20} />{providerNames[current?.provider || "muse"]}</>}</div>{block.kind === "user" ? <p>{block.text}</p> : <Markdown text={block.text} />}</article>)}
       {view.todos.length > 0 && <details className="phone-todos"><summary>Task checklist <span>{view.todos.filter((todo) => todo.status === "completed").length}/{view.todos.length}</span></summary>{view.todos.map((todo, index) => <p key={index}><Icon name={todo.status === "completed" ? "check" : "code"} size={14} />{todo.text}</p>)}</details>}
       {current?.running && <div className="phone-working" role="status"><span className="phone-pulse" />{view.activity || `${providerNames[current?.provider || "muse"]} is working…`}</div>}
     </div>

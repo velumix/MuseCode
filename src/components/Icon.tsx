@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import museMark from "../assets/muse-mark.png";
+import velumMark from "../assets/velum-mark.png";
 
 export type IconName = "search" | "plus" | "chat" | "folder" | "code" | "terminal" | "arrow" | "down" | "reset" | "command" | "check" | "copy" | "close" | "shield" | "bell" | "phone";
 
@@ -26,6 +26,6 @@ export default function Icon({ name, size = 18, className, style }: { name: Icon
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={className} style={style} aria-hidden="true"><path d={paths[name]} /></svg>;
 }
 
-export function MuseMark({ size = 40 }: { size?: number }) {
-  return <img className="muse-mark" src={museMark} width={size} height={size} alt="" aria-hidden="true" draggable={false} />;
+export function VelumMark({ size = 40 }: { size?: number }) {
+  return <img className="velum-mark" src={velumMark} width={size} height={size} alt="" aria-hidden="true" draggable={false} />;
 }

@@ -40,7 +40,7 @@ function newId(): string {
 }
 
 function createTab(n: number, provider = preferredProvider()): Tab {
-  return { provider, id: newId(), title: `muse ${n}`, mode: "agent", agentStatus: { kind: "starting" }, terminalStatus: { kind: "starting" }, agentKey: 0, terminalKey: 0, terminalStarted: false };
+  return { provider, id: newId(), title: `New conversation ${n}`, mode: "agent", agentStatus: { kind: "starting" }, terminalStatus: { kind: "starting" }, agentKey: 0, terminalKey: 0, terminalStarted: false };
 }
 
 function tabStatus(tab: Tab): PtyStatus | AgentStatus {
@@ -414,7 +414,7 @@ export default function App() {
           <Icon name="reset" size={17} />
         </button>
       </div>
-      {activeTab && <ProviderPicker value={activeTab.provider} onChange={(provider) => { if (provider !== activeTab.provider) openProvider(provider); }} />}
+      {activeTab && <ProviderPicker value={activeTab.provider} failure={activeTab.agentStatus.kind === "error" ? activeTab.agentStatus.message : undefined} onChange={(provider) => { if (provider !== activeTab.provider) openProvider(provider); }} />}
       <div className="terminal-wrap">
         {tabs.map((t) => (
           <Fragment key={t.id}>

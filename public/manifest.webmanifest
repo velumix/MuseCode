@@ -9,7 +9,7 @@
   "background_color": "#191c21",
   "theme_color": "#191c21",
   "icons": [
-    { "src": "/pwa-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/pwa-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+    { "src": "/velum-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/velum-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
   ]
 }

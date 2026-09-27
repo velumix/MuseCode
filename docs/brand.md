@@ -6,15 +6,15 @@ The wordmark uses lowercase velum with a small CODE suffix.
 ## Assets
 
 - `assets/velum-mark.svg`: editable vector master.
-- `src/assets/muse-mark.png`: 256 px UI export; the filename stays stable for existing imports.
+- `src/assets/velum-mark.png`: 256 px UI export.
 - `src-tauri/icons/`: Windows ICO, platform PNGs and other Tauri exports.
 - `src-tauri/nsis/`: installer header and sidebar artwork.
-- `android/app/src/main/res/drawable-nodpi/muse_mark.png`: Android adaptive icon and welcome mark.
-- `public/pwa-192.png`, `public/pwa-512.png`: phone web app icons.
+- `android/app/src/main/res/drawable-nodpi/velum_mark.png`: Android adaptive icon and welcome mark.
+- `public/velum-192.png`, `public/velum-512.png`: phone web app icons.
 
 Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-assets.ps1`
 to export every current asset from the SVG with Tauri and System.Drawing.
-The old raster M masters remain as historical source material.
+Every shipped mark is exported from the V master; obsolete M sources have been removed.
 
 ## Interaction
 

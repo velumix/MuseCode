@@ -11,7 +11,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const usb = process.argv.includes("--usb-fixture");
 const installed = process.argv.includes("--installed");
 const release = installed || process.argv.includes("--release");
-const count = execFileSync("powershell.exe", ["-NoProfile", "-Command", "@(Get-Process muse-code-app -ErrorAction SilentlyContinue).Count"], { encoding: "utf8", windowsHide: true }).trim();
+const count = execFileSync("powershell.exe", ["-NoProfile", "-Command", "@(Get-Process velum-code -ErrorAction SilentlyContinue).Count"], { encoding: "utf8", windowsHide: true }).trim();
 assert.equal(count, "0", "Quit VelumCode before testing; tests must not attach to your conversations.");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const run = path.join(root, ".qa", `remote-${Date.now()}`);
@@ -34,7 +34,7 @@ try {
     catch { vite = spawn(process.execPath, [path.join(root, "node_modules/vite/bin/vite.js"), "--host", "127.0.0.1"], { cwd: root, windowsHide: true, stdio: "ignore" }); }
     for (let i = 0; i < 100; i++) { try { if ((await fetch("http://127.0.0.1:1420")).ok) break; } catch {} await sleep(100); }
   }
-  const executable = installed ? path.join(process.env.LOCALAPPDATA, "Velum Code/muse-code-app.exe") : path.join(root, `src-tauri/target/${release ? "release" : "debug"}/muse-code-app.exe`);
+  const executable = installed ? path.join(process.env.LOCALAPPDATA, "Velum Code/velum-code.exe") : path.join(root, `src-tauri/target/${release ? "release" : "debug"}/velum-code.exe`);
   app = spawn(executable, [], { cwd: root, windowsHide: true, stdio: "ignore", env: { ...process.env,
     PATH: `${run};${process.env.PATH}`, MUSE_QA_LOG: log, MUSE_CODE_CONFIG_DIR: path.join(run, "settings"),
     ...(usb ? { ANDROID_HOME: sdk, MUSE_QA_ADB_DIR: run } : {}),
@@ -73,7 +73,29 @@ try {
   const context = await phoneBrowser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   phone = await context.newPage();
   phone.on("pageerror", (e) => errors.push(e.message));
+  if (release) {
+    // Seed the cache left by the former phone app before the new worker starts.
+    await phone.goto(new URL("/manifest.webmanifest", invitation.url).href);
+    await phone.evaluate(async () => {
+      const old = await caches.open("muse-phone-v2");
+      await old.put("/", new Response("<title>Muse Code</title><main>Old phone shell</main>"));
+    });
+  }
   await phone.goto(invitation.url);
+  if (release) {
+    await phone.evaluate(() => navigator.serviceWorker.ready.then(() => true));
+    await expect.poll(() => phone.evaluate(() => caches.keys())).toEqual(["velum-phone-v3"]);
+    await context.setOffline(true);
+    const offline = await context.newPage();
+    await offline.goto(new URL("/", invitation.url).href);
+    assert((await offline.title()).includes("Velum Code"), "Offline launch used the old brand shell");
+    assert(!(await offline.locator("body").innerText()).includes("Old phone shell"));
+    await offline.close();
+    await context.setOffline(false);
+    const cached = await phone.evaluate(async () => (await (await caches.open("velum-phone-v3")).keys()).map((r) => r.url));
+    assert(cached.every((url) => !url.includes("/api/") && !url.includes("pair=")), "Phone cache contains private data");
+    console.log("PASS: old phone cache migrates, offline launch has current branding, private data stays uncached");
+  }
   await expect(phone.getByLabel("Name this phone")).toBeVisible();
   assert(!phone.url().includes("pair="), "Pairing token stayed in the browser address");
   await phone.getByLabel("Name this phone").fill("QA phone");

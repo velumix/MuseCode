@@ -54,7 +54,7 @@ pub struct SpawnInfo {
 /// Build the spawn command for the resolved binary. Script shims
 /// (`.cmd`/`.bat`/`.ps1`) cannot be launched directly through ConPTY,
 /// so they are wrapped in their interpreter.
-fn build_command(muse_path: &Path) -> CommandBuilder {
+pub(crate) fn build_command(muse_path: &Path) -> CommandBuilder {
     let ext = muse_path
         .extension()
         .and_then(|e| e.to_str())
