@@ -5,7 +5,7 @@ Validated on Windows with the installed 0.4.0 desktop bundle. These changes exte
 ## Automated checks
 
 - **44 browser tests pass**, covering existing desktop and phone behavior, plugin installation, permission review, execution, draft handoff, disabling, accessibility, and reload recovery.
-- **70 Rust tests pass**, including manifest validation, path confinement, file-size limits, disabled permissions, package digests, saved resume IDs, truncated history and interrupted turns.
+- **71 Rust tests pass**, including manifest validation, path confinement, file-size limits, disabled permissions, package digests, saved resume IDs, truncated history and interrupted turns. Oversized JSON-escaped text cannot replace a valid checkpoint.
 - **SDK check passes**: the generator creates a runnable plugin, rejects invalid paths and refuses to overwrite an existing folder. A sample `definePlugin` command passes strict TypeScript checking.
 - Production frontend build, Rust formatting and Clippy pass with warnings treated as errors.
 - SDK package dry-run includes the generator, runtime helper, type definitions and README.
