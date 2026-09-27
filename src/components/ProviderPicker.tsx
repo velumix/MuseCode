@@ -18,15 +18,19 @@ export default function ProviderPicker({ value, onChange, failure, options, onOp
   useEffect(() => { void refresh(); }, []);
   const current = providers.find((item) => item.id === value);
   return <div className="provider-bar">
-    <label htmlFor="provider-choice">AI provider</label>
-    <select id="provider-choice" value={value} onChange={(event) => onChange(event.target.value as Provider)} title="Choosing a different provider opens a new conversation">
-      {Object.entries(providerNames).map(([id, name]) => <option key={id} value={id}>{name}{id === "codex" ? " · ChatGPT" : ""}</option>)}
-    </select>
+    <div className="provider-field">
+      <label htmlFor="provider-choice">AI provider</label>
+      <select id="provider-choice" value={value} onChange={(event) => onChange(event.target.value as Provider)} title="Choosing a different provider opens a new conversation">
+        {Object.entries(providerNames).map(([id, name]) => <option key={id} value={id}>{name}{id === "codex" ? " · ChatGPT" : ""}</option>)}
+      </select>
+    </div>
     <ModelControls provider={value} options={options} onChange={onOptionsChange} disabled={disabled} refreshKey={modelsKey} load={(provider, refresh) => invoke<ModelCatalog>("provider_models", { provider, refresh })} />
     {(error || (current && !current.installed)) && <span className="provider-note">{error || "CLI not installed"}</span>}
-    {current && !current.installed && <button className="status-btn" onClick={() => void openUrl(current.setup_url).catch((error) => setError(String(error)))}>Setup</button>}
-    {value === "antigravity" && current?.installed && <button className="status-btn" onClick={() => setSignIn(true)}>Sign in</button>}
-    <button className="status-btn" aria-label="Refresh installed providers" onClick={() => void refresh()}><Icon name="reset" size={14} /></button>
+    <div className="provider-actions">
+      {current && !current.installed && <button className="status-btn" onClick={() => void openUrl(current.setup_url).catch((error) => setError(String(error)))}>Setup</button>}
+      {value === "antigravity" && current?.installed && <button className="status-btn" onClick={() => setSignIn(true)}>Sign in</button>}
+      <button className="status-btn provider-refresh" aria-label="Refresh installed providers" title="Refresh installed providers" onClick={() => void refresh()}><Icon name="reset" size={14} /></button>
+    </div>
     {terminal && <p className="provider-terminal-note">Terminal changes apply when you restart the session.</p>}
     {signIn && <AntigravityLogin onClose={() => { setSignIn(false); setModelsKey((n) => n + 1); }} />}
   </div>;

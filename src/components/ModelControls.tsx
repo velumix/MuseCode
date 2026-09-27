@@ -44,7 +44,7 @@ export default function ModelControls({ provider, options, onChange, load, disab
         void apply({ model: id, reasoning: next?.efforts.includes(options.reasoning) ? options.reasoning : "" });
       }} />
       <ChoiceMenu label="Reasoning" choices={efforts} value={options.reasoning} disabled={disabled || busy || (efforts.length <= 1 && !options.reasoning)} onChange={(reasoning) => void apply({ ...options, reasoning })} />
-      <button type="button" className="models-refresh" aria-label="Refresh available models" disabled={loading || busy} onClick={() => setRefresh((n) => n + 1)}><Icon name="reset" size={14} /></button>
+      <button type="button" className="models-refresh" aria-label="Refresh available models" title="Refresh available models" disabled={loading || busy} onClick={() => setRefresh((n) => n + 1)}><Icon name="reset" size={14} /></button>
     </div>
     {custom && <form className="custom-model" onSubmit={(e) => { e.preventDefault(); void apply({ model: modelId.trim(), reasoning: "" }); }}><input aria-label="Custom model ID" autoFocus value={modelId} maxLength={200} placeholder="provider/model-id" onChange={(e) => setModelId(e.target.value)} /><button disabled={busy || disabled || !modelId.trim()}>Apply model</button><button type="button" onClick={() => setCustom(false)}>Cancel</button></form>}
     {(error || catalog.notice || loading) && <p className={`model-note${error ? " error" : ""}`} role={error ? "alert" : "status"}>{error || (loading ? "Loading available models…" : catalog.notice)}</p>}

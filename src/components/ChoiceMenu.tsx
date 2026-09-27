@@ -31,9 +31,12 @@ export default function ChoiceMenu({ label, value, choices, disabled, onChange }
     setQuery(""); setOpen(true);
   };
   return <>
-    <button ref={trigger} type="button" className="choice-trigger" aria-label={`${label}: ${selected?.label || value || "Default"}`} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? id : undefined} disabled={disabled} onClick={() => open ? close() : show()} onKeyDown={(e) => { if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); show(); } }}>
-      <span><small>{label}</small><strong>{selected?.label || value || "Default"}</strong></span><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
-    </button>
+    <div className="choice-field">
+      <label htmlFor={`${id}-trigger`}>{label}</label>
+      <button id={`${id}-trigger`} ref={trigger} type="button" className="choice-trigger" aria-label={`${label}: ${selected?.label || value || "Default"}`} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? id : undefined} disabled={disabled} onClick={() => open ? close() : show()} onKeyDown={(e) => { if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); show(); } }}>
+        <span>{selected?.label || value || "Default"}</span><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
+      </button>
+    </div>
     {open && createPortal(<div ref={menu} className="choice-menu" style={position} onBlur={(e) => { if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget as Node) && e.relatedTarget !== trigger.current) setOpen(false); }} onKeyDown={(e) => {
       if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); return; }
       const items = Array.from(menu.current?.querySelectorAll<HTMLElement>('[role="option"]') || []);

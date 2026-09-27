@@ -17,6 +17,7 @@ Checked on Windows with the existing Muse, Codex and Antigravity integrations, a
 
 - 38 browser tests pass, including note editing, archive/restore/delete, review approval, settings, save-conflict recovery, keyboard focus, long Unicode messages and Remember actions on both devices.
 - The memory panels pass automated accessibility checks and fit the tested desktop and 390-pixel phone layouts. The phone editor was also checked at keyboard-height viewport size.
+- The compact desktop layout uses a 32-pixel title bar and matching provider, model and reasoning dropdowns. All three fields retain equal widths and align at 1200, 980 and 760-pixel window widths; phone dropdowns keep 44-pixel touch targets. All 38 browser tests pass after the layout changes. Minimize, maximize, restore and close-to-tray pass in the updated installed Windows build, and the paired Pixel reconnects with the new dropdown layout.
 - Phone drafts survive reload. Logout/detected revocation removes local drafts and private UI. Reload does not extend a draft's expiry time.
 - Real USB server integration verifies that the authenticated phone editor writes the desktop's Markdown vault. Sending, stopping, reconnecting and revocation continue to work while the desktop is in the tray.
 - The installed build also passes phone-shell cache migration, offline branding, and checks that private API responses never enter the service-worker cache.

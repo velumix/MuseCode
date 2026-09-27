@@ -5,33 +5,33 @@ import Icon, { VelumMark } from "./Icon";
 
 function MinimizeIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-      <path d="M2 6h8" strokeLinecap="round" />
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true">
+      <path d="M0 5.5h10" />
     </svg>
   );
 }
 
 function MaximizeIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-      <rect x="2.5" y="2.5" width="7" height="7" rx="1" />
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true">
+      <rect x=".5" y=".5" width="9" height="9" />
     </svg>
   );
 }
 
 function RestoreIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-      <rect x="4" y="2" width="6" height="6" rx="1" />
-      <path d="M8 8v2H2V4h2" />
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true">
+      <path d="M2.5 2.5V.5h7v7h-2" />
+      <rect x=".5" y="2.5" width="7" height="7" />
     </svg>
   );
 }
 
 function CloseIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-      <path d="M3 3l6 6M9 3l-6 6" strokeLinecap="round" />
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true">
+      <path d="m.5.5 9 9m0-9-9 9" />
     </svg>
   );
 }
@@ -71,11 +71,11 @@ export default function TitleBar({ onCommands }: { onCommands: () => void }) {
       }}
     >
       <div className="titlebar-brand">
-        <VelumMark />
-        <span>velum<span className="brand-suffix">code</span></span>
+        <VelumMark size={18} />
+        <span>Velum Code</span>
       </div>
       <button type="button" className="global-search" onClick={onCommands} aria-label="Search commands and conversations">
-        <Icon name="search" size={17} />
+        <Icon name="search" size={14} />
         <span>Search Velum</span>
         <kbd>Ctrl K</kbd>
       </button>
