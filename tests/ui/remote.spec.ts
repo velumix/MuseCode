@@ -5,6 +5,7 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
   const remote = {
     paired, control, pending: false, failSend: false, revoked: false, sends: [] as string[],
     memory: {root:"C:\\Vault",settings:{enabled:true,capture:"review",budget_bytes:3000},notes:[] as any[],warning:null},
+    board: {revision:0,cards:[] as any[]},
     sessions: [{ provider, options: { model: "", reasoning: "" }, id: "session-one", title: "Review the project", workspace: "C:\\Projects\\VelumCode", running: false, status: "completed", revision: 3 }],
     entries: [
       { seq: 1, event: { kind: "turn_start", prompt: "Review the project", remote: false } },
@@ -39,6 +40,13 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
       if(body.action==="save")remote.memory.notes=[{...body,id:"phone-note",revision:"r1",source:"Saved by you",created_at:1,updated_at:1}];
       return answer(remote.memory);
     }
+    if(url.pathname.endsWith("/kanban")) {
+      expect(request.headers()["x-muse-request"]).toBe("1");
+      if(body.action!=="load"&&!control)return answer({error:"View only"},403);
+      if(body.action==="save") {remote.board.cards=[...remote.board.cards.filter(c=>c.id!==body.card.id),body.card];remote.board.revision++;}
+      if(body.action==="move") {remote.board.cards.find(c=>c.id===body.id).column=body.column;remote.board.revision++;}
+      return answer(remote.board);
+    }
     if (url.pathname.endsWith("/models")) return answer({ models: [{ id: "phone-model", label: "Phone model", efforts: ["low", "high"], default_effort: "low", description: "Available on your desktop" }], notice: null });
     if (url.pathname.endsWith("/options")) {
       expect(request.headers()["x-muse-request"]).toBe("1");
@@ -65,6 +73,31 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
   await page.goto(`/remote.html${paired ? "" : "#pair=one-use-test-invitation"}`);
   return remote;
 }
+
+test("phone Kanban edits shared cards and prepares a draft with accessible touch controls",async({page})=>{
+  const remote=await boot(page);await expect(page.locator(".phone-online")).toBeVisible();
+  await page.getByLabel("Message your desktop agent").fill("Existing phone draft");
+  await page.getByRole("button",{name:"Kanban",exact:true}).click();
+  await page.getByRole("button",{name:"Add task to Backlog",exact:true}).click();
+  await page.getByLabel("Title",{exact:true}).fill("Check the phone layout");await page.getByLabel("Details",{exact:true}).fill("Keep touch targets comfortable.");await page.getByRole("button",{name:"Save task",exact:true}).click();
+  expect(remote.board.cards).toHaveLength(1);await page.getByLabel("Move Check the phone layout",{exact:true}).selectOption("progress");
+  await expect(page.locator(".progress .kanban-card-title")).toHaveText("Check the phone layout");
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  expect((await new AxeBuilder({page}).include(".kanban-panel").analyze()).violations).toEqual([]);
+  await page.locator(".progress").scrollIntoViewIfNeeded();await page.screenshot({path:".qa/kanban-phone.png",animations:"disabled"});
+  await page.getByRole("button",{name:"Work on this",exact:false}).click();
+  await expect(page.getByLabel("Message your desktop agent")).toHaveValue("Existing phone draft\n\nWork on this task: Check the phone layout\n\nKeep touch targets comfortable.");expect(remote.sends).toEqual([]);
+});
+test("view-only phone Kanban cannot mutate cards",async({page})=>{
+  const remote=await boot(page,true,false);remote.board.cards=[{id:"one",title:"Read only",description:"",column:"backlog",priority:"normal"}];
+  await expect(page.locator(".phone-online")).toBeVisible();await page.getByRole("button",{name:"Kanban",exact:true}).click();
+  await expect(page.getByRole("button",{name:"Add task to Backlog",exact:true})).toBeDisabled();await expect(page.getByLabel("Move Read only",{exact:true})).toBeDisabled();await expect(page.getByRole("button",{name:"Work on this",exact:false})).toHaveCount(0);
+});
+test("revoking a phone closes its open Kanban and removes task details",async({page})=>{
+  const remote=await boot(page);remote.board.cards=[{id:"one",title:"Private board task",description:"Project context",column:"backlog",priority:"normal"}];
+  await expect(page.locator(".phone-online")).toBeVisible();await page.getByRole("button",{name:"Kanban",exact:true}).click();await expect(page.getByRole("button",{name:"Private board task",exact:true})).toBeVisible();
+  remote.revoked=true;await page.evaluate(()=>(window as any).remoteEvent());await expect(page.locator(".kanban-panel")).toHaveCount(0);await expect(page.getByText("Private board task",{exact:true})).toHaveCount(0);
+});
 
 test("phone model choices update the session without losing the draft", async ({ page }) => {
   const remote = await boot(page);

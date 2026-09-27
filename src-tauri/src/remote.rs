@@ -524,6 +524,7 @@ fn router(state: WebState) -> Router {
         .route("/api/sessions/{id}/stop", post(stop))
         .route("/api/sessions/{id}/options", post(configure))
         .route("/api/sessions/{id}/memory", post(memory_request))
+        .route("/api/sessions/{id}/kanban", post(kanban_request))
         .route("/api/providers/{provider}/models", get(models))
         .route("/api/events", get(events))
         .fallback(asset)
@@ -810,6 +811,34 @@ async fn configure(
     )
     .map_err(|e| ApiError(StatusCode::CONFLICT, e))?;
     Ok(Json(json!({"ok":true})))
+}
+
+async fn kanban_request(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<crate::kanban::Request>,
+) -> ApiResult {
+    authenticate(
+        &state,
+        &headers,
+        !matches!(request, crate::kanban::Request::Load {}),
+    )?;
+    let app = state.app.ok_or_else(|| bad("Desktop unavailable."))?;
+    let workspace = app
+        .state::<SessionLog>()
+        .summaries()
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or(ApiError(
+            StatusCode::NOT_FOUND,
+            "This conversation is closed.".into(),
+        ))?
+        .workspace;
+    let result = crate::kanban::kanban_request(app, workspace, request)
+        .await
+        .map_err(|e| ApiError(StatusCode::CONFLICT, e))?;
+    Ok(Json(json!(result)))
 }
 
 async fn memory_request(
@@ -1107,6 +1136,37 @@ mod tests {
                 .status(),
             StatusCode::UNPROCESSABLE_ENTITY
         );
+    }
+    #[tokio::test]
+    async fn kanban_api_requires_pairing_control_and_fixed_workspace() {
+        let (state, token) = fixture(false);
+        for (body, auth, expected) in [
+            (json!({"action":"load"}), None, StatusCode::UNAUTHORIZED),
+            (
+                json!({"action":"delete","id":"card","revision":0}),
+                Some(token.as_str()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                json!({"action":"move","id":"card","column":"done","before":null,"revision":0}),
+                Some(token.as_str()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                json!({"action":"load","workspace":"C:\\elsewhere"}),
+                Some(token.as_str()),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+        ] {
+            assert_eq!(
+                router(state.clone())
+                    .oneshot(request("/api/sessions/one/kanban", auth, Some(body)))
+                    .await
+                    .unwrap()
+                    .status(),
+                expected
+            );
+        }
     }
     #[tokio::test]
     async fn memory_api_requires_pairing_control_and_fixed_workspace() {

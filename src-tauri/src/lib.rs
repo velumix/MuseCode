@@ -1,7 +1,9 @@
 mod desktop;
 mod events;
 mod history;
+mod kanban;
 mod memory;
+mod plugin_github;
 mod plugins;
 mod provider_auth;
 mod provider_events;
@@ -34,6 +36,7 @@ pub fn run() {
         .setup(|app| {
             memory::setup(app.handle());
             plugins::setup(app.handle());
+            kanban::setup(app.handle());
             history::setup(app.handle());
             desktop::setup(app)?;
             remote::setup(app)
@@ -41,6 +44,7 @@ pub fn run() {
         .on_window_event(desktop::close_to_tray)
         .invoke_handler(tauri::generate_handler![
             memory::memory_request,
+            kanban::kanban_request,
             memory::memory_open,
             plugins::plugins_list,
             plugins::plugins_preview,

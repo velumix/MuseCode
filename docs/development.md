@@ -58,7 +58,7 @@ Windows desktop and are run locally using the commands below.
 npm run check          # TypeScript + production frontend build + browser tests + Rust tests
 npm run check:native   # Windows debug build + real WebView2/IPC/ConPTY smoke test
 npm run check:remote   # real Tailscale HTTPS + native app + phone browser (Tailscale sign-in required)
-npm run check:extensions # native plugins, permissions, restart/crash recovery and provider resume
+npm run check:extensions # GitHub plugins, Kanban, permissions and restart/crash recovery (internet required)
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
 
@@ -140,6 +140,8 @@ those workflows. YOLO changes approval/sandbox behavior; it does not add interac
 - `src/` — React UI: `TitleBar`, `TabBar`, `ChatView`, `TerminalView`, `SearchBar`
 - `src-tauri/src/history.rs` / `src/desktopHistory.ts` — bounded native recovery and draft checkpoints
 - `src-tauri/src/plugins.rs` — package review, installation, permissions and confined file reads
+- `src-tauri/src/plugin_github.rs` — bounded GitHub downloads pinned to a commit, with no clone or build step
+- `src-tauri/src/kanban.rs` / `src/components/KanbanPanel.tsx` — atomic workspace boards and shared desktop/phone UI
 - `src/pluginRuntime.ts` / `src/pluginBridge.js` — lazy, isolated worker runtime
 - `packages/plugin-sdk/` / `examples/project-tools/` — plugin SDK and working starter
 - `src-tauri/src/runner.rs` — headless agent sessions, one `muse exec --json`

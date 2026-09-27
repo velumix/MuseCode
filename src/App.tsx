@@ -17,6 +17,8 @@ import "./App.css";
 import ProviderPicker from "./components/ProviderPicker";
 const MemoryPanel = lazy(() => import("./components/MemoryPanel"));
 const PluginPanel = lazy(() => import("./components/PluginPanel"));
+const KanbanPanel = lazy(() => import("./components/KanbanPanel"));
+import { taskPrompt, type Board, type Card } from "./kanban";
 import type { PluginSelection } from "./components/PluginPanel";
 import type { InstalledPlugin, PluginChatHandle } from "./plugins";
 import { loadDesktop, saveDesktop, saveDraft, recoveryError } from "./desktopHistory";
@@ -83,6 +85,7 @@ export default function App() {
   const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
   const [pluginPanel, setPluginPanel] = useState<{ selection?: PluginSelection } | null>(null);
   const [memory, setMemory] = useState<{workspace:string;seed?:string}|null>(null);
+  const [boardWorkspace, setBoardWorkspace] = useState<string | null>(null);
   const [desktop, setDesktop] = useState<DesktopStatus>({ notifications_enabled: true, last_error: null });
   const [desktopMessage, setDesktopMessage] = useState<{ text: string; error: boolean } | null>(() => recoveryError ? { text: recoveryError, error: true } : null);
   useEffect(() => {
@@ -212,6 +215,16 @@ export default function App() {
   }, []);
 
   const newTab = useCallback(() => openProvider(preferredProvider()), [openProvider]);
+  const workOnCard = (card: Card) => {
+    if (stateRef.current.tabs.length >= 32) throw new Error("Close a conversation before opening this task.");
+    const active = stateRef.current.tabs.find(t=>t.id===stateRef.current.activeId);
+    const tab = createTab(++counter.current, active?.provider);
+    tab.workspace = boardWorkspace || active?.workspace;
+    tab.options = active?.options || tab.options;
+    tab.title = card.title;
+    saveDraft(tab.id, taskPrompt(card));
+    setTabs(tabs=>[...tabs,tab]); setActiveId(tab.id); setBoardWorkspace(null);
+  };
 
   const configure = useCallback(async (tab: Tab, options: RunOptions) => {
     await invoke("agent_configure", { tabId: tab.id, options });
@@ -386,6 +399,7 @@ export default function App() {
   const failed = activeTab && (tabStatus(activeTab).kind === "error" || tabStatus(activeTab).kind === "exited");
 
   const paletteActions: PaletteAction[] = [
+    { id: "cmd-kanban", title: "Open workspace Kanban board", run: () => { if(activeTab?.workspace)setBoardWorkspace(activeTab.workspace); } },
     { id: "cmd-plugins", title: "Manage plugins", run: () => setPluginPanel({}) },
     ...plugins.filter(p => p.enabled).flatMap(p => p.manifest.commands.map(c => ({ id: `plugin-${p.manifest.id}-${c.id}`, title: `${c.title} · ${p.manifest.name}`, run: () => setPluginPanel({ selection: { id: p.manifest.id, command: c.id } }) }))),
     { id:"cmd-memory", title:"Open project memory vault", run:()=>{ if(activeTab?.workspace)setMemory({workspace:activeTab.workspace}); } },
@@ -437,7 +451,7 @@ export default function App() {
         <button type="button" aria-label="Dismiss notification message" onClick={() => { setDesktopMessage(null); setDesktop((s) => ({ ...s, last_error: null })); }}><Icon name="close" size={15} /></button>
       </div>}
       <div className="app-body">
-      <TabBar tabs={tabs.map((t) => ({ ...t, status: tabStatus(t) }))} activeId={activeTab?.id ?? ""} onSelect={selectTab} onClose={closeTab} onNew={newTab} onCommands={togglePalette} onPlugins={() => setPluginPanel({})} workspace={activeTab?.workspace} />
+      <TabBar tabs={tabs.map((t) => ({ ...t, status: tabStatus(t) }))} activeId={activeTab?.id ?? ""} onSelect={selectTab} onClose={closeTab} onNew={newTab} onCommands={togglePalette} onPlugins={() => setPluginPanel({})} onKanban={()=>{if(activeTab?.workspace)setBoardWorkspace(activeTab.workspace);}} workspace={activeTab?.workspace} />
       <main className="conversation-pane" aria-label="Current conversation">
       <div className="conversation-toolbar">
         <div className="conversation-heading">
@@ -513,6 +527,7 @@ export default function App() {
       </div>
       {paletteOpen && <CommandPalette actions={paletteActions} onClose={() => setPaletteOpen(false)} />}
       {remoteOpen && <Suspense fallback={null}><RemotePanel onClose={() => setRemoteOpen(false)} /></Suspense>}
+      {boardWorkspace && <Suspense fallback={null}><KanbanPanel workspace={boardWorkspace} request={request=>invoke<Board>("kanban_request",{workspace:boardWorkspace,request})} onClose={()=>setBoardWorkspace(null)} onWork={workOnCard}/></Suspense>}
       {pluginPanel && <Suspense fallback={null}><PluginPanel plugins={plugins} selection={pluginPanel.selection} onClose={() => setPluginPanel(null)} onRefresh={refreshPlugins} workspace={activeTab?.workspace || ""} messages={() => pluginHandles.current.get(activeTab?.id)?.messages() || []} onInsert={text => { pluginHandles.current.get(activeTab?.id)?.insert(text); focusComposer(); }} /></Suspense>}
       {memory&&<Suspense fallback={null}><MemoryPanel seed={memory.seed} onClose={()=>setMemory(null)} request={(request)=>invoke<MemoryView>("memory_request",{workspace:memory.workspace,request})} openVault={()=>invoke("memory_open")}/></Suspense>}
     </div>

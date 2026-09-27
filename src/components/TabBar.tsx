@@ -18,6 +18,7 @@ interface TabBarProps {
   onNew: () => void;
   onCommands: () => void;
   onPlugins: () => void;
+  onKanban: () => void;
   workspace?: string;
 }
 
@@ -34,7 +35,7 @@ function sessionDetail(status: PtyStatus | AgentStatus): string {
   return "Ready when you are";
 }
 
-export default function TabBar({ tabs, activeId, onSelect, onClose, onNew, onCommands, onPlugins, workspace }: TabBarProps) {
+export default function TabBar({ tabs, activeId, onSelect, onClose, onNew, onCommands, onPlugins, onKanban, workspace }: TabBarProps) {
   const project = workspace?.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "Your workspace";
   return (
     <aside className="sidebar" aria-label="Conversations">
@@ -93,6 +94,7 @@ export default function TabBar({ tabs, activeId, onSelect, onClose, onNew, onCom
       ))}
       </div>
       <div className="sidebar-footer">
+        <button type="button" onClick={onKanban} disabled={!workspace} aria-label="Kanban" title="Workspace Kanban"><Icon name="board" size={18}/><span>Kanban</span></button>
         <button type="button" onClick={onPlugins} aria-label="Plugins" title="Plugins"><Icon name="code" size={18}/><span>Plugins</span></button>
         <button type="button" onClick={onCommands} aria-label="Command menu" title="Command menu (Ctrl+K)"><Icon name="command" size={18} /><span>Command menu</span><kbd>Ctrl K</kbd></button>
         <span className="sidebar-footnote">A little space to build something.</span>

@@ -4,14 +4,20 @@ Plugins add local commands to **Plugins** in the sidebar and to **Ctrl+K**. API 
 
 ## Try Project tools
 
-1. Clone or download this repository.
-2. Open **Plugins**, paste the full path to `examples/project-tools`, and choose **Review plugin**.
+1. Open **Plugins** in Velum Code.
+2. Paste `velumix/velum-plugin-project-tools` (or its full GitHub URL) and choose **Review plugin**.
 3. Review the publisher details and requested permissions, then **Allow and install**.
 4. Choose **Create project brief** or **Prepare review checklist**, then **Run command**.
 
 The example reads the current workspace's root directory and optional `package.json`. It does not make an AI request. **Add to draft** appends the result to your existing draft; you choose when to send it.
 
-Installed packages are copied into Velum's app configuration directory. Editing the original folder has no effect until you review and install it again. Updates are matched by plugin ID and require a fresh review. Disable or remove plugins from the same screen. Removing one also deletes its settings.
+Every plugin must be a **public GitHub repository** with built `velum-plugin.json` and `index.js` at its root on the default branch. Velum resolves that branch to a commit, downloads both files at that commit, and caches the exact package for review. Installation uses those reviewed bytes even if the branch changes afterward. Files are copied into the app configuration directory; installed commands work offline.
+
+Use **Check for updates** to fetch the latest default-branch commit. Review the version, source link, and permissions (new permissions are highlighted), then install. Updates preserve private settings and enabled state. A different repository cannot silently replace an installed plugin with the same ID. Remove the old plugin explicitly before changing repositories. Removing a plugin deletes its private settings.
+
+GitHub checks happen only when requested; there is no startup polling. Public repositories require no token. Private repositories, GitHub Enterprise, branch selectors and release archives are not supported in API v1. Each review makes three bounded HTTPS requests with timeouts; GitHub rate limits are reported without affecting installed plugins. Redirected repositories require their current URL. Repository identity and commit pinning are provenance, not a publisher signature or endorsement.
+
+Previously installed folder plugins are disabled until linked by reviewing and installing their GitHub repository. Their settings remain intact; enable them after migration. Local folder installation has been removed.
 
 ## Create your first plugin
 
@@ -21,7 +27,19 @@ From this repository:
 node packages/plugin-sdk/create.mjs my-plugin
 ```
 
-This creates a ready-to-install folder without overwriting an existing directory. Edit the author's name and details in `velum-plugin.json`, then edit `index.js`. There is no build step for this JavaScript starter.
+This creates a repository-ready folder, README and .gitignore without overwriting an existing directory. Edit the author's name and details in `velum-plugin.json`, then edit `index.js`. There is no build step for this JavaScript starter.
+
+Publish it as its own GitHub repository:
+
+```sh
+cd my-plugin
+git init -b main
+git add .
+git commit -m "Added plugin"
+gh repo create YOUR-USERNAME/my-plugin --public --source . --remote origin --push
+```
+
+Paste that repository URL into Velum's Plugins screen. For subsequent changes, commit and push, then check for updates in Velum. Choose the license for your own repository before distributing your code.
 
 ```json
 {
@@ -83,10 +101,10 @@ export default definePlugin({
 Bundle it as an IIFE with the global name `VelumPlugin`:
 
 ```sh
-npx esbuild src/index.ts --bundle --platform=browser --format=iife --global-name=VelumPlugin --target=es2020 --outfile=dist/index.js
+npx esbuild src/index.ts --bundle --platform=browser --format=iife --global-name=VelumPlugin --target=es2020 --outfile=index.js
 ```
 
-Copy your `velum-plugin.json` into `dist`, then install that folder. The host also accepts `VelumPlugin.default`, as emitted by this command. See [esbuild's global-name documentation](https://esbuild.github.io/api/#global-name) for other bundler configurations. Only developer builds need a bundler; Velum ships no JS engine or npm runtime for plugins.
+Commit the built `index.js` alongside `velum-plugin.json` at your repository root, then push. Velum never runs npm, git hooks or build scripts. The host also accepts `VelumPlugin.default`, as emitted by this command. See [esbuild's global-name documentation](https://esbuild.github.io/api/#global-name) for other bundler configurations. Only developer builds need a bundler; Velum ships no JS engine or npm runtime for plugins.
 
 ## API and permissions
 
@@ -114,7 +132,7 @@ Workspace access is confined to the workspace selected when the command starts. 
 
 The manager and runtime are separate lazy-loaded frontend chunks. Startup reads manifest metadata only. A command gets a fresh Web Worker inside an opaque-origin, sandboxed iframe. A restrictive Content Security Policy blocks network access; the worker cannot access the app DOM, browser storage or Tauri IPC. Communication uses a private MessageChannel and a fixed host API allowlist. Native code independently checks filesystem and storage permissions. See the [browser sandbox](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/iframe#sandbox) and [worker CSP rules](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers#content_security_policy).
 
-Workers are discarded on completion, failure, cancellation, timeout, or panel close. API calls already accepted by the native backend may finish after cancellation; keep storage operations small and idempotent. Browser workers do not offer a hard memory quota: this is bounded command execution, not an operating-system resource sandbox. Install code from authors you trust. Packages are local and publishers are not cryptographically verified. The review digest detects changes between review, install, and execution; it is not an author signature.
+Workers are discarded on completion, failure, cancellation, timeout, or panel close. API calls already accepted by the native backend may finish after cancellation; keep storage operations small and idempotent. Browser workers do not offer a hard memory quota: this is bounded command execution, not an operating-system resource sandbox. Install code from authors you trust. Packages are downloaded from GitHub and stored locally; publishers are not cryptographically verified. The review digest binds the manifest and code shown for installation and detects later edits; it is not an author signature.
 
 There are no startup hooks, background daemons, shell commands, arbitrary network requests, file writes, custom UI injection, provider adapters or automatic AI tool calls in v1. Plugins do not consume model tokens unless you deliberately send their output. Plugins currently run on Windows desktop; paired phones retain their existing chat, memory and model controls.
 
@@ -122,6 +140,6 @@ There are no startup hooks, background daemons, shell commands, arbitrary networ
 
 - Test missing permissions, missing files, long input, cancellation, and errors in your command.
 - Keep computation small; report useful errors by throwing `Error`.
-- Package `velum-plugin.json` and the built `index.js` together. A user can unzip your release into a folder, review, and install it.
+- Commit `velum-plugin.json` and the built `index.js` at the root of a public GitHub repository. Users install by repository URL and review updates from the default branch.
 - Use an appropriate license for your plugin and bundled dependencies.
 - Velum's own browser tests exercise worker isolation, timeouts, permission rejection and UI responsiveness. Native smoke tests cover the actual Windows package and filesystem boundary.

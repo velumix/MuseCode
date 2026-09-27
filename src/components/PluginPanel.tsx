@@ -31,10 +31,9 @@ export default function PluginPanel({
   messages: () => { role: string; text: string }[];
   onInsert: (text: string) => void;
 }) {
-  const [path, setPath] = useState("");
-  const [preview, setPreview] = useState<
-    (PluginPreview & { path: string }) | null
-  >(null);
+  const [repository, setRepository] = useState("");
+  const [preview, setPreview] = useState<PluginPreview | null>(null);
+  const [notice, setNotice] = useState("");
   const [selected, setSelected] = useState<PluginSelection | undefined>(
     selection,
   );
@@ -103,6 +102,33 @@ export default function PluginPanel({
         controller.current = null;
       }
     });
+  const review = (repo: string, expectedId?: string) =>
+    void run(async () => {
+      setNotice("");
+      setPreview(null);
+      const next = await invoke<PluginPreview>("plugins_preview", {
+        repository: repo,
+      });
+      if (expectedId && next.manifest.id !== expectedId)
+        throw new Error(
+          "This repository changed its plugin ID. Review it as a new installation.",
+        );
+      const current = plugins.find((p) => p.manifest.id === next.manifest.id);
+      if (
+        current?.origin?.commit === next.origin.commit &&
+        current.digest === next.digest
+      ) {
+        setNotice(`${next.manifest.name} is up to date.`);
+        return;
+      }
+      setRepository(next.origin.repository);
+      setPreview(next);
+      requestAnimationFrame(() =>
+        panel.current
+          ?.querySelector(".plugin-install")
+          ?.scrollIntoView({ block: "start" }),
+      );
+    });
   return (
     <div
       className="plugin-overlay"
@@ -161,6 +187,11 @@ export default function PluginPanel({
             {error}
           </p>
         )}
+        {notice && (
+          <p className="plugin-notice" role="status">
+            {notice}
+          </p>
+        )}
         <div className="plugin-body">
           {selected && plugin?.enabled ? (
             <button
@@ -176,37 +207,39 @@ export default function PluginPanel({
           ) : (
             <>
               <section className="plugin-install" aria-label="Install a plugin">
-                <h3>Install from a folder</h3>
+                <h3>Install from GitHub</h3>
                 <p>
-                  Choose a built plugin folder containing{" "}
-                  <code>velum-plugin.json</code> and <code>index.js</code>.
+                  Every plugin is a repository. Paste its public GitHub URL to
+                  review its commands and permissions.
                 </p>
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
-                    void run(async () => {
-                      const p = path.trim().replace(/^"|"$/g, "");
-                      setPreview({
-                        ...(await invoke<PluginPreview>("plugins_preview", {
-                          path: p,
-                        })),
-                        path: p,
-                      });
-                    });
+                    review(repository.trim());
                   }}
                 >
                   <input
-                    aria-label="Plugin folder"
-                    placeholder="C:\Plugins\project-tools"
-                    value={path}
+                    aria-label="GitHub repository"
+                    placeholder="owner/repository or GitHub URL"
+                    value={repository}
                     onChange={(e) => {
-                      setPath(e.target.value);
+                      setRepository(e.target.value);
                       setPreview(null);
+                      setNotice("");
                     }}
                     disabled={busy}
                   />
-                  <button disabled={busy || !path.trim()}>Review plugin</button>
+                  <button disabled={busy || !repository.trim()}>
+                    {busy ? "Please wait…" : "Review plugin"}
+                  </button>
                 </form>
+                <button
+                  className="plugin-example"
+                  disabled={busy}
+                  onClick={() => review("velumix/velum-plugin-project-tools")}
+                >
+                  Try Project tools by Velumix
+                </button>
                 {preview && (
                   <div className="plugin-review">
                     <div className="plugin-card-heading">
@@ -217,14 +250,50 @@ export default function PluginPanel({
                       </span>
                     </div>
                     <p>{preview.manifest.description}</p>
-                    <p>
-                      By {preview.manifest.author} · Local package, publisher
-                      not verified
+                    <p>By {preview.manifest.author} · Publisher not verified</p>
+                    <p className="plugin-origin">
+                      {preview.origin.repository} · Commit{" "}
+                      {preview.origin.commit.slice(0, 7)}{" "}
+                      <button
+                        disabled={busy}
+                        onClick={() =>
+                          void openUrl(
+                            `https://github.com/${preview.origin.repository}/tree/${preview.origin.commit}`,
+                          ).catch((e) => setError(String(e)))
+                        }
+                      >
+                        View source ↗
+                      </button>
                     </p>
+                    {plugins.some(
+                      (p) => p.manifest.id === preview.manifest.id,
+                    ) && (
+                      <p>
+                        Update from v
+                        {
+                          plugins.find(
+                            (p) => p.manifest.id === preview.manifest.id,
+                          )?.manifest.version
+                        }
+                        . Existing settings and enabled state are kept.
+                      </p>
+                    )}
                     <h4>This plugin can</h4>
                     <ul>
                       {preview.manifest.permissions.map((p) => (
-                        <li key={p}>{permissionLabels[p]}</li>
+                        <li key={p}>
+                          {permissionLabels[p]}
+                          {plugins.some(
+                            (old) =>
+                              old.manifest.id === preview.manifest.id &&
+                              !old.manifest.permissions.includes(p),
+                          ) && (
+                            <strong className="plugin-new-permission">
+                              {" "}
+                              New permission
+                            </strong>
+                          )}
+                        </li>
                       ))}
                       {!preview.manifest.permissions.length && (
                         <li>Process only the text you enter</li>
@@ -240,11 +309,11 @@ export default function PluginPanel({
                         onClick={() =>
                           void run(async () => {
                             await invoke("plugins_install", {
-                              path: preview.path,
+                              repository: preview.origin.repository,
                               reviewedDigest: preview.digest,
                             });
                             setPreview(null);
-                            setPath("");
+                            setRepository("");
                             await onRefresh();
                           })
                         }
@@ -284,7 +353,7 @@ export default function PluginPanel({
                       <strong>{p.manifest.name}</strong>
                       <span>v{p.manifest.version}</span>
                       <button
-                        disabled={busy}
+                        disabled={busy || !p.origin}
                         role="switch"
                         aria-checked={p.enabled}
                         aria-label={`Enable ${p.manifest.name}`}
@@ -303,6 +372,33 @@ export default function PluginPanel({
                     </div>
                     <p>{p.manifest.description}</p>
                     <small>By {p.manifest.author}</small>
+                    {p.origin ? (
+                      <div className="plugin-origin">
+                        <button
+                          onClick={() =>
+                            void openUrl(
+                              `https://github.com/${p.origin!.repository}/tree/${p.origin!.commit}`,
+                            ).catch((e) => setError(String(e)))
+                          }
+                        >
+                          {p.origin.repository} ↗
+                        </button>
+                        <span>{p.origin.commit.slice(0, 7)}</span>
+                        <button
+                          disabled={busy}
+                          onClick={() =>
+                            review(p.origin!.repository, p.manifest.id)
+                          }
+                        >
+                          Check for updates
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="plugin-legacy">
+                        Link this plugin to its GitHub repository above to
+                        enable it. Saved settings are kept.
+                      </p>
+                    )}
                     <details>
                       <summary>Permissions</summary>
                       <ul>

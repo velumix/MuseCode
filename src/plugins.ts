@@ -16,14 +16,20 @@ export interface PluginManifest {
   commands: PluginCommand[];
 }
 export interface InstalledPlugin {
+  origin?: PluginOrigin | null;
   manifest: PluginManifest;
   enabled: boolean;
   digest: string;
 }
 export interface PluginPreview {
+  origin: PluginOrigin;
   manifest: PluginManifest;
   digest: string;
   bytes: number;
+}
+export interface PluginOrigin {
+  repository: string;
+  commit: string;
 }
 export interface PluginResult {
   title?: string;

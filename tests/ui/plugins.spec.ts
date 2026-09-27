@@ -27,7 +27,12 @@ async function pluginFixture(
           },
         ],
       };
-      const plugin = { manifest, enabled: true, digest: "reviewed-code" };
+      const plugin = {
+        manifest,
+        enabled: true,
+        digest: "reviewed-code",
+        origin: { repository: "test/tools", commit: "a".repeat(40) },
+      };
       w.qa.plugins = [plugin];
       const original = w.__TAURI_INTERNALS__.invoke;
       w.__TAURI_INTERNALS__.invoke = async (cmd: string, args: any) => {
@@ -35,8 +40,9 @@ async function pluginFixture(
         w.qa.calls.push({ cmd, args });
         if (cmd === "plugins_list") return structuredClone(w.qa.plugins);
         if (cmd === "plugins_preview")
-          return { ...plugin, bytes: source.length };
+          return w.qa.nextPreview || { ...plugin, bytes: source.length };
         if (cmd === "plugins_install") {
+          if (w.qa.nextPreview) Object.assign(plugin, w.qa.nextPreview);
           w.qa.plugins = [plugin];
           return;
         }
@@ -85,7 +91,7 @@ test("plugins review permissions, run on demand, append to draft and disable", a
     .locator(".chat-wrap:not(.hidden) textarea")
     .fill("Keep this draft");
   await page.getByRole("button", { name: "Plugins", exact: true }).click();
-  await page.getByLabel("Plugin folder").fill("C:\\Plugins\\test");
+  await page.getByLabel("GitHub repository").fill("test/tools");
   await page.getByRole("button", { name: "Review plugin" }).click();
   await expect(page.locator(".plugin-review")).toContainText("Read text files");
   expect(
@@ -130,6 +136,58 @@ test("plugins review permissions, run on demand, append to draft and disable", a
   await expect(
     page.getByRole("button", { name: "Test command", exact: false }),
   ).toBeDisabled();
+});
+
+test("GitHub updates are reviewed with commit and new permissions before installation", async ({
+  page,
+}) => {
+  await boot(page);
+  await pluginFixture(page, "self.VelumPlugin={commands:{}}");
+  await page.getByRole("button", { name: "Plugins", exact: true }).click();
+  await page.getByLabel("GitHub repository").fill("test/tools");
+  await page.getByRole("button", { name: "Review plugin" }).click();
+  await page
+    .getByRole("button", { name: "Allow and install", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Check for updates", exact: true })
+    .click();
+  await expect(page.getByRole("status")).toContainText("up to date");
+  await page.evaluate(() => {
+    const w = window as any;
+    const p = w.qa.plugins[0];
+    w.qa.nextPreview = {
+      ...p,
+      bytes: 100,
+      digest: "updated-code",
+      manifest: { ...p.manifest, version: "2.0.0", permissions: ["storage"] },
+      origin: { repository: "test/tools", commit: "b".repeat(40) },
+    };
+  });
+  await page
+    .getByRole("button", { name: "Check for updates", exact: true })
+    .click();
+  await expect(page.locator(".plugin-review")).toContainText("bbbbbbb");
+  await expect(page.locator(".plugin-review")).toContainText("New permission");
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).qa.calls.filter((c: any) => c.cmd === "plugins_install")
+          .length,
+    ),
+  ).toBe(1);
+  await page
+    .getByRole("button", { name: "Allow and install update", exact: true })
+    .click();
+  await expect(page.locator(".plugin-card")).toContainText("v2.0.0");
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).qa.calls
+          .filter((c: any) => c.cmd === "plugins_install")
+          .at(-1).args,
+    ),
+  ).toEqual({ repository: "test/tools", reviewedDigest: "updated-code" });
 });
 
 test("plugin worker cannot reach network, app storage or native IPC", async ({

@@ -23,6 +23,8 @@ test("SDK scaffolds an installable plugin and refuses to overwrite existing work
   assert.equal(manifest.apiVersion, 1);
   assert.equal(manifest.entry, "index.js");
   assert.deepEqual(manifest.permissions, []);
+  assert.match(readFileSync(path.join(dir,"example-plugin/README.md"),"utf8"),/public GitHub repository URL/);
+  assert.match(readFileSync(path.join(dir,"example-plugin/.gitignore"),"utf8"),/node_modules/);
   const source = readFileSync(
     path.join(dir, "example-plugin/index.js"),
     "utf8",

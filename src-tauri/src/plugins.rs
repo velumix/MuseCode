@@ -1,5 +1,6 @@
 //! Local command plugins. Only metadata is loaded at startup; JavaScript runs in
 //! an opaque-origin browser worker and reaches native code through this allowlist.
+use crate::plugin_github::{self, Origin};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -45,19 +46,23 @@ pub struct Installed {
     pub manifest: Manifest,
     pub digest: String,
     pub enabled: bool,
+    #[serde(default)]
+    pub origin: Option<Origin>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct Preview {
     pub manifest: Manifest,
     pub digest: String,
     pub bytes: usize,
+    pub origin: Origin,
 }
 
 pub struct PluginState {
     root: PathBuf,
     installed: Mutex<HashMap<String, Installed>>,
     storage_lock: Mutex<()>,
+    previews: Mutex<HashMap<String, (Preview, String)>>,
 }
 
 fn valid_id(id: &str) -> bool {
@@ -162,27 +167,71 @@ fn digest(manifest: &Manifest, source: &str) -> String {
     format!("{:x}", hash.finalize())
 }
 
-fn package(path: &str) -> Result<(Preview, String), String> {
-    let root = PathBuf::from(path);
-    let manifest: Manifest = serde_json::from_str(&read_bounded(
-        &child(&root, "velum-plugin.json")?,
-        32 * 1024,
-    )?)
-    .map_err(|e| format!("Invalid velum-plugin.json: {e}"))?;
+fn package(repository: &str) -> Result<(Preview, String), String> {
+    let (origin, text, source) = plugin_github::package(repository)?;
+    let manifest: Manifest =
+        serde_json::from_str(&text).map_err(|e| format!("Invalid velum-plugin.json: {e}"))?;
     validate(&manifest)?;
-    let source = read_bounded(&child(&root, &manifest.entry)?, MAX_SOURCE)?;
     let digest = digest(&manifest, &source);
     Ok((
         Preview {
             manifest,
             digest,
             bytes: source.len(),
+            origin,
         },
         source,
     ))
 }
 
 impl PluginState {
+    fn install(&self, repository: &str, reviewed_digest: &str) -> Result<(), String> {
+        let (preview, source) = self
+            .previews
+            .lock()
+            .unwrap()
+            .get(reviewed_digest)
+            .cloned()
+            .ok_or("Review this plugin again before installing.")?;
+        if preview.origin.repository != plugin_github::repository(repository)? {
+            return Err("Repository changed after review. Review it again.".into());
+        }
+        let mut installed = self.installed.lock().unwrap();
+        let old = installed.get(&preview.manifest.id);
+        if old
+            .and_then(|p| p.origin.as_ref())
+            .is_some_and(|o| o.repository != preview.origin.repository)
+        {
+            return Err("Another repository already uses this plugin ID. Remove the existing plugin before switching publishers.".into());
+        }
+        let enabled = old.map(|p| p.enabled).unwrap_or(true);
+        if installed.len() >= MAX_PLUGINS && !installed.contains_key(&preview.manifest.id) {
+            return Err("The 32 plugin limit has been reached.".into());
+        }
+        fs::create_dir_all(&self.root).map_err(|e| e.to_string())?;
+        let plugin = Installed {
+            manifest: preview.manifest,
+            digest: preview.digest,
+            enabled,
+            origin: Some(preview.origin),
+        };
+        // Content-addressed source ensures the reviewed manifest and code stay paired.
+        crate::storage::write_bytes(
+            &self.root.join(format!("{}.js", plugin.digest)),
+            source.as_bytes(),
+        )?;
+        crate::storage::write_json(
+            &self.root.join(format!("{}.json", plugin.manifest.id)),
+            &plugin,
+        )?;
+        let old = installed.insert(plugin.manifest.id.clone(), plugin.clone());
+        if let Some(old) = old.filter(|old| old.digest != plugin.digest) {
+            let _ = fs::remove_file(self.root.join(format!("{}.js", old.digest)));
+        }
+        self.previews.lock().unwrap().remove(reviewed_digest);
+        Ok(())
+    }
+
     fn load(root: PathBuf) -> Self {
         let mut installed = HashMap::new();
         if let Ok(files) = fs::read_dir(&root) {
@@ -193,13 +242,20 @@ impl PluginState {
                 let Ok(text) = read_bounded(&file.path(), 32 * 1024) else {
                     continue;
                 };
-                let Ok(plugin) = serde_json::from_str::<Installed>(&text) else {
+                let Ok(mut plugin) = serde_json::from_str::<Installed>(&text) else {
                     continue;
                 };
                 if validate(&plugin.manifest).is_ok()
                     && file.file_name().to_string_lossy() == format!("{}.json", plugin.manifest.id)
                     && installed.len() < MAX_PLUGINS
                 {
+                    if plugin
+                        .origin
+                        .as_ref()
+                        .is_none_or(|o| !plugin_github::valid_origin(o))
+                    {
+                        plugin.enabled = false;
+                    }
                     installed.insert(plugin.manifest.id.clone(), plugin);
                 }
             }
@@ -208,6 +264,7 @@ impl PluginState {
             root,
             installed: Mutex::new(installed),
             storage_lock: Mutex::new(()),
+            previews: Mutex::new(HashMap::new()),
         }
     }
 
@@ -240,48 +297,29 @@ pub fn plugins_list(state: State<PluginState>) -> Vec<Installed> {
 }
 
 #[tauri::command]
-pub async fn plugins_preview(path: String) -> Result<Preview, String> {
-    tauri::async_runtime::spawn_blocking(move || package(&path).map(|p| p.0))
-        .await
-        .map_err(|e| e.to_string())?
+pub async fn plugins_preview(app: tauri::AppHandle, repository: String) -> Result<Preview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (preview, source) = package(&repository)?;
+        let state = app.state::<PluginState>();
+        let mut previews = state.previews.lock().unwrap();
+        // One review at a time; retain only the bytes shown in the latest review.
+        previews.clear();
+        previews.insert(preview.digest.clone(), (preview.clone(), source));
+        Ok(preview)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn plugins_install(
     app: tauri::AppHandle,
-    path: String,
+    repository: String,
     reviewed_digest: String,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let (preview, source) = package(&path)?;
-        if preview.digest != reviewed_digest {
-            return Err(
-                "The plugin changed after review. Review it again before installing.".into(),
-            );
-        }
         let state = app.state::<PluginState>();
-        let mut installed = state.installed.lock().unwrap();
-        if installed.len() >= MAX_PLUGINS && !installed.contains_key(&preview.manifest.id) {
-            return Err("The 32 plugin limit has been reached.".into());
-        }
-        fs::create_dir_all(&state.root).map_err(|e| e.to_string())?;
-        let plugin = Installed {
-            manifest: preview.manifest,
-            digest: preview.digest,
-            enabled: true,
-        };
-        // Content-addressed source ensures the reviewed manifest and code stay paired.
-        fs::write(state.root.join(format!("{}.js", plugin.digest)), source)
-            .map_err(|e| e.to_string())?;
-        crate::storage::write_json(
-            &state.root.join(format!("{}.json", plugin.manifest.id)),
-            &plugin,
-        )?;
-        let old = installed.insert(plugin.manifest.id.clone(), plugin.clone());
-        if let Some(old) = old.filter(|old| old.digest != plugin.digest) {
-            let _ = fs::remove_file(state.root.join(format!("{}.js", old.digest)));
-        }
-        Ok(())
+        state.install(&repository, &reviewed_digest)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -291,6 +329,14 @@ pub async fn plugins_install(
 pub fn plugins_enable(state: State<PluginState>, id: String, enabled: bool) -> Result<(), String> {
     let mut installed = state.installed.lock().unwrap();
     let current = installed.get_mut(&id).ok_or("Plugin is not installed.")?;
+    if enabled
+        && current
+            .origin
+            .as_ref()
+            .is_none_or(|o| !plugin_github::valid_origin(o))
+    {
+        return Err("Link this plugin to its GitHub repository before enabling it.".into());
+    }
     let mut next = current.clone();
     next.enabled = enabled;
     crate::storage::write_json(&state.root.join(format!("{id}.json")), &next)?;
@@ -383,6 +429,90 @@ pub async fn plugins_call(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn installs_reviewed_bytes_and_preserves_settings_without_switching_repositories() {
+        let root =
+            std::env::temp_dir().join(format!("velum-plugin-review-{}", uuid::Uuid::new_v4()));
+        let state = PluginState::load(root.clone());
+        let m = manifest();
+        let source = "self.VelumPlugin={commands:{}}";
+        let mut preview = Preview {
+            manifest: m.clone(),
+            digest: digest(&m, source),
+            bytes: source.len(),
+            origin: Origin {
+                repository: "velumix/example".into(),
+                commit: "a".repeat(40),
+            },
+        };
+        assert!(state.install("velumix/example", "unreviewed").is_err());
+        state
+            .previews
+            .lock()
+            .unwrap()
+            .insert(preview.digest.clone(), (preview.clone(), source.into()));
+        assert!(state.install("other/repo", &preview.digest).is_err());
+        state.install("velumix/example", &preview.digest).unwrap();
+        assert!(state.previews.lock().unwrap().is_empty());
+        assert_eq!(
+            fs::read_to_string(root.join(format!("{}.js", preview.digest))).unwrap(),
+            source
+        );
+        fs::write(root.join(format!("{}.data", m.id)), r#"{"setting":true}"#).unwrap();
+        state
+            .installed
+            .lock()
+            .unwrap()
+            .get_mut(&m.id)
+            .unwrap()
+            .enabled = false;
+        preview.origin.commit = "b".repeat(40);
+        preview.manifest.permissions.push("storage".into());
+        preview.digest = digest(&preview.manifest, source);
+        state
+            .previews
+            .lock()
+            .unwrap()
+            .insert(preview.digest.clone(), (preview.clone(), source.into()));
+        state.install("velumix/example", &preview.digest).unwrap();
+        let installed = PluginState::load(root.clone());
+        assert!(!installed.installed.lock().unwrap()[&m.id].enabled);
+        assert_eq!(
+            fs::read_to_string(root.join(format!("{}.data", m.id))).unwrap(),
+            r#"{"setting":true}"#
+        );
+        preview.origin.repository = "other/repo".into();
+        state
+            .previews
+            .lock()
+            .unwrap()
+            .insert(preview.digest.clone(), (preview.clone(), source.into()));
+        assert!(state
+            .install("other/repo", &preview.digest)
+            .unwrap_err()
+            .contains("Another repository"));
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn folder_plugins_keep_settings_but_require_repository_migration() {
+        let root =
+            std::env::temp_dir().join(format!("velum-plugin-legacy-{}", uuid::Uuid::new_v4()));
+        let m = manifest();
+        crate::storage::write_json(
+            &root.join(format!("{}.json", m.id)),
+            &Installed {
+                manifest: m.clone(),
+                digest: digest(&m, "old"),
+                enabled: true,
+                origin: None,
+            },
+        )
+        .unwrap();
+        let state = PluginState::load(root.clone());
+        assert!(!state.installed.lock().unwrap()[&m.id].enabled);
+        assert!(state.permitted(&m.id, "").is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
     fn manifest() -> Manifest {
         serde_json::from_str(include_str!(
             "../../examples/project-tools/velum-plugin.json"
@@ -433,9 +563,11 @@ mod tests {
                     manifest: m.clone(),
                     digest: before,
                     enabled: false,
+                    origin: None,
                 },
             )])),
             storage_lock: Mutex::new(()),
+            previews: Mutex::new(HashMap::new()),
         };
         assert!(state.permitted(&m.id, "").is_err());
         state

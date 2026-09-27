@@ -176,10 +176,21 @@ Memory works with **Muse, Codex, and Antigravity in Agent mode**. Automatic sugg
 
 The Android app also restores unsent drafts after reloads and process restarts, retries failed connections when brought back to the foreground, and recovers when Android reclaims its WebView renderer. Draft storage is bounded and cleared when the phone disconnects or its access is revoked. The desktop must remain running to keep a conversation available.
 
+## A board for the work ahead
+
+Open **Kanban** on desktop or phone. Each workspace has its own board with **Backlog**, **In progress**, **Review** and **Done**. Add task details and priorities, search cards, drag them between columns, or use the status menu and reorder button by touch or keyboard.
+
+Boards save to your desktop after every change and survive restarts. Refresh to pick up edits from another screen; stale edits are caught before they overwrite newer work. View-only phones can browse boards. **Work on this** prepares an agent draft with the task details—on desktop, in a new conversation using your selected provider and model. You choose when to send it.
+
+The board loads only when opened, supports up to 300 cards per workspace, and makes no AI requests. [Board details](docs/kanban.md).
+
+<p align="center"><a href="docs/images/kanban-desktop.png"><img src="docs/images/kanban-desktop.png" alt="Velum Code workspace Kanban board with task priorities and agent draft actions" width="900" /></a><br /><sub>One board per workspace. <a href="docs/images/kanban-phone.png">See the phone view.</a></sub></p>
+
 ## Small plugins, useful tools
 
-Open **Plugins** in the sidebar to review and install a local plugin folder. Enabled commands
-also appear in **Ctrl+K**. The included **Project tools** example creates project briefs and
+Open **Plugins** in the sidebar and paste a public GitHub repository URL. Review its permissions
+and install a pinned commit. **Check for updates** reviews a newer commit while keeping your settings.
+Enabled commands also appear in **Ctrl+K**. [**Project tools**](https://github.com/velumix/velum-plugin-project-tools) creates project briefs and
 review checklists; results can be added to your draft without sending an AI request.
 
 Plugins have explicit permissions for workspace reads, conversation reads and their own

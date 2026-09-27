@@ -148,6 +148,19 @@ try {
   await phone.getByRole("button", { name: "Close memory" }).click();
   await expect(phone.getByLabel("Message your desktop agent")).toHaveValue("Recover this phone draft");
   console.log("PASS: phone drafts survive reload; authenticated phone editor writes the same desktop Markdown vault");
+  await phone.getByRole("button",{name:"Kanban",exact:true}).click();
+  await phone.getByRole("button",{name:"Add task to Backlog",exact:true}).click();
+  await phone.getByLabel("Title",{exact:true}).fill("From phone board");
+  await phone.getByLabel("Details",{exact:true}).fill("Shared with the desktop");
+  await phone.getByRole("button",{name:"Save task",exact:true}).click();
+  await expect(phone.getByRole("button",{name:"From phone board",exact:true})).toBeVisible();
+  const sharedBoard=await invoke("kanban_request",{workspace:sessions[0].workspace,request:{action:"load"}});
+  assert.equal(sharedBoard.cards[0].title,"From phone board");
+  await invoke("kanban_request",{workspace:sessions[0].workspace,request:{action:"move",revision:sharedBoard.revision,id:sharedBoard.cards[0].id,column:"review",before:null}});
+  await phone.getByRole("button",{name:"Refresh",exact:true}).click();
+  await expect(phone.locator(".review .kanban-card-title")).toHaveText("From phone board");
+  await phone.getByRole("button",{name:"Close Kanban"}).click();
+  console.log("PASS: paired phone and desktop edit the same persistent Kanban board");
   if (usb) {
     await invoke("remote_usb_disconnect");
     await expect(phone.getByLabel("Message your desktop agent")).toHaveCount(0);

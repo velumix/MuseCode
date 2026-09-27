@@ -2,6 +2,8 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState }
 import { clearDrafts, loadDrafts, saveDrafts, loadSelection, saveSelection } from "./drafts";
 import type { MemoryView } from "../memory";
 const MemoryPanel=lazy(()=>import("../components/MemoryPanel"));
+const KanbanPanel=lazy(()=>import("../components/KanbanPanel"));
+import { taskPrompt, type Board } from "../kanban";
 import { providerNames, defaultOptions, type ModelCatalog } from "../providers";
 import Icon, { VelumMark } from "../components/Icon";
 import Markdown from "../components/Markdown";
@@ -50,6 +52,7 @@ export default function RemoteApp() {
   const [replay, setReplay] = useState<Replay | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>(loadDrafts);
   const [memorySession,setMemorySession]=useState("");
+  const [boardSession,setBoardSession]=useState("");
   const [memorySeed,setMemorySeed]=useState<string>();
   const [listOpen, setListOpen] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -66,7 +69,7 @@ export default function RemoteApp() {
   const view = useMemo(() => transcript(replay?.events || []), [replay]);
   const memoryUsage = useMemo(()=>{const events=replay?.events||[];for(let i=events.length-1;i>=0;i--){if(events[i].event.kind==="memory_context")return events[i].event;}},[replay]);
 
-  const forget = () => { setDevice(null); setSessions([]); setReplay(null); cache.current.clear(); setConnected(false); setDrafts({}); clearDrafts();setMemorySession("");setMemorySeed(undefined); saveClaim(""); setClaim(""); };
+  const forget = () => { setDevice(null); setSessions([]); setReplay(null); cache.current.clear(); setConnected(false); setDrafts({}); clearDrafts();setMemorySession("");setBoardSession("");setMemorySeed(undefined); saveClaim(""); setClaim(""); };
   useEffect(()=>{if(device)saveDrafts(drafts);},[drafts,device]);
   useEffect(()=>{if(device&&selected)saveSelection(selected);},[selected,device]);
 
@@ -214,7 +217,8 @@ export default function RemoteApp() {
 
   return <main className="phone-app">
     <header className="phone-header"><VelumMark size={35} /><div><h1>Velum Code</h1><span className={connected ? "phone-online" : "phone-offline"}><i />{connected ? "Desktop connected" : "Reconnecting…"}</span></div>
-      <button className="phone-icon-button phone-memory-button" aria-label="Memory" disabled={!current||!connected} onClick={()=>{setMemorySeed(undefined);setMemorySession(selected);}}><Icon name="memory" size={21}/></button>
+      <button className="phone-icon-button phone-memory-button" aria-label="Kanban" disabled={!current||!connected} onClick={()=>setBoardSession(selected)}><Icon name="board" size={21}/></button>
+      <button className="phone-icon-button" aria-label="Memory" disabled={!current||!connected} onClick={()=>{setMemorySeed(undefined);setMemorySession(selected);}}><Icon name="memory" size={21}/></button>
       <button className="phone-icon-button" aria-label="Phone settings" onClick={() => setInstallHelp((value) => !value)}><Icon name="phone" size={21} /></button>
     </header>
     {installHelp && <section className="phone-settings" aria-label="Phone settings"><strong>{device.name}</strong><p>{computer || "Your desktop"}</p><p>{device.control ? "View and control · standard agent permissions" : "View-only access"}</p>
@@ -250,5 +254,10 @@ export default function RemoteApp() {
       <span className="phone-composer-note">{current?.workspace.split(/[\\/]/).filter(Boolean).pop() || "Velum Code"} · runs on your desktop{typeof memoryUsage?.bytes==="number"&&memoryUsage.bytes>0?` · Memory ${memoryUsage.bytes.toLocaleString()} B`:""}</span>
     </footer>
     {memorySession&&<Suspense fallback={null}><MemoryPanel seed={memorySeed} readOnly={!device.control||!connected} request={request=>api<MemoryView>(`/sessions/${encodeURIComponent(memorySession)}/memory`,request)} onClose={()=>{setMemorySession("");setMemorySeed(undefined);}}/></Suspense>}
+    {boardSession&&<Suspense fallback={null}><KanbanPanel workspace={sessions.find(s=>s.id===boardSession)?.workspace||"Workspace"} readOnly={!device.control||!connected} request={request=>api<Board>(`/sessions/${encodeURIComponent(boardSession)}/kanban`,request)} onClose={()=>setBoardSession("")} onWork={card=>{
+      const prompt=[drafts[boardSession],taskPrompt(card)].filter(Boolean).join("\n\n");
+      if(prompt.length>16000)throw new Error("Your message is too long. Shorten the current draft first.");
+      setDrafts(drafts=>({...drafts,[boardSession]:prompt}));setSelected(boardSession);setBoardSession("");
+    }}/></Suspense>}
   </main>;
 }

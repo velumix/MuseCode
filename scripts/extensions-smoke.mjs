@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash, randomUUID } from "node:crypto";
 import { spawn, execFileSync } from "node:child_process";
 import {
   mkdirSync,
@@ -69,6 +70,34 @@ writeFileSync(
   path.join(runDir, "codex.cmd"),
   `@echo off\r\n"${process.execPath}" "${path.join(root, "tests/fixtures/provider-cli.cjs")}" codex %*\r\n`,
 );
+// Seed isolated storage fixtures directly; production installs require GitHub review.
+mkdirSync(path.join(config, "plugins"), { recursive: true });
+for (const id of ["qa.storage-one", "qa.storage-two"]) {
+  const manifest = {
+    ...JSON.parse(
+      readFileSync(path.join(pluginDir, "velum-plugin.json"), "utf8"),
+    ),
+    id,
+    permissions: ["storage"],
+  };
+  const source = readFileSync(path.join(pluginDir, "index.js"), "utf8");
+  const digest = createHash("sha256")
+    .update(JSON.stringify(manifest))
+    .update(source)
+    .digest("hex");
+  writeFileSync(path.join(config, "plugins", digest + ".js"), source);
+  writeFileSync(
+    path.join(config, "plugins", id + ".json"),
+    JSON.stringify({
+      manifest,
+      digest,
+      enabled: true,
+      origin: { repository: "qa/fixtures", commit: "a".repeat(40) },
+    }),
+  );
+}
+const repository = "velumix/velum-plugin-project-tools";
+let savedBoard;
 const env = {
   ...process.env,
   PATH: `${runDir};${process.env.PATH}`,
@@ -171,25 +200,26 @@ try {
     "title",
     project,
   );
-  const preview = await invoke("plugins_preview", { path: pluginDir });
-  writeFileSync(
-    path.join(pluginDir, "index.js"),
-    readFileSync(path.join(pluginDir, "index.js"), "utf8") +
-      "\n// changed after review",
+  await assert.rejects(
+    invoke("plugins_preview", { repository: pluginDir }),
+    /public GitHub repository/,
   );
+  const preview = await invoke("plugins_preview", { repository });
+  assert.equal(preview.origin.repository, repository);
+  assert.match(preview.origin.commit, /^[a-f0-9]{40}$/);
   await assert.rejects(
     invoke("plugins_install", {
-      path: pluginDir,
+      repository: "other/repo",
       reviewedDigest: preview.digest,
     }),
-    /changed after review/,
+    /Repository changed/,
   );
-  copyFileSync(
-    path.join(root, "examples/project-tools/index.js"),
-    path.join(pluginDir, "index.js"),
+  await assert.rejects(
+    invoke("plugins_install", { repository, reviewedDigest: "unreviewed" }),
+    /Review this plugin/,
   );
   await page.getByRole("button", { name: "Plugins", exact: true }).click();
-  await page.getByLabel("Plugin folder").fill(pluginDir);
+  await page.getByLabel("GitHub repository").fill(repository);
   await page.getByRole("button", { name: "Review plugin" }).click();
   await expect(page.locator(".plugin-review")).toContainText("Read text files");
   await page
@@ -241,8 +271,8 @@ try {
   await page.getByRole("button", { name: "Add to draft" }).click();
   assert((await composer().inputValue()).includes("velum-plugin-demo"));
   assert.equal(records().filter((r) => r.kind === "turn").length, 0);
-  const source = readFileSync(path.join(pluginDir, "index.js"), "utf8");
   const installedSource = path.join(config, "plugins", `${preview.digest}.js`);
+  const source = readFileSync(installedSource, "utf8");
   writeFileSync(installedSource, source + "\n// unexpected edit");
   await assert.rejects(
     invoke("plugins_source", {
@@ -252,17 +282,6 @@ try {
     /files have changed/,
   );
   writeFileSync(installedSource, source);
-  for (const id of ["qa.storage-one", "qa.storage-two"]) {
-    writeFileSync(
-      path.join(pluginDir, "velum-plugin.json"),
-      JSON.stringify({ ...preview.manifest, id, permissions: ["storage"] }),
-    );
-    const p = await invoke("plugins_preview", { path: pluginDir });
-    await invoke("plugins_install", {
-      path: pluginDir,
-      reviewedDigest: p.digest,
-    });
-  }
   const storage = (id, method, args) =>
     invoke("plugins_call", {
       id,
@@ -286,6 +305,36 @@ try {
     "PASS: native plugin review/install, worker execution, file boundary, permission denial, disable and draft handoff",
   );
 
+  const boardCard = {
+    id: randomUUID(),
+    title: "Verify packaged board",
+    description: "Survives a full quit",
+    column: "backlog",
+    priority: "high",
+  };
+  savedBoard = await invoke("kanban_request", {
+    workspace: project,
+    request: { action: "save", revision: 0, card: boardCard },
+  });
+  await assert.rejects(
+    invoke("kanban_request", {
+      workspace: project,
+      request: { action: "delete", revision: 0, id: boardCard.id },
+    }),
+    /changed on another screen/,
+  );
+  await page.getByRole("button", { name: "Kanban", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: boardCard.title, exact: true }),
+  ).toBeVisible();
+  await page
+    .getByLabel("Move " + boardCard.title, { exact: true })
+    .selectOption("review");
+  await expect(page.locator(".review .kanban-card-title")).toHaveText(
+    boardCard.title,
+  );
+  await page.getByRole("button", { name: "Close Kanban" }).click();
+  console.log("PASS: native board save, stale-edit rejection and UI move");
   await send("Before restart");
   await composer().fill("Unsent Muse draft");
   const museId = records().find((r) => r.kind === "turn").args;
@@ -300,6 +349,13 @@ try {
   await quit();
   await start();
   await expect(page.getByRole("tab")).toHaveCount(2);
+  const restoredBoard = await invoke("kanban_request", {
+    workspace: project,
+    request: { action: "load" },
+  });
+  assert.equal(restoredBoard.cards[0].column, "review");
+  assert.equal(restoredBoard.cards[0].id, savedBoard.cards[0].id);
+  console.log("PASS: workspace board survives complete app restart");
   await expect(composer()).toHaveValue("Unsent Codex draft");
   await expect(
     page.locator(".chat-wrap:not(.hidden) .msg.assistant"),
@@ -314,7 +370,7 @@ try {
     performance.getEntriesByType("resource").map((r) => r.name),
   );
   assert(
-    !sources.some((s) => /pluginRuntime|PluginPanel/.test(s)),
+    !sources.some((s) => /pluginRuntime|PluginPanel|KanbanPanel/.test(s)),
     "Plugin runtime loaded at startup",
   );
   await send("Codex after restart");
