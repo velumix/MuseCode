@@ -36,6 +36,14 @@ deterministic local CLI processes. It never contacts a model provider.
 pairing/approval, shared memory/Kanban, native bot creation, private bot notes,
 cron previews, and phone-to-desktop bot conversation creation without a real phone.
 
+## Physical phone verification
+
+The signed APK was also checked on a physical Pixel 7 Pro over USB. Selecting a
+bot picture through Android's Photo Picker exposed an early file-input reset that
+released the image before decoding finished. The form now keeps the selection
+until decoding completes; the same upload succeeds on the phone. A delayed-read
+browser regression test covers this lifecycle.
+
 ## Practical limits
 
 Provider behavior is verified through protocol fixtures, not paid live model calls.

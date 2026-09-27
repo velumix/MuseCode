@@ -310,10 +310,13 @@ export default function BotsPanel(props: Props) {
                           type="file"
                           accept="image/png,image/jpeg,image/webp"
                           disabled={readOnly || busy}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) void run(() => upload(file));
-                            e.target.value = "";
+                          onChange={async (e) => {
+                            const input = e.currentTarget;
+                            const file = input.files?.[0];
+                            // Android's picker-backed file must stay selected until
+                            // the asynchronous decoder has finished reading it.
+                            if (file) await run(() => upload(file));
+                            input.value = "";
                           }}
                         />
                       </label>

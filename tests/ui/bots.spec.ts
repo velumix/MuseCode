@@ -31,6 +31,16 @@ test("bot profile edits, provider preferences, private memory, and avatar persis
     .getByRole("button", { name: "Reasoning: High", exact: true })
     .click();
   await page.getByRole("option", { name: /^Maximum/ }).click();
+  await page.evaluate(() => {
+    const decode = window.createImageBitmap.bind(window);
+    // A picker-backed Android file must remain selected during asynchronous reads.
+    window.createImageBitmap = (async (...args: unknown[]) => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const input = document.querySelector<HTMLInputElement>(".bot-file-button input");
+      if (!input?.files?.length) throw new Error("Picture selection was released during decoding");
+      return Reflect.apply(decode, window, args);
+    }) as typeof createImageBitmap;
+  });
   await page
     .locator(".bot-file-button input")
     .setInputFiles({
@@ -42,6 +52,7 @@ test("bot profile edits, provider preferences, private memory, and avatar persis
       ),
     });
   await expect(page.locator(".bot-picture img")).toBeVisible();
+  await expect(page.locator(".bot-file-button input")).toHaveValue("");
   await page
     .getByRole("button", { name: "Personality & instructions", exact: true })
     .click();
