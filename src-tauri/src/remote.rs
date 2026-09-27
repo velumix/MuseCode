@@ -922,18 +922,18 @@ async fn automation_request(
     )?;
     let app = state.app.ok_or_else(|| bad("Desktop unavailable."))?;
     let workspace = session_workspace(&app, &id)?;
+    let workspace_key = crate::automation::canonical(&workspace).map_err(bad)?;
     if let crate::automation::Request::Run { id }
     | crate::automation::Request::Pause { id, .. }
     | crate::automation::Request::Stop { id } = &request
     {
         let view = app.state::<crate::automation::Store>().view();
-        let path = std::path::PathBuf::from(&workspace)
-            .canonicalize()
-            .map_err(|e| bad(e.to_string()))?;
-        if !view.snapshot.jobs.iter().any(|j| {
-            &j.id == id
-                && std::path::PathBuf::from(&j.workspace).canonicalize().ok() == Some(path.clone())
-        }) {
+        if !view
+            .snapshot
+            .jobs
+            .iter()
+            .any(|j| &j.id == id && j.workspace == workspace_key)
+        {
             return Err(ApiError(
                 StatusCode::FORBIDDEN,
                 "This job belongs to another workspace.".into(),
@@ -943,27 +943,26 @@ async fn automation_request(
     let mut value = crate::automation::automation_request(app, request)
         .await
         .map_err(|e| ApiError(StatusCode::CONFLICT, e))?;
+    filter_automation_workspace(&mut value, &workspace_key);
+    Ok(Json(value))
+}
+fn filter_automation_workspace(value: &mut Value, workspace: &str) {
     if let Some(jobs) = value.get_mut("jobs").and_then(|v| v.as_array_mut()) {
-        let workspace = std::path::PathBuf::from(workspace).canonicalize().ok();
-        jobs.retain(|j| {
-            j["workspace"]
-                .as_str()
-                .and_then(|s| std::path::PathBuf::from(s).canonicalize().ok())
-                == workspace
-        });
+        jobs.retain(|j| j["workspace"].as_str() == Some(workspace));
         let ids = jobs
             .iter()
             .filter_map(|j| j["id"].as_str().map(str::to_owned))
             .collect::<Vec<_>>();
         if let Some(runs) = value.get_mut("runs").and_then(|v| v.as_array_mut()) {
             runs.retain(|r| {
-                r["job_id"]
-                    .as_str()
-                    .is_some_and(|id| ids.iter().any(|v| v == id))
+                r["workspace"].as_str() == Some(workspace)
+                    || r["workspace"].as_str().unwrap_or("").is_empty()
+                        && r["job_id"]
+                            .as_str()
+                            .is_some_and(|id| ids.iter().any(|v| v == id))
             });
         }
     }
-    Ok(Json(value))
 }
 async fn kanban_request(
     State(state): State<WebState>,
@@ -1383,6 +1382,21 @@ mod tests {
                 "{path}"
             );
         }
+    }
+    #[test]
+    fn run_history_keeps_its_workspace_after_a_task_is_unassigned() {
+        let mut view = json!({"jobs":[{"id":"existing","workspace":"alpha"},{"id":"foreign","workspace":"beta"}],"runs":[{"id":"removed-task","job_id":"removed","workspace":"alpha"},{"id":"legacy","job_id":"existing"},{"id":"foreign","job_id":"foreign","workspace":"beta"},{"id":"unknown","job_id":"removed"}]});
+        filter_automation_workspace(&mut view, "alpha");
+        assert_eq!(view["jobs"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            view["runs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["removed-task", "legacy"]
+        );
     }
     #[tokio::test]
     async fn memory_api_requires_pairing_control_and_fixed_workspace() {

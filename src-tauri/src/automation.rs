@@ -63,6 +63,8 @@ pub struct Job {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Run {
+    #[serde(default)]
+    pub workspace: String,
     pub id: String,
     pub job_id: String,
     pub session_id: String,
@@ -129,7 +131,7 @@ fn key(workspace: &str, card: &str) -> String {
         Sha256::digest(format!("{workspace}\n{card}").as_bytes())
     )
 }
-fn canonical(workspace: &str) -> Result<String, String> {
+pub(crate) fn canonical(workspace: &str) -> Result<String, String> {
     let p = PathBuf::from(workspace)
         .canonicalize()
         .map_err(|e| e.to_string())?;
@@ -527,6 +529,7 @@ fn start(app: &tauri::AppHandle, id: &str, manual: bool) -> Result<(), String> {
             s.runs.remove(0);
         }
         s.runs.push(Run {
+            workspace: job.workspace.clone(),
             id: run_id.clone(),
             job_id: id.into(),
             session_id: session_id.clone(),
@@ -898,6 +901,7 @@ mod tests {
                 let job = &mut s.jobs[0];
                 job.status = "running".into();
                 s.runs.push(Run {
+                    workspace: job.workspace.clone(),
                     id: "run".into(),
                     job_id: job.id.clone(),
                     session_id: "bot-run-test".into(),

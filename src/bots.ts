@@ -53,6 +53,7 @@ export interface Job {
   day_runs: number;
 }
 export interface BotRun {
+  workspace: string;
   id: string;
   job_id: string;
   session_id: string;

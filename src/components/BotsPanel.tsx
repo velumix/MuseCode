@@ -749,6 +749,7 @@ export default function BotsPanel(props: Props) {
                                 {job.paused ? " · Paused" : ""}
                               </p>
                               <small>
+                                {job.workspace?.replace(/^\\\\\?\\/, '')}<br/>
                                 {job.assignment.cron} ·{" "}
                                 {job.assignment.timezone}
                                 {job.status !== "complete"
@@ -828,6 +829,7 @@ export default function BotsPanel(props: Props) {
                       </button>
                       <h3>{result.task}</h3>
                       <p>
+                        {result.workspace?.replace(/^\\\\\?\\/, '')}<br/>
                         {result.bot_name} · {providerNames[result.provider]} ·{" "}
                         {result.status} · {when(result.started_at)}
                       </p>
