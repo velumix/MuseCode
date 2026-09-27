@@ -70,9 +70,9 @@ test("phone model choices update the session without losing the draft", async ({
   const remote = await boot(page);
   await expect(page.locator(".phone-online")).toBeVisible();
   await page.getByLabel("Message your desktop agent").fill("Keep this phone draft");
-  await page.getByRole("button", { name: "Model: CLI default", exact: true }).click();
+  await page.getByRole("button", { name: "Model: Phone model", exact: true }).click();
   await page.getByRole("option", { name: /^Phone model/ }).click();
-  await page.getByRole("button", { name: "Reasoning: Default", exact: true }).click();
+  await page.getByRole("button", { name: "Reasoning: Low", exact: true }).click();
   await page.getByRole("option", { name: /^High/ }).click();
   await expect(page.getByRole("button", { name: "Reasoning: High", exact: true })).toBeVisible();
   expect(remote.sessions[0].options).toEqual({ model: "phone-model", reasoning: "high" });
@@ -123,8 +123,8 @@ test("phone Remember creates a reviewable note from an answer",async({page})=>{
 test("view-only phones cannot edit model settings", async ({ page }) => {
   await boot(page, true, false);
   await expect(page.locator(".phone-online")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Model: CLI default", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Reasoning: Default", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Model: Phone model", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Reasoning: Low", exact: true })).toBeDisabled();
 });
 
 test("phone pairs with a matching code and waits for desktop approval", async ({ page }) => {

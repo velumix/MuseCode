@@ -116,7 +116,7 @@ try {
   await desktop.getByRole("button", { name: "Close remote access" }).click();
   await phone.getByRole("button", { name: /^Model:/ }).click();
   await phone.getByRole("option").getByText("Fixture Muse", { exact: true }).click();
-  await phone.getByRole("button", { name: "Reasoning: Default", exact: true }).click();
+  await phone.getByRole("button", { name: /^Reasoning:/ }).click();
   await phone.getByRole("option", { name: /^High / }).click();
   await expect(desktop.getByRole("button", { name: "Model: Fixture Muse", exact: true })).toBeVisible();
   await expect(desktop.getByRole("button", { name: "Reasoning: High", exact: true })).toBeVisible();

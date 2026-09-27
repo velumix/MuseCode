@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Icon from "./Icon";
 export interface Choice { id: string; label: string; description?: string }
-export default function ChoiceMenu({ label, value, choices, disabled, onChange }: { label: string; value: string; choices: Choice[]; disabled?: boolean; onChange: (value: string) => void }) {
+export default function ChoiceMenu({ label, value, choices, disabled, placeholder = "Choose…", onChange }: { label: string; value: string; choices: Choice[]; disabled?: boolean; placeholder?: string; onChange: (value: string) => void }) {
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -33,8 +33,8 @@ export default function ChoiceMenu({ label, value, choices, disabled, onChange }
   return <>
     <div className="choice-field">
       <label htmlFor={`${id}-trigger`}>{label}</label>
-      <button id={`${id}-trigger`} ref={trigger} type="button" className="choice-trigger" aria-label={`${label}: ${selected?.label || value || "Default"}`} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? id : undefined} disabled={disabled} onClick={() => open ? close() : show()} onKeyDown={(e) => { if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); show(); } }}>
-        <span>{selected?.label || value || "Default"}</span><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
+      <button id={`${id}-trigger`} ref={trigger} type="button" className="choice-trigger" aria-label={`${label}: ${selected?.label || value || placeholder}`} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? id : undefined} disabled={disabled} onClick={() => open ? close() : show()} onKeyDown={(e) => { if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); show(); } }}>
+        <span>{selected?.label || value || placeholder}</span><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
       </button>
     </div>
     {open && createPortal(<div ref={menu} className="choice-menu" style={position} onBlur={(e) => { if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget as Node) && e.relatedTarget !== trigger.current) setOpen(false); }} onKeyDown={(e) => {

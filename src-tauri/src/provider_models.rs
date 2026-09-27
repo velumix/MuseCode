@@ -44,7 +44,7 @@ impl RunOptions {
             if let Some((_, catalog)) = CATALOGS.lock().unwrap().get(&provider) {
                 if let Some(model) = catalog.models.iter().find(|m| m.id == self.model) {
                     if !model.efforts.contains(&self.reasoning) {
-                        return Err("That reasoning level is unavailable for this model. Choose another level or use the default.".into());
+                        return Err("That reasoning level is unavailable for this model. Choose a supported level.".into());
                     }
                 }
             }
@@ -77,11 +77,13 @@ pub struct Model {
     pub description: String,
     pub efforts: Vec<String>,
     pub default_effort: String,
+    pub is_default: bool,
 }
 #[derive(Clone, Default, Serialize)]
 pub struct Catalog {
     pub models: Vec<Model>,
     pub notice: Option<String>,
+    pub defaults: RunOptions,
 }
 static CATALOGS: LazyLock<Mutex<HashMap<Provider, (Instant, Catalog)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -243,7 +245,7 @@ fn parse_rpc_models(provider: Provider, value: &Value) -> Vec<Model> {
             {
                 return None;
             }
-            let efforts = variants
+            let efforts: Vec<String> = variants
                 .as_array()
                 .into_iter()
                 .flatten()
@@ -255,12 +257,21 @@ fn parse_rpc_models(provider: Provider, value: &Value) -> Vec<Model> {
                 .filter(|v| EFFORTS.contains(v))
                 .map(str::to_owned)
                 .collect();
+            let mut default_effort = field(entry, "defaultReasoningEffort");
+            // Muse's CLI starts at high; only offer it when this model supports it.
+            if provider == Provider::Muse
+                && default_effort.is_empty()
+                && efforts.iter().any(|e| e == "high")
+            {
+                default_effort = "high".into();
+            }
             Some(Model {
                 label: if label.is_empty() { id.clone() } else { label },
                 id,
                 description: field(entry, "description"),
                 efforts,
-                default_effort: field(entry, "defaultReasoningEffort"),
+                default_effort,
+                is_default: entry["isDefault"] == true,
             })
         })
         .collect()
@@ -315,6 +326,7 @@ fn parse_agy_models(output: &str) -> Vec<Model> {
             description: String::new(),
             efforts: effort.map(|e| vec![e.into()]).unwrap_or_default(),
             default_effort: effort.unwrap_or_default().into(),
+            is_default: false,
         });
     }
     for model in &mut result {
@@ -329,6 +341,32 @@ fn effort_label(value: &str) -> String {
     c.next()
         .map(|first| first.to_uppercase().collect::<String>() + c.as_str())
         .unwrap_or_default()
+}
+fn resolve_defaults(models: &[Model], configured: RunOptions) -> RunOptions {
+    let model_id = if configured.model.is_empty() {
+        models
+            .iter()
+            .find(|m| m.is_default)
+            .or_else(|| models.first())
+            .map(|m| m.id.clone())
+            .unwrap_or_default()
+    } else {
+        configured.model
+    };
+    let model = models.iter().find(|m| m.id == model_id);
+    let reasoning = match model {
+        Some(model) => [configured.reasoning.as_str(), model.default_effort.as_str()]
+            .into_iter()
+            .find(|effort| model.efforts.iter().any(|e| e == effort))
+            .map(str::to_owned)
+            .or_else(|| model.efforts.first().cloned())
+            .unwrap_or_default(),
+        None => configured.reasoning,
+    };
+    RunOptions {
+        model: model_id,
+        reasoning,
+    }
 }
 fn discover(provider: Provider) -> Result<Catalog, String> {
     if provider == Provider::Antigravity {
@@ -374,8 +412,9 @@ fn discover(provider: Provider) -> Result<Catalog, String> {
         }
         let models = parse_agy_models(&output);
         return Ok(Catalog {
+            defaults: resolve_defaults(&models, RunOptions::default()),
             notice: models.is_empty().then(|| {
-                "The CLI returned no selectable models. Use its default or enter a model ID.".into()
+                "The CLI returned no selectable models. Refresh or enter a model ID.".into()
             }),
             models,
         });
@@ -397,10 +436,25 @@ fn discover(provider: Provider) -> Result<Catalog, String> {
         }
     }
     models.dedup_by(|a, b| a.id == b.id);
+    let mut configured = RunOptions::default();
+    if provider == Provider::Codex {
+        // Read only the model preferences, never return the rest of the CLI config.
+        rpc.deadline = rpc.deadline.min(Instant::now() + Duration::from_secs(2));
+        if let Ok(value) = rpc.request(20, "config/read", json!({"includeLayers":false})) {
+            let candidate = RunOptions {
+                model: field(&value["config"], "model"),
+                reasoning: field(&value["config"], "model_reasoning_effort"),
+            };
+            if candidate.validate(provider).is_ok() {
+                configured = candidate;
+            }
+        }
+    }
     Ok(Catalog {
-        notice: models.is_empty().then(|| {
-            "The CLI returned no model catalog. Its configured default remains available.".into()
-        }),
+        defaults: resolve_defaults(&models, configured),
+        notice: models
+            .is_empty()
+            .then(|| "The CLI returned no model catalog. Refresh or enter a model ID.".into()),
         models,
     })
 }
@@ -423,6 +477,7 @@ pub fn catalog(provider: Provider, refresh: bool) -> Catalog {
         Err(notice) => Catalog {
             models: vec![],
             notice: Some(notice),
+            defaults: RunOptions::default(),
         },
     }
 }
@@ -449,6 +504,67 @@ mod tests {
             &json!({"models":[{"modelId":"spark","variants":["high","max"]}]}),
         );
         assert_eq!(muse[0].efforts, vec!["high", "max"]);
+        assert_eq!(muse[0].default_effort, "high");
+    }
+    #[test]
+    fn real_defaults_honor_configured_models_and_supported_efforts() {
+        let models = parse_rpc_models(
+            Provider::Codex,
+            &json!({"data":[
+                {"model":"fast","supportedReasoningEfforts":[{"reasoningEffort":"low"}],"defaultReasoningEffort":"low"},
+                {"model":"deep","isDefault":true,"supportedReasoningEfforts":[{"reasoningEffort":"low"},{"reasoningEffort":"high"}],"defaultReasoningEffort":"high"},
+                {"model":"basic","supportedReasoningEfforts":[]}
+            ]}),
+        );
+        assert_eq!(
+            resolve_defaults(&models, RunOptions::default()),
+            RunOptions {
+                model: "deep".into(),
+                reasoning: "high".into()
+            }
+        );
+        assert_eq!(
+            resolve_defaults(
+                &models,
+                RunOptions {
+                    model: "fast".into(),
+                    reasoning: "max".into()
+                }
+            ),
+            RunOptions {
+                model: "fast".into(),
+                reasoning: "low".into()
+            }
+        );
+        assert_eq!(
+            resolve_defaults(
+                &models,
+                RunOptions {
+                    model: "deep".into(),
+                    reasoning: "low".into()
+                }
+            )
+            .reasoning,
+            "low"
+        );
+        assert!(resolve_defaults(
+            &models,
+            RunOptions {
+                model: "basic".into(),
+                reasoning: "high".into()
+            }
+        )
+        .reasoning
+        .is_empty());
+        let custom = RunOptions {
+            model: "custom/model".into(),
+            reasoning: "high".into(),
+        };
+        assert_eq!(resolve_defaults(&models, custom.clone()), custom);
+        assert_eq!(
+            resolve_defaults(&[], RunOptions::default()),
+            RunOptions::default()
+        );
     }
     #[test]
     fn antigravity_groups_only_returned_effort_variants() {

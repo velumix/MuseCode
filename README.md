@@ -85,7 +85,9 @@ The embedded Terminal starts that tab's provider for sign-in and interactive app
 
 Choose **Model**, then **Reasoning**, above the conversation. Available models come from
 the installed CLI and its signed-in account; reasoning levels depend on the selected model.
-**CLI default** keeps the CLI's configuration, and **Enter model ID** supports custom aliases.
+The selectors show a concrete model and reasoning level as soon as the catalog loads,
+using your saved choices or the provider's available defaults. Models without adjustable
+reasoning show **Not adjustable**. **Enter model ID** supports custom aliases.
 Your last choices are remembered separately for each provider. In Agent view they apply to
 the next message without clearing the conversation or draft. In Terminal view, use **Restart**
 to launch with new settings. Paired phones with control access have the same selectors;
