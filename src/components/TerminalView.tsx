@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { Provider } from "../providers";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
@@ -22,6 +23,7 @@ export interface TerminalHandles {
 }
 
 interface TerminalViewProps {
+  provider: Provider;
   sessionId: string;
   active: boolean;
   /** Bump to tear down the session and spawn a fresh one. */
@@ -31,7 +33,7 @@ interface TerminalViewProps {
   onHandles: (sessionId: string, handles: TerminalHandles | null) => void;
 }
 
-export default function TerminalView({ sessionId, active, sessionKey, workspace, onStatus, onHandles }: TerminalViewProps) {
+export default function TerminalView({ provider, sessionId, active, sessionKey, workspace, onStatus, onHandles }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef<{ id: string; term: Terminal; fit: FitAddon } | null>(null);
   const statusRef = useRef(onStatus);
@@ -122,6 +124,7 @@ export default function TerminalView({ sessionId, active, sessionKey, workspace,
         );
         if (disposed) return;
         const info = await invoke<{ id: string; backend: string }>("pty_spawn", {
+          provider,
           id: nativeId,
           workspace,
           cols: Math.max(1, term.cols),
@@ -168,7 +171,7 @@ export default function TerminalView({ sessionId, active, sessionKey, workspace,
         await invoke("pty_kill", { id: nativeId });
       }).catch(() => {});
     };
-  }, [sessionId, sessionKey, workspace]);
+  }, [sessionId, sessionKey, workspace, provider]);
 
   // Hidden tabs have no layout box; refit once this tab becomes visible.
   useEffect(() => {

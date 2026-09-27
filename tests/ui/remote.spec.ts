@@ -1,10 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-async function boot(page: Page, paired = true, control = true) {
+async function boot(page: Page, paired = true, control = true, provider = "muse") {
   const remote = {
     paired, control, pending: false, failSend: false, revoked: false, sends: [] as string[],
-    sessions: [{ id: "session-one", title: "Review the project", workspace: "C:\\Projects\\MuseCode", running: false, status: "completed", revision: 3 }],
+    sessions: [{ provider, id: "session-one", title: "Review the project", workspace: "C:\\Projects\\VelumCode", running: false, status: "completed", revision: 3 }],
     entries: [
       { seq: 1, event: { kind: "turn_start", prompt: "Review the project", remote: false } },
       { seq: 2, event: { kind: "assistant_delta", text: "**Review complete.**\n\n```ts\nconst connected = true;\n```\n\n[Documentation](https://example.com)" } },
@@ -71,9 +71,11 @@ test("phone pairs with a matching code and waits for desktop approval", async ({
 });
 
 test("phone sends and stops real session actions while preserving multiline drafts", async ({ page }) => {
-  const remote = await boot(page);
+  const remote = await boot(page, true, true, "codex");
   await expect(page.locator(".phone-online")).toBeVisible();
   await expect(page.locator(".md strong")).toHaveText("Review complete.");
+  await expect(page.locator(".phone-message.assistant .phone-message-label")).toHaveText("Codex");
+  await page.screenshot({ path: ".qa/velum-phone.png", animations: "disabled" });
   const composer = page.getByLabel("Message your desktop agent");
   await composer.fill("Run the tests\nand report failures");
   await composer.press("Enter");

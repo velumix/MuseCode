@@ -1,6 +1,6 @@
 // Offline launch caches only the phone shell. Messages, API responses, and QR
 // pairing data never enter Cache Storage. Commands are never queued offline.
-const CACHE = "muse-phone-v1";
+const CACHE = "muse-phone-v2";
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then(async (cache) => {
     await cache.addAll(["/", "/manifest.webmanifest", "/pwa-192.png", "/pwa-512.png"]);
@@ -23,5 +23,5 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(fetch(event.request).then(async (response) => {
     if (response.ok && !shell) { const cache = await caches.open(CACHE); await cache.put(event.request, response.clone()); }
     return response;
-  }).catch(async () => (await caches.match(shell ? "/" : event.request)) || new Response("Reconnect to your desktop to open MuseCode.", { status: 503 })));
+  }).catch(async () => (await caches.match(shell ? "/" : event.request)) || new Response("Reconnect to your desktop to open Velum Code.", { status: 503 })));
 });

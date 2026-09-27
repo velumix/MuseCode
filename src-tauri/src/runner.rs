@@ -1,12 +1,6 @@
-//! Headless agent sessions: one `muse exec --json` child per turn.
-//!
-//! Each tab owns a stable muse session id plus a workspace directory
-//! (`agent_new`); every prompt runs as a fresh `exec` process against that
-//! id (`--session-id` continues the session server-side, verified on CLI
-//! 1.4.0). Stdout JSONL is folded line by line (see [`crate::events`]) and
-//! re-emitted as `agent-event`s; stderr is drained on a side thread and
-//! only surfaces when a turn dies without a terminal record. A missing
-//! terminal record is synthesized from the exit code so every turn closes.
+//! One provider process per turn, bound to its tab and workspace.
+//! Provider streams share one event vocabulary for desktop, phone and notifications.
+//! Resume IDs come from the selected CLI; stderr is drained concurrently.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
@@ -14,15 +8,18 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::events::{AgentEvent, Fold};
-use crate::pty::{home_dir, resolve_muse};
+use crate::events::AgentEvent;
+use crate::provider_events::Stream;
+use crate::providers::{self, Provider};
+use crate::pty::home_dir;
 
 /// Last stderr lines retained for failure diagnosis.
 const STDERR_TAIL_LINES: usize = 30;
 
 pub struct AgentSession {
     tab_id: String,
-    session_id: String,
+    session_id: Mutex<String>,
+    provider: Provider,
     workspace: std::path::PathBuf,
     child: Mutex<Option<Child>>,
     running: Mutex<bool>,
@@ -137,45 +134,6 @@ pub fn agent_validate_workspace(workspace: Option<String>) -> Result<String, Str
     resolve_workspace(workspace).map(|path| path.display().to_string())
 }
 
-/// Build a piped `muse exec` command. Rust handles `.cmd`/`.bat` quoting
-/// itself (including spaces and shell metacharacters); `.ps1` needs its
-/// interpreter explicitly.
-/// When `yolo` is set, `--yolo` disables approval and sandboxing for the run.
-fn build_exec_command(muse_path: &std::path::Path, yolo: bool) -> Command {
-    let ext = muse_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase());
-    let mut cmd = match ext.as_deref() {
-        Some("ps1") => {
-            let mut cmd = Command::new("powershell");
-            cmd.arg("-NoProfile")
-                .arg("-ExecutionPolicy")
-                .arg("Bypass")
-                .arg("-File")
-                .arg(muse_path);
-            cmd
-        }
-        _ => Command::new(muse_path),
-    };
-    cmd.arg("exec").arg("--json");
-    if yolo {
-        cmd.arg("--yolo");
-    }
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW: the app itself has no console, so without this
-        // every turn pops a visible console window. The whole shim chain
-        // (cmd -> powershell -> muse-bin) inherits the consoleless state.
-        cmd.creation_flags(0x08000000);
-    }
-    cmd
-}
-
 /// Take the tab's child (if any), kill it, and reap it. The reader thread
 /// observes the missing child after EOF and reports the turn cancelled.
 fn kill_session(state: &State<AgentState>, id: &str) {
@@ -279,10 +237,14 @@ fn spawn_reader(
 
     std::thread::spawn(move || {
         let state = app.state::<AgentState>();
-        let mut fold = Fold::default();
+        let mut fold = Stream::new(session.provider);
         let mut terminal = None;
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            for event in fold.fold_line(&line) {
+            let events = fold.fold_line(&line);
+            if let Some(id) = &fold.session_id {
+                *session.session_id.lock().unwrap() = id.clone();
+            }
+            for event in events {
                 if matches!(event, AgentEvent::TurnEnd { .. }) {
                     terminal = Some(event);
                 } else if state.sessions.lock().ok().is_some_and(|sessions| {
@@ -298,12 +260,37 @@ fn spawn_reader(
             let _ = handle.join();
         }
         let exit = reap_child(&session);
-        if terminal.is_none() || exit.is_none() {
+        // Headless Antigravity can deny a tool yet still finish successfully.
+        // Surface those permission notices so skipped work is visible.
+        if session.provider == Provider::Antigravity {
+            if let Ok(tail) = stderr_tail.lock() {
+                for line in tail.iter().filter(|line| {
+                    let line = line.to_ascii_lowercase();
+                    line.contains("denied")
+                        || line.contains("approval")
+                        || line.contains("permission")
+                }) {
+                    emit(
+                        &app,
+                        &id,
+                        AgentEvent::Notice {
+                            text: line.chars().take(2000).collect(),
+                        },
+                    );
+                }
+            }
+        }
+        if terminal.is_none() || exit.is_none() || exit.is_some_and(|code| code != Some(0)) {
             // Reaped by us: exit code decides the status. Already reaped by
             // `kill_session`: the user stopped the turn.
             let (status, reason) = match exit {
-                Some(Some(0)) => ("completed".to_owned(), None),
+                Some(Some(0)) if session.provider == Provider::Muse => ("completed".to_owned(), None),
+                Some(Some(0)) => ("failed".to_owned(), Some(format!("{} ended without a completion event. Open Terminal to check its sign-in and setup.", session.provider.label()))),
                 Some(code) => {
+                    let structured = match &terminal {
+                        Some(AgentEvent::TurnEnd { reason: Some(reason), .. }) if !reason.is_empty() => Some(reason.clone()),
+                        _ => None,
+                    };
                     let tail = stderr_tail
                         .lock()
                         .ok()
@@ -311,8 +298,11 @@ fn spawn_reader(
                         .filter(|t| !t.trim().is_empty());
                     (
                         "failed".to_owned(),
-                        Some(tail.unwrap_or_else(|| {
-                            format!("muse exited unexpectedly (code {code:?})")
+                        Some(structured.or(tail).unwrap_or_else(|| {
+                            format!(
+                                "{} exited unexpectedly (code {code:?})",
+                                session.provider.label()
+                            )
                         })),
                     )
                 }
@@ -365,9 +355,15 @@ pub fn agent_new(
     id: String,
     workspace: Option<String>,
     tab_id: Option<String>,
+    provider: Option<Provider>,
 ) -> Result<NewInfo, String> {
     let workspace = resolve_workspace(workspace)?;
-    let session_id = uuid::Uuid::new_v4().to_string();
+    let provider = provider.unwrap_or_default();
+    let session_id = if provider == Provider::Muse {
+        uuid::Uuid::new_v4().to_string()
+    } else {
+        String::new()
+    };
     let old = state
         .sessions
         .lock()
@@ -376,7 +372,8 @@ pub fn agent_new(
             id.clone(),
             Arc::new(AgentSession {
                 tab_id: tab_id.unwrap_or_else(|| id.clone()),
-                session_id: session_id.clone(),
+                session_id: Mutex::new(session_id.clone()),
+                provider,
                 workspace: workspace.clone(),
                 child: Mutex::new(None),
                 running: Mutex::new(false),
@@ -387,7 +384,7 @@ pub fn agent_new(
         old.stop();
     }
     app.state::<crate::session_log::SessionLog>()
-        .register(&id, workspace.display().to_string());
+        .register_provider(&id, workspace.display().to_string(), provider);
     crate::remote::changed(&app);
     Ok(NewInfo {
         id,
@@ -411,9 +408,6 @@ pub fn agent_send(
     if prompt.trim().is_empty() {
         return Err("prompt is empty".to_string());
     }
-    let muse_path = resolve_muse().ok_or_else(|| {
-        "Could not find the `muse` CLI on PATH. Install the Muse CLI and make sure `muse` works in a terminal, then try again.".to_string()
-    })?;
     // Serialize registration with stop/destroy and competing sends until
     // the new child is owned by this session.
     let sessions = state
@@ -427,7 +421,9 @@ pub fn agent_send(
         return Err("a turn is already running — stop it first".to_string());
     }
     let session = Arc::clone(session);
-    let session_id = &session.session_id;
+    let provider = session.provider;
+    let cli_path = provider.resolve().ok_or_else(|| provider.missing())?;
+    let session_id = session.session_id.lock().unwrap().clone();
     let workspace = &session.workspace;
     // Prompt via file so quoting/newlines can never corrupt argv.
     let turn_id = uuid::Uuid::new_v4().to_string();
@@ -436,20 +432,13 @@ pub fn agent_send(
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("failed to stage prompt: {e}"))?;
     }
-    std::fs::write(file, &prompt).map_err(|e| format!("failed to stage prompt: {e}"))?;
+    std::fs::write(file, provider.input(&prompt))
+        .map_err(|e| format!("failed to stage prompt: {e}"))?;
 
-    let mut cmd = build_exec_command(&muse_path, yolo);
-    cmd.arg("--session-id")
-        .arg(session_id)
-        .arg("--workspace")
-        .arg(workspace)
-        .arg("--prompt-file")
-        .arg(file)
-        .arg("--user-input-auto-resolve")
-        .current_dir(workspace);
+    let mut cmd = providers::exec_command(provider, &cli_path, &session_id, workspace, file, yolo)?;
     let child = cmd
         .spawn()
-        .map_err(|e| format!("failed to launch `{}`: {e}", muse_path.display()))?;
+        .map_err(|e| format!("failed to launch `{}`: {e}", cli_path.display()))?;
 
     let mut child = child;
     let stdout = child.stdout.take().ok_or_else(|| {
@@ -512,7 +501,18 @@ pub fn agent_destroy(app: AppHandle, state: State<AgentState>, id: String) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::{build_exec_command, home_dir, resolve_workspace, safe_fragment};
+    use super::{home_dir, resolve_workspace, safe_fragment};
+    fn build_exec_command(path: &std::path::Path, yolo: bool) -> std::process::Command {
+        crate::providers::exec_command(
+            crate::providers::Provider::Muse,
+            path,
+            "session",
+            std::path::Path::new("."),
+            std::path::Path::new("prompt.txt"),
+            yolo,
+        )
+        .unwrap()
+    }
     use std::path::Path;
 
     #[test]

@@ -51,41 +51,6 @@ pub struct SpawnInfo {
     pub backend: String,
 }
 
-/// Locate the `muse` CLI on PATH, honouring PATHEXT on Windows so shims
-/// like `muse.cmd` resolve to a real file.
-pub(crate) fn resolve_muse() -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    #[cfg(windows)]
-    let exts: Vec<String> = std::env::var("PATHEXT")
-        .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string())
-        .split(';')
-        .map(|s| s.to_string())
-        .collect();
-    for dir in std::env::split_paths(&path) {
-        #[cfg(windows)]
-        {
-            for ext in &exts {
-                let candidate = dir.join(format!("muse{ext}"));
-                if candidate.is_file() {
-                    return Some(candidate);
-                }
-            }
-            let bare = dir.join("muse");
-            if bare.is_file() {
-                return Some(bare);
-            }
-        }
-        #[cfg(not(windows))]
-        {
-            let candidate = dir.join("muse");
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-    }
-    None
-}
-
 /// Build the spawn command for the resolved binary. Script shims
 /// (`.cmd`/`.bat`/`.ps1`) cannot be launched directly through ConPTY,
 /// so they are wrapped in their interpreter.
@@ -247,12 +212,12 @@ pub fn pty_spawn(
     cols: u16,
     rows: u16,
     workspace: Option<String>,
+    provider: Option<crate::providers::Provider>,
 ) -> Result<SpawnInfo, String> {
     let workspace = crate::runner::resolve_workspace(workspace)?;
     kill_session(&state, &id);
-    let muse_path = resolve_muse().ok_or_else(|| {
-        "Could not find the `muse` CLI on PATH. Install the Muse CLI and make sure `muse` works in a terminal, then restart the session.".to_string()
-    })?;
+    let provider = provider.unwrap_or_default();
+    let muse_path = provider.resolve().ok_or_else(|| provider.missing())?;
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {

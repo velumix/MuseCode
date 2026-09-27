@@ -12,7 +12,7 @@ const usb = process.argv.includes("--usb-fixture");
 const installed = process.argv.includes("--installed");
 const release = installed || process.argv.includes("--release");
 const count = execFileSync("powershell.exe", ["-NoProfile", "-Command", "@(Get-Process muse-code-app -ErrorAction SilentlyContinue).Count"], { encoding: "utf8", windowsHide: true }).trim();
-assert.equal(count, "0", "Quit MuseCode before testing; tests must not attach to your conversations.");
+assert.equal(count, "0", "Quit VelumCode before testing; tests must not attach to your conversations.");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const run = path.join(root, ".qa", `remote-${Date.now()}`);
 mkdirSync(run, { recursive: true });
@@ -34,7 +34,7 @@ try {
     catch { vite = spawn(process.execPath, [path.join(root, "node_modules/vite/bin/vite.js"), "--host", "127.0.0.1"], { cwd: root, windowsHide: true, stdio: "ignore" }); }
     for (let i = 0; i < 100; i++) { try { if ((await fetch("http://127.0.0.1:1420")).ok) break; } catch {} await sleep(100); }
   }
-  const executable = installed ? path.join(process.env.LOCALAPPDATA, "Muse Code/muse-code-app.exe") : path.join(root, `src-tauri/target/${release ? "release" : "debug"}/muse-code-app.exe`);
+  const executable = installed ? path.join(process.env.LOCALAPPDATA, "Velum Code/muse-code-app.exe") : path.join(root, `src-tauri/target/${release ? "release" : "debug"}/muse-code-app.exe`);
   app = spawn(executable, [], { cwd: root, windowsHide: true, stdio: "ignore", env: { ...process.env,
     PATH: `${run};${process.env.PATH}`, MUSE_QA_LOG: log, MUSE_CODE_CONFIG_DIR: path.join(run, "settings"),
     ...(usb ? { ANDROID_HOME: sdk, MUSE_QA_ADB_DIR: run } : {}),

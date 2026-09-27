@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import Markdown from "./Markdown";
+import { providerNames, type Provider } from "../providers";
 import { copyText } from "./clip";
 import Icon, { MuseMark, type IconName } from "./Icon";
 
@@ -46,6 +47,8 @@ interface NewInfo {
 }
 
 interface ChatViewProps {
+  initialWorkspace?: string;
+  provider: Provider;
   sessionId: string;
   active: boolean;
   /** Bump to drop the conversation and start a fresh agent session. */
@@ -232,7 +235,7 @@ function ToolBlock({ block }: { block: Extract<Block, { kind: "tool" }> }) {
   );
 }
 
-export default function ChatView({ sessionId, active, sessionKey, onStatus, onWorkspace, onTitle }: ChatViewProps) {
+export default function ChatView({ provider, initialWorkspace, sessionId, active, sessionKey, onStatus, onWorkspace, onTitle }: ChatViewProps) {
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [todos, setTodos] = useState<TodoEntry[]>([]);
   const [input, setInput] = useState("");
@@ -243,7 +246,7 @@ export default function ChatView({ sessionId, active, sessionKey, onStatus, onWo
   // Workspace bound to this tab's session at creation; null selects the
   // backend default (home). Changing it restarts the session via the effect
   // below, so a session never straddles two directories.
-  const [workspace, setWorkspace] = useState<string | null>(null);
+  const [workspace, setWorkspace] = useState<string | null>(initialWorkspace || null);
   const [draft, setDraft] = useState("");
   const [effective, setEffective] = useState("");
   // Bump to retry session creation with the same workspace (e.g. the
@@ -489,7 +492,7 @@ export default function ChatView({ sessionId, active, sessionKey, onStatus, onWo
         // The listener above filters by session id; register after attaching
         // so no event from our own session can slip past.
         if (disposed) return;
-        const info = await invoke<NewInfo>("agent_new", { id: nativeId, workspace, tabId: sessionId });
+        const info = await invoke<NewInfo>("agent_new", { id: nativeId, workspace, tabId: sessionId, provider });
         if (!disposed) {
           nativeIdRef.current = nativeId;
           setEffective(info.workspace);
@@ -517,7 +520,7 @@ export default function ChatView({ sessionId, active, sessionKey, onStatus, onWo
       }).catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, sessionKey, workspace, retry]);
+  }, [sessionId, sessionKey, workspace, retry, provider]);
 
   // Focus requests from App (palette / Ctrl+L), targeted by session id.
   useEffect(() => {
@@ -699,7 +702,7 @@ export default function ChatView({ sessionId, active, sessionKey, onStatus, onWo
                 <div key={b.id} className="msg assistant">
                   <div className="message-header">
                     <span className="message-avatar muse-avatar"><MuseMark size={38} /></span>
-                    <div className="message-author"><strong>Muse<span className="assistant-badge">AI</span></strong></div>
+                    <div className="message-author"><strong>{providerNames[provider]}<span className="assistant-badge">AI</span></strong></div>
                     <CopyButton text={b.text} />
                   </div>
                   <Markdown text={b.text} />
@@ -756,8 +759,8 @@ export default function ChatView({ sessionId, active, sessionKey, onStatus, onWo
           ref={composerRef}
           value={input}
           rows={2}
-          placeholder={ready ? "What’s on your mind? Ask Muse…" : "Getting ready…"}
-          aria-label="Message Muse"
+          placeholder={ready ? `What’s on your mind? Ask ${providerNames[provider]}…` : "Getting ready…"}
+          aria-label={`Message ${providerNames[provider]}`}
           disabled={!ready || applying}
           onChange={(e) => {
             setHistIdx(null);

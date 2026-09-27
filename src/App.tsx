@@ -14,11 +14,14 @@ import CommandPalette from "./components/CommandPalette";
 const RemotePanel = lazy(() => import("./components/RemotePanel"));
 import type { PaletteAction } from "./components/CommandPalette";
 import "./App.css";
+import ProviderPicker from "./components/ProviderPicker";
+import { preferredProvider, providerNames, type Provider } from "./providers";
 
 type TabMode = "agent" | "terminal";
 interface DesktopStatus { notifications_enabled: boolean; last_error: string | null }
 
 interface Tab {
+  provider: Provider;
   id: string;
   title: string;
   mode: TabMode;
@@ -36,8 +39,8 @@ function newId(): string {
   return `tab-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
 }
 
-function createTab(n: number): Tab {
-  return { id: newId(), title: `muse ${n}`, mode: "agent", agentStatus: { kind: "starting" }, terminalStatus: { kind: "starting" }, agentKey: 0, terminalKey: 0, terminalStarted: false };
+function createTab(n: number, provider = preferredProvider()): Tab {
+  return { provider, id: newId(), title: `muse ${n}`, mode: "agent", agentStatus: { kind: "starting" }, terminalStatus: { kind: "starting" }, agentKey: 0, terminalKey: 0, terminalStarted: false };
 }
 
 function tabStatus(tab: Tab): PtyStatus | AgentStatus {
@@ -48,16 +51,16 @@ function statusText(tab: Tab): string {
   const status = tabStatus(tab);
   switch (status.kind) {
     case "starting":
-      return tab.mode === "agent" ? "Starting agent…" : "Starting muse…";
+      return `Starting ${providerNames[tab.provider]}…`;
     case "idle":
       return "Ready";
     case "done":
       return "\u2713 Done";
     case "running":
-      if ("backend" in status) return `muse · ${status.backend}`;
+      if ("backend" in status) return `${providerNames[tab.provider]} · ${status.backend}`;
       return "detail" in status && status.detail ? `Working… · ${status.detail}` : "Working…";
     case "exited":
-      return status.code === null ? "muse exited" : `muse exited (code ${status.code})`;
+      return status.code === null ? `${providerNames[tab.provider]} exited` : `${providerNames[tab.provider]} exited (code ${status.code})`;
     case "error":
       return status.message;
   }
@@ -167,11 +170,15 @@ export default function App() {
     });
   }, []);
 
-  const newTab = useCallback(() => {
-    const t = createTab(++counter.current);
+  const openProvider = useCallback((provider: Provider) => {
+    try { localStorage.setItem("velum-provider", provider); } catch { /* Storage is optional. */ }
+    const t = createTab(++counter.current, provider);
+    t.workspace = stateRef.current.tabs.find((tab) => tab.id === stateRef.current.activeId)?.workspace;
     setTabs((prev) => [...prev, t]);
     setActiveId(t.id);
   }, []);
+
+  const newTab = useCallback(() => openProvider(preferredProvider()), [openProvider]);
 
   const selectTab = useCallback(
     (id: string) => {
@@ -337,7 +344,7 @@ export default function App() {
   const failed = activeTab && (tabStatus(activeTab).kind === "error" || tabStatus(activeTab).kind === "exited");
 
   const paletteActions: PaletteAction[] = [
-    { id: "cmd-remote", title: "Connect your phone with Tailscale", run: () => setRemoteOpen(true) },
+    { id: "cmd-remote", title: "Connect your phone with Tailscale or USB", run: () => setRemoteOpen(true) },
     { id: "cmd-new", title: "New agent tab", hint: "Ctrl+T", run: newTab },
     { id: "cmd-focus", title: "Focus message input", hint: "Ctrl+L", run: focusComposer },
     {
@@ -359,8 +366,8 @@ export default function App() {
     { id: "cmd-restart", title: "Restart this tab's session", run: restartActive },
     { id: "cmd-notifications", title: desktop.notifications_enabled ? "Turn off background notifications" : "Turn on background notifications", run: () => void toggleNotifications() },
     { id: "cmd-test-notification", title: "Send a test Windows notification", run: () => void testNotification() },
-    { id: "cmd-tray", title: "Hide Muse to the system tray", run: () => void getCurrentWindow().close() },
-    { id: "cmd-quit", title: "Quit Muse Code and stop background work", run: () => void invoke("desktop_quit") },
+    { id: "cmd-tray", title: "Hide Velum Code to the system tray", run: () => void getCurrentWindow().close() },
+    { id: "cmd-quit", title: "Quit Velum Code and stop background work", run: () => void invoke("desktop_quit") },
     {
       id: "cmd-close",
       title: "Close this tab",
@@ -386,7 +393,7 @@ export default function App() {
       </div>}
       <div className="app-body">
       <TabBar tabs={tabs.map((t) => ({ ...t, status: tabStatus(t) }))} activeId={activeTab?.id ?? ""} onSelect={selectTab} onClose={closeTab} onNew={newTab} onCommands={togglePalette} workspace={activeTab?.workspace} />
-      <section className="conversation-pane" aria-label="Current conversation">
+      <main className="conversation-pane" aria-label="Current conversation">
       <div className="conversation-toolbar">
         <div className="conversation-heading">
           <span className="section-label">Your space to create</span>
@@ -397,7 +404,7 @@ export default function App() {
             <button type="button" className={activeTab.mode === "agent" ? "active" : ""} aria-pressed={activeTab.mode === "agent"} onClick={() => setMode(activeTab.id, "agent")}>
               <Icon name="chat" size={16} />Agent
             </button>
-            <button type="button" className={activeTab.mode === "terminal" ? "active" : ""} aria-pressed={activeTab.mode === "terminal"} title="Open a separate Muse terminal conversation in this workspace" onClick={() => setMode(activeTab.id, "terminal")}>
+            <button type="button" className={activeTab.mode === "terminal" ? "active" : ""} aria-pressed={activeTab.mode === "terminal"} title={`Open a separate ${providerNames[activeTab.provider]} terminal conversation in this workspace`} onClick={() => setMode(activeTab.id, "terminal")}>
               <Icon name="terminal" size={17} />Terminal
             </button>
           </div>
@@ -407,11 +414,14 @@ export default function App() {
           <Icon name="reset" size={17} />
         </button>
       </div>
-      <main className="terminal-wrap">
+      {activeTab && <ProviderPicker value={activeTab.provider} onChange={(provider) => { if (provider !== activeTab.provider) openProvider(provider); }} />}
+      <div className="terminal-wrap">
         {tabs.map((t) => (
           <Fragment key={t.id}>
             <ChatView
               sessionId={t.id}
+              provider={t.provider}
+              initialWorkspace={t.workspace}
               active={t.id === activeTab?.id && t.mode === "agent"}
               sessionKey={t.agentKey}
               onStatus={handleAgentStatus}
@@ -421,6 +431,7 @@ export default function App() {
             {t.terminalStarted && <Suspense fallback={t.id === activeTab?.id && t.mode === "terminal" ? <p>Loading terminal…</p> : null}>
             <TerminalView
               sessionId={t.id}
+              provider={t.provider}
               active={t.id === activeTab?.id && t.mode === "terminal"}
               sessionKey={t.terminalKey}
               workspace={t.workspace}
@@ -433,7 +444,7 @@ export default function App() {
         {searchOpen && activeTab?.mode === "terminal" && (
           <SearchBar onNext={(q) => find(1, q)} onPrevious={(q) => find(-1, q)} onClose={closeSearch} />
         )}
-      </main>
+      </div>
       <footer className="statusbar">
         {activeTab && (
           <>
@@ -446,9 +457,9 @@ export default function App() {
         <span className="status-spacer" />
         <button type="button" className="notification-toggle" onClick={() => setRemoteOpen(true)}><Icon name="phone" size={13} />Connect phone</button>
         <button type="button" className="notification-toggle" aria-label="Background notifications" aria-pressed={desktop.notifications_enabled} title={desktop.notifications_enabled ? "Background notifications on — click to mute" : "Background notifications muted — click to enable"} onClick={() => void toggleNotifications()}><Icon name="bell" size={13} />{desktop.notifications_enabled ? "Notifications on" : "Notifications muted"}</button>
-        <span className="footer-hint" title="Closing the window keeps Muse running. Use the tray menu or Ctrl+K → Quit to exit.">Runs in tray</span>
+        <span className="footer-hint" title="Closing the window keeps Velum Code running. Use the tray menu or Ctrl+K → Quit to exit.">Runs in tray</span>
       </footer>
-      </section>
+      </main>
       </div>
       {paletteOpen && <CommandPalette actions={paletteActions} onClose={() => setPaletteOpen(false)} />}
       {remoteOpen && <Suspense fallback={null}><RemotePanel onClose={() => setRemoteOpen(false)} /></Suspense>}

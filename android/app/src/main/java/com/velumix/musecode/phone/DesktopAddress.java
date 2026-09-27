@@ -6,7 +6,7 @@ import java.util.Locale;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
-/** Only private Tailscale HTTPS or MuseCode's exact USB loopback endpoint. */
+/** Only private Tailscale HTTPS or VelumCode's exact USB loopback endpoint. */
 final class DesktopAddress {
     static final String USB_ORIGIN = "http://127.0.0.1:43827";
     private static final Pattern HOST = Pattern.compile("[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.ts\\.net");

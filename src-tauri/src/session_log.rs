@@ -15,6 +15,7 @@ pub struct Entry {
 
 #[derive(Clone, Serialize)]
 pub struct Summary {
+    pub provider: crate::providers::Provider,
     pub id: String,
     pub title: String,
     pub workspace: String,
@@ -40,11 +41,22 @@ pub struct Replay {
 pub struct SessionLog(Mutex<HashMap<String, Log>>);
 
 impl SessionLog {
+    #[cfg(test)]
     pub fn register(&self, id: &str, workspace: String) {
+        self.register_provider(id, workspace, crate::providers::Provider::Muse);
+    }
+
+    pub fn register_provider(
+        &self,
+        id: &str,
+        workspace: String,
+        provider: crate::providers::Provider,
+    ) {
         self.0.lock().unwrap().insert(
             id.into(),
             Log {
                 summary: Summary {
+                    provider,
                     id: id.into(),
                     title: "New conversation".into(),
                     workspace,

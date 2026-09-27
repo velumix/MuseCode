@@ -1,14 +1,14 @@
 # Remote access
 
-MuseCode's phone interface connects to the agent running on your Windows desktop. Use the
+VelumCode's phone interface connects to the agent running on your Windows desktop. Use the
 [Android APK](android.md) with its built-in QR scanner, or the installable mobile web app.
-Install the regular Tailscale app on both devices; MuseCode uses that client's private
+Install the regular Tailscale app on both devices; VelumCode uses that client's private
 network and HTTPS support.
 
 ## Connect a phone
 
 1. Sign into Tailscale on both devices. Keep the desktop awake.
-2. Open **Connect phone** in MuseCode's footer or command palette. Refresh to check Tailscale.
+2. Open **Connect phone** in VelumCode's footer or command palette. Refresh to check Tailscale.
 3. Enable remote access. If Tailscale needs HTTPS enabled for your network, follow its setup
    link and try again. Your tailnet's permissions must allow access to this device on TCP 8443.
 4. Show a QR code, scan it in the Android app (or your phone's camera for the web app), and name the phone.
@@ -29,7 +29,7 @@ The phone stays paired for up to 90 days. Clearing browser storage requires pair
 - Control the agent while the desktop window is hidden in the tray.
 - Reconnect after a network interruption or phone sleep and replay recent activity.
 - Keep an unsent draft while changing conversations or briefly losing the connection.
-- Add the MuseCode icon and standalone interface to the phone's home screen.
+- Add the VelumCode icon and standalone interface to the phone's home screen.
 - Revoke individual phones, grant view-only access, or switch off remote access entirely.
 
 Phone messages always use standard agent permissions, including when the desktop has selected
@@ -43,12 +43,12 @@ conversation before retrying: the desktop may already have accepted the message.
 
 ## Network and credentials
 
-The native HTTP listener binds to an ephemeral **127.0.0.1** port. MuseCode starts an owned
+The native HTTP listener binds to an ephemeral **127.0.0.1** port. VelumCode starts an owned
 foreground `tailscale serve --yes --https=8443 http://127.0.0.1:<port>` process. Tailscale
-terminates TLS and applies tailnet access policy. Closing MuseCode to the tray preserves it;
+terminates TLS and applies tailnet access policy. Closing VelumCode to the tray preserves it;
 disabling remote access or quitting terminates the process and its foreground route.
 Other routes are not reset or overwritten. An existing route on 8443 must be freed first.
-MuseCode never starts Funnel or opens a LAN/public listener.
+VelumCode never starts Funnel or opens a LAN/public listener.
 
 The QR puts its random invitation in a URL fragment, which is not sent in HTTP URLs. The phone
 removes that fragment from the address bar. Pairing binds the invitation to a separate phone
@@ -82,7 +82,7 @@ HTTPS and its Secure cookie. Pairing invitations and device credentials are scop
 transport. Both modes require matching-code approval, hash credentials on disk, enforce
 the same request checks, and support immediate revocation.
 
-MuseCode refuses to replace a conflicting ADB forwarding rule. Disconnecting removes only
+VelumCode refuses to replace a conflicting ADB forwarding rule. Disconnecting removes only
 its own mapping and closes the listener. Quit closes the listener and attempts mapping
 cleanup; an interrupted cleanup can leave an inert mapping that is reused on reconnect.
 USB is enabled explicitly after each desktop launch. After unplugging, reconnect the cable
@@ -95,7 +95,7 @@ an undetected phone may need a data-capable cable or its Windows USB driver.
 | --- | --- |
 | Tailscale not installed / disconnected | Install the Windows client, sign in, then click Refresh. |
 | HTTPS setup needed | Use the setup link in Tailscale's message to enable HTTPS, then retry. |
-| Port 8443 is already serving another app | Inspect `tailscale serve status`; move the other service if you want MuseCode to use this port. |
+| Port 8443 is already serving another app | Inspect `tailscale serve status`; move the other service if you want VelumCode to use this port. |
 | Phone cannot open the address | Connect its Tailscale app, check tailnet grants/ACLs for TCP 8443, and keep the desktop awake. |
 | Pairing expired | Generate a fresh QR code and keep both screens open for confirmation. |
 | Reconnecting after Tailscale restarts | Refresh the desktop status and enable remote access again if its Serve process stopped. |

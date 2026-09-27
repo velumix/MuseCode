@@ -72,11 +72,11 @@ export default function TitleBar({ onCommands }: { onCommands: () => void }) {
     >
       <div className="titlebar-brand">
         <MuseMark />
-        <span>muse<span className="brand-suffix">code</span></span>
+        <span>velum<span className="brand-suffix">code</span></span>
       </div>
       <button type="button" className="global-search" onClick={onCommands} aria-label="Search commands and conversations">
         <Icon name="search" size={17} />
-        <span>Search Muse</span>
+        <span>Search Velum</span>
         <kbd>Ctrl K</kbd>
       </button>
       <div className="titlebar-drag-space" />
@@ -87,7 +87,7 @@ export default function TitleBar({ onCommands }: { onCommands: () => void }) {
         <button type="button" aria-label={maximized ? "Restore" : "Maximize"} onClick={() => void win.toggleMaximize()}>
           {maximized ? <RestoreIcon /> : <MaximizeIcon />}
         </button>
-        <button type="button" aria-label="Close" title="Hide to system tray — Muse keeps running" className="close" onClick={() => void win.close()}>
+        <button type="button" aria-label="Close" title="Hide to system tray — Velum Code keeps running" className="close" onClick={() => void win.close()}>
           <CloseIcon />
         </button>
       </div>

@@ -22,7 +22,7 @@ use windows::{
 
 const APP_ID: &str = "com.velumix.musecode";
 const ACTIVATOR: GUID = GUID::from_u128(0x31c4bdc3_41ce_4b6e_99ab_502f4549295f);
-const GROUP: &str = "MuseCode";
+const GROUP: &str = "VelumCode";
 
 struct ComApartment(bool);
 impl ComApartment {
@@ -154,7 +154,7 @@ fn check_setting(setting: windows::core::Result<NotificationSetting>) -> Result<
         // first Show. Windows still applies global/user policy to that Show.
         Err(error) if error.code() == HRESULT(0x80070490u32 as i32) => Ok(()),
         Err(error) => Err(format!("Could not read Windows notification settings: {error}")),
-        Ok(_) => Err("Windows notifications are disabled for Muse Code. Enable them in Settings > System > Notifications.".into()),
+        Ok(_) => Err("Windows notifications are disabled for Velum Code. Enable them in Settings > System > Notifications.".into()),
     }
 }
 
@@ -186,7 +186,7 @@ pub(super) fn send(
         .map(|id| format!("conversation:{id}"))
         .unwrap_or_else(|| "open".into());
     let xml = format!(
-        r#"<toast launch="{}"><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text><image placement="appLogoOverride" src="{}"/></binding></visual><actions><action content="Open Muse" arguments="{}" activationType="foreground"/></actions></toast>"#,
+        r#"<toast launch="{}"><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text><image placement="appLogoOverride" src="{}"/></binding></visual><actions><action content="Open Velum" arguments="{}" activationType="foreground"/></actions></toast>"#,
         xml_escape(&argument),
         xml_escape(title),
         xml_escape(body),

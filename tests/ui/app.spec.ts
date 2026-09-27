@@ -31,6 +31,7 @@ async function boot(page: Page, delay = 0) {
       unregisterCallback(id: number) { callbacks.delete(id); },
       async invoke(cmd: string, args: any = {}) {
         api.calls.push({ cmd, args });
+        if (cmd === "provider_status") return ["muse", "codex", "antigravity"].map((id) => ({ id, installed: id !== "antigravity", setup_url: "https://antigravity.google/docs/getting-started?tab=cli" }));
         if (cmd === "remote_status" || cmd === "remote_check_tailscale") return { ...api.remote };
         if (cmd === "remote_usb_devices") return [{ serial: "PIXEL_TEST", name: "Pixel 7 Pro", authorized: true }, { serial: "LOCKED", name: "Android phone", authorized: false }];
         if (cmd === "remote_usb_connect") { api.remote.usb = { serial: args.serial, name: "Pixel 7 Pro", authorized: true }; return { ...api.remote }; }
@@ -79,6 +80,28 @@ async function boot(page: Page, delay = 0) {
 }
 
 const composer = (page: Page) => page.locator(".chat-wrap:not(.hidden) textarea");
+
+test("providers keep separate conversations, drafts and terminal sessions", async ({ page }) => {
+  await boot(page);
+  await composer(page).fill("My Muse draft");
+  await page.getByLabel("AI provider").selectOption("codex");
+  await expect(page.getByRole("tab")).toHaveCount(2);
+  await expect(page.getByRole("textbox", { name: "Message Codex", exact: true })).toBeVisible();
+  await composer(page).fill("Codex conversation");
+  await composer(page).press("Enter");
+  await page.evaluate(() => (window as any).qa.agent({ kind: "turn_end", status: "completed", text: "Codex response" }));
+  await expect(page.locator(".msg.assistant")).toContainText("Codex response");
+  await page.getByRole("button", { name: "Terminal", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).qa.calls.findLast((c: any) => c.cmd === "pty_spawn")?.args.provider)).toBe("codex");
+  await page.getByRole("tab").first().click();
+  await expect(composer(page)).toHaveValue("My Muse draft");
+  await expect(page.getByLabel("AI provider")).toHaveValue("muse");
+  await page.getByLabel("AI provider").selectOption("antigravity");
+  await expect(page.getByText("CLI not installed", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Setup", exact: true })).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  expect(await page.evaluate(() => (window as any).qa.calls.filter((c: any) => c.cmd === "agent_new").map((c: any) => c.args.provider))).toEqual(expect.arrayContaining(["muse", "codex", "antigravity"]));
+});
 
 test("USB pairing works with Tailscale disabled and requires desktop approval", async ({ page }) => {
   await boot(page);
@@ -321,10 +344,10 @@ test("multiline prompts, prompt history, code copy and palette commands", async 
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("const answer = 42;");
   await composer(page).focus();
   await page.keyboard.press("Control+k");
-  await page.getByRole("combobox").fill("zzzzzzzzzz");
+  await page.getByRole("combobox", { name: "Command palette" }).fill("zzzzzzzzzz");
   await expect(page.getByText("No matching commands")).toBeVisible();
-  await page.getByRole("combobox").fill("new agent");
-  await page.getByRole("combobox").press("Enter");
+  await page.getByRole("combobox", { name: "Command palette" }).fill("new agent");
+  await page.getByRole("combobox", { name: "Command palette" }).press("Enter");
   await expect(page.getByRole("tab")).toHaveCount(2);
   await page.keyboard.press("Control+1");
   await expect(page.getByRole("tab").first()).toHaveAttribute("aria-selected", "true");
@@ -398,12 +421,12 @@ test("desktop notification controls and activation restore the intended conversa
   await expect(page.getByRole("tab").first()).toHaveAttribute("aria-selected", "true");
   await expect(page.locator(".chat-wrap:not(.hidden) .msg.assistant")).toContainText("Result to return to");
   await page.keyboard.press("Control+k");
-  await page.getByRole("combobox").fill("test Windows notification");
-  await page.getByRole("combobox").press("Enter");
+  await page.getByRole("combobox", { name: "Command palette" }).fill("test Windows notification");
+  await page.getByRole("combobox", { name: "Command palette" }).press("Enter");
   await expect(page.getByText("Test notification sent to Windows.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Dismiss notification message", exact: true }).click();
   await page.keyboard.press("Control+k");
-  await page.getByRole("combobox").fill("Quit Muse");
-  await page.getByRole("combobox").press("Enter");
+  await page.getByRole("combobox", { name: "Command palette" }).fill("Quit Velum");
+  await page.getByRole("combobox", { name: "Command palette" }).press("Enter");
   await expect.poll(() => page.evaluate(() => (window as any).qa.calls.some((c: any) => c.cmd === "desktop_quit"))).toBe(true);
 });

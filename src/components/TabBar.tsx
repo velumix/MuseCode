@@ -1,8 +1,10 @@
 import type { PtyStatus } from "./TerminalView";
 import type { AgentStatus } from "./ChatView";
 import Icon from "./Icon";
+import { providerNames, type Provider } from "../providers";
 
 export interface TabInfo {
+  provider: Provider;
   id: string;
   title: string;
   status: PtyStatus | AgentStatus;
@@ -73,7 +75,7 @@ export default function TabBar({ tabs, activeId, onSelect, onClose, onNew, onCom
           }}
         >
           <span className="conversation-icon"><Icon name="chat" size={19} /></span>
-          <span className="tab-copy"><span className="tab-title">{conversationTitle(t.title)}</span><span className="tab-detail">{sessionDetail(t.status)}</span></span>
+          <span className="tab-copy"><span className="tab-title">{conversationTitle(t.title)}</span><span className="tab-detail">{providerNames[t.provider]} · {sessionDetail(t.status)}</span></span>
           {t.status.kind === "running" && <span className="status-dot running" aria-hidden="true" />}
           <span
             className="tab-close"

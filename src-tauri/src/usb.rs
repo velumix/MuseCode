@@ -109,7 +109,7 @@ pub async fn require_phone(serial: &str) -> Result<(Device, &'static str), Strin
             return Ok((device, package));
         }
     }
-    Err("Install the MuseCode APK on this phone first.".into())
+    Err("Install the VelumCode APK on this phone first.".into())
 }
 
 fn mapping(output: &str) -> Option<&str> {
@@ -122,8 +122,8 @@ fn mapping(output: &str) -> Option<&str> {
 pub async fn connect(serial: &str) -> Result<(), String> {
     let routes = run(&["-s", serial, "reverse", "--list"]).await?;
     match mapping(&routes) {
-        Some(SOCKET) => Ok(()), // Reuse MuseCode's route after unplugging or restarting.
-        Some(_) => Err("USB port 43827 is already forwarded to another app. Remove that forwarding before connecting MuseCode.".into()),
+        Some(SOCKET) => Ok(()), // Reuse VelumCode's route after unplugging or restarting.
+        Some(_) => Err("USB port 43827 is already forwarded to another app. Remove that forwarding before connecting VelumCode.".into()),
         None => run(&["-s", serial, "reverse", "--no-rebind", SOCKET, SOCKET]).await.map(|_| ()),
     }
 }
@@ -145,7 +145,7 @@ pub async fn open(serial: &str, package: &str, url: &str) -> Result<(), String> 
     ])
     .await?;
     if output.contains("Error:") {
-        return Err("Could not open MuseCode. Install the latest APK on this phone.".into());
+        return Err("Could not open VelumCode. Install the latest APK on this phone.".into());
     }
     Ok(())
 }

@@ -1,4 +1,4 @@
-; Muse Code — custom NSIS installer hooks.
+; Velum Code custom NSIS installer hooks.
 ;
 ; This file is !included near the top of Tauri's generated installer.nsi,
 ; BEFORE ${PRODUCTNAME} and friends are defined. Consequences:
@@ -7,33 +7,35 @@
 ;    because macros expand at their !insertmacro site (after the defines).
 
 ; --- Branded wizard pages (literal text only, see note above) ---
-!define MUI_WELCOMEPAGE_TITLE "Welcome to Muse Code Setup"
-!define MUI_WELCOMEPAGE_TEXT "Muse Code is a desktop companion for the Muse coding agent.$\r$\n$\r$\nThis wizard will install Muse Code on your computer.$\r$\n$\r$\nClick Next to continue."
-!define MUI_FINISHPAGE_TITLE "Muse Code is installed"
-!define MUI_FINISHPAGE_TEXT "Muse Code was installed successfully.$\r$\n$\r$\nKeep $\"Run Muse Code$\" checked and click Finish to launch it."
-BrandingText "Muse Code Setup"
+!define MUI_WELCOMEPAGE_TITLE "Welcome to Velum Code Setup"
+!define MUI_WELCOMEPAGE_TEXT "Velum Code is a desktop home for Muse, Codex and Antigravity.$\r$\n$\r$\nThis wizard will install Velum Code on your computer.$\r$\n$\r$\nClick Next to continue."
+!define MUI_FINISHPAGE_TITLE "Velum Code is installed"
+!define MUI_FINISHPAGE_TEXT "Velum Code was installed successfully.$\r$\n$\r$\nKeep $\"Run Velum Code$\" checked and click Finish to launch it."
+BrandingText "Velum Code Setup"
 
 !macro NSIS_HOOK_PREINSTALL
-  ; No pre-copy steps.
+  ; Keep the stable app identity/data, while removing the old product entry
+  ; and shortcuts. The previous uninstaller retains app data in silent mode.
+  IfFileExists "$LOCALAPPDATA\Muse Code\uninstall.exe" 0 velum_migration_done
+  ExecWait '"$LOCALAPPDATA\Muse Code\uninstall.exe" /S _?=$LOCALAPPDATA\Muse Code' $0
+  ${If} $0 != 0
+    MessageBox MB_ICONSTOP|MB_OK "Close Muse Code and run this installer again." /SD IDOK
+    Abort
+  ${EndIf}
+  Delete "$LOCALAPPDATA\Muse Code\uninstall.exe"
+  RMDir "$LOCALAPPDATA\Muse Code"
+  velum_migration_done:
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
   ; Native toast identity and COM activation, including Notification Center.
   ; NSIS runs as a 32-bit process; the COM server is the 64-bit app.
   SetRegView 64
-  WriteRegStr HKCU "Software\Classes\AppUserModelId\com.velumix.musecode" "DisplayName" "Muse Code"
+  WriteRegStr HKCU "Software\Classes\AppUserModelId\com.velumix.musecode" "DisplayName" "Velum Code"
   WriteRegStr HKCU "Software\Classes\AppUserModelId\com.velumix.musecode" "IconUri" "$INSTDIR\muse-notification.png"
   WriteRegStr HKCU "Software\Classes\AppUserModelId\com.velumix.musecode" "CustomActivator" "{31C4BDC3-41CE-4B6E-99AB-502F4549295F}"
   WriteRegStr HKCU "Software\Classes\CLSID\{31C4BDC3-41CE-4B6E-99AB-502F4549295F}\LocalServer32" "" '$\"$INSTDIR\${MAINBINARYNAME}.exe$\" --toast-activated'
   SetRegView lastused
-  ; Muse Code v1 hosts the `muse` CLI inside its terminal view, so flag a
-  ; missing CLI right after install. /SD IDOK keeps this safe under /S.
-  nsExec::ExecToStack 'cmd /c where muse'
-  Pop $0 ; exit code ("0" when found)
-  Pop $1 ; command output (discarded)
-  ${If} $0 != "0"
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Muse Code is installed, but the 'muse' command was not found on your PATH.$\r$\n$\r$\nInstall the Muse CLI and make sure 'muse' works in a terminal, then launch Muse Code." /SD IDOK
-  ${EndIf}
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL

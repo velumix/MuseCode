@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Install (or uninstall) Muse Code from the local NSIS bundle.
+  Install (or uninstall) Velum Code from the local NSIS bundle.
 .DESCRIPTION
   Builds the release installer on demand with -Build (or when the bundle is
   missing), then runs it silently and verifies the install. With -Uninstall,

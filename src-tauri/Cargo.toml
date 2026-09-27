@@ -1,7 +1,7 @@
 [package]
 name = "muse-code-app"
-version = "0.2.0"
-description = "Muse Code — a desktop companion for the Muse coding agent"
+version = "0.3.0"
+description = "Velum Code — a desktop home for Muse, Codex and Antigravity"
 authors = ["velumix"]
 edition = "2021"
 

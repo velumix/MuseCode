@@ -5,7 +5,7 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <queries><package android:name="com.tailscale.ipn" /></queries>
     <application android:label="@string/app_name" android:icon="@mipmap/ic_launcher"
-        android:roundIcon="@mipmap/ic_launcher" android:theme="@style/Theme.MuseCode"
+        android:roundIcon="@mipmap/ic_launcher" android:theme="@style/Theme.VelumCode"
         android:allowBackup="false" android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:usesCleartextTraffic="false" android:hardwareAccelerated="true"
@@ -22,6 +22,6 @@
         </activity>
         <activity android:name="com.journeyapps.barcodescanner.CaptureActivity"
             android:exported="false" android:screenOrientation="unspecified"
-            android:theme="@style/Theme.MuseCode.Scanner" tools:replace="android:screenOrientation,android:theme" />
+            android:theme="@style/Theme.VelumCode.Scanner" tools:replace="android:screenOrientation,android:theme" />
     </application>
 </manifest>

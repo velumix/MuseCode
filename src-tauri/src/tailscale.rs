@@ -1,5 +1,5 @@
 //! Use the installed client and an app-owned foreground Serve configuration.
-//! Closing the window keeps it alive; Quit drops only MuseCode's listener.
+//! Closing the window keeps it alive; Quit drops only VelumCode's listener.
 use serde::Serialize;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -124,7 +124,7 @@ fn contains_proxy(value: &Value, target: &str) -> bool {
 pub async fn start(port: u16) -> Result<Child, String> {
     let config = json(&["serve", "status", "--json"]).await?;
     if port_in_use(&config) {
-        return Err("Tailscale port 8443 is already serving another app. Free that port before enabling MuseCode remote access; your existing routes were left untouched.".into());
+        return Err("Tailscale port 8443 is already serving another app. Free that port before enabling VelumCode remote access; your existing routes were left untouched.".into());
     }
     let target = format!("http://127.0.0.1:{port}");
     let mut child = command()?

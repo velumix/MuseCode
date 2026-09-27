@@ -66,7 +66,7 @@ export default function RemotePanel({ onClose }: { onClose: () => void }) {
   return <dialog ref={dialog} className="remote-dialog" aria-labelledby="remote-title" onCancel={onClose}>
     <header className="remote-heading">
       <div className="remote-symbol"><Icon name="phone" size={25} /></div>
-      <div><span className="section-label">Muse, wherever you are</span><h2 id="remote-title">Connect your phone</h2></div>
+      <div><span className="section-label">Your workspace, wherever you are</span><h2 id="remote-title">Connect your phone</h2></div>
       <button className="remote-icon-button" aria-label="Close remote access" onClick={onClose}><Icon name="close" /></button>
     </header>
     <p className="remote-intro">Your desktop does the work. Your phone keeps you in the conversation.</p>
@@ -77,11 +77,11 @@ export default function RemotePanel({ onClose }: { onClose: () => void }) {
     {(error || (transport === "tailscale" && status?.error)) && <div className="remote-error" role="alert">{error || status?.error}{transport === "tailscale" && setupLink && <div className="remote-actions"><button onClick={() => void openUrl(setupLink).catch((e) => setError(String(e)))}>Enable HTTPS in Tailscale<Icon name="arrow" size={15} /></button></div>}</div>}
     {transport === "usb" ? <section className="remote-network remote-usb" aria-label="USB connection">
       <div className="remote-network-label"><Icon name="phone" size={20} /><div><strong>One cable. Same conversation.</strong><span>Connect directly to your computer. No Tailscale or Wi-Fi needed.</span></div></div>
-      <ol className="remote-usb-steps"><li>Install the MuseCode APK on your phone.</li><li>Use a USB data cable, enable USB debugging, and allow this computer.</li><li>Connect below, then approve the matching code.</li></ol>
+      <ol className="remote-usb-steps"><li>Install the VelumCode APK on your phone.</li><li>Use a USB data cable, enable USB debugging, and allow this computer.</li><li>Connect below, then approve the matching code.</li></ol>
       <div className="remote-actions"><button disabled={busy} onClick={() => void action(refreshUsb)}><Icon name="reset" size={16} />Find USB phones</button>{status?.usb && <button disabled={busy} onClick={() => void action(() => invoke("remote_usb_disconnect"))}>Disconnect USB</button>}</div>
       {usbChecked && !usbDevices.length && <p className="remote-muted">No phone detected. Unlock your phone and check its USB debugging prompt, then refresh.</p>}
       {usbDevices.map((device) => <div className="remote-device" key={device.serial}><Icon name="phone" /><div><strong>{device.name}</strong><span>{device.authorized ? status?.usb?.serial === device.serial ? "USB link enabled" : "Ready to connect" : "Allow USB debugging on this phone"}</span></div><button className="remote-primary" disabled={busy || !device.authorized || (!!status?.usb && status.usb.serial !== device.serial)} onClick={() => void action(async () => { await invoke("remote_usb_connect", { serial: device.serial }); setInvitation(null); })}>{status?.usb?.serial === device.serial ? "Reconnect" : "Connect"}</button></div>)}
-      {status?.usb && <p className="remote-muted">Open MuseCode on {status.usb.name}. If you unplug the cable, reconnect it and choose Reconnect here.</p>}
+      {status?.usb && <p className="remote-muted">Open VelumCode on {status.usb.name}. If you unplug the cable, reconnect it and choose Reconnect here.</p>}
     </section> : <section className="remote-network" aria-label="Private network">
       <div className="remote-network-label"><Icon name="shield" size={20} /><div><strong>Private with Tailscale</strong><span>{status?.tailscale.message || "Checking your connection…"}</span></div></div>
       <div className="remote-actions">
@@ -101,18 +101,18 @@ export default function RemotePanel({ onClose }: { onClose: () => void }) {
       <div className="remote-address"><span className="remote-live-dot" /><span title={status.url ?? ""}>{status.url}</span><button className="remote-icon-button" aria-label="Copy private address" onClick={() => void copyText(status.url ?? "").then((ok) => { setCopied(ok); setTimeout(() => setCopied(false), 1500); })}><Icon name={copied ? "check" : "copy"} size={16} /></button></div>
       <section className="remote-pair-layout">
         <div className="remote-qr">
-          {invitation && !expired ? <img src={`data:image/svg+xml,${encodeURIComponent(invitation.svg)}`} alt="Scan this QR code with your phone camera to pair with MuseCode" /> : <div className="remote-qr-empty"><Icon name="phone" size={42} /><span>{expired ? "QR code expired" : "Ready when you are"}</span></div>}
+          {invitation && !expired ? <img src={`data:image/svg+xml,${encodeURIComponent(invitation.svg)}`} alt="Scan this QR code with your phone camera to pair with VelumCode" /> : <div className="remote-qr-empty"><Icon name="phone" size={42} /><span>{expired ? "QR code expired" : "Ready when you are"}</span></div>}
         </div>
-        <div className="remote-pair-copy"><h3>One scan. Same conversation.</h3><ol><li>Connect your phone to the same Tailscale network.</li><li>Scan the QR with your phone’s camera.</li><li>Confirm the code here, then add MuseCode to your home screen.</li></ol>
+        <div className="remote-pair-copy"><h3>One scan. Same conversation.</h3><ol><li>Connect your phone to the same Tailscale network.</li><li>Scan the QR with your phone’s camera.</li><li>Confirm the code here, then add VelumCode to your home screen.</li></ol>
           <button className="remote-primary" disabled={busy} onClick={() => void action(async () => { setInvitation(await invoke<Invitation>("remote_pair")); setTime(Date.now()); setControl(true); })}>{invitation ? "Generate new QR code" : "Show pairing code"}</button>
           {invitation && !expired && <span className="remote-expiry">Expires in {seconds}s · single use</span>}
         </div>
       </section>
-    </> : <div className="remote-off"><Icon name="phone" size={34} /><div><h3>A little more freedom.</h3><p>Read live responses, send a follow-up, and stop a task from your phone. MuseCode keeps working in the tray.</p></div></div>)}
+    </> : <div className="remote-off"><Icon name="phone" size={34} /><div><h3>A little more freedom.</h3><p>Read live responses, send a follow-up, and stop a task from your phone. VelumCode keeps working in the tray.</p></div></div>)}
     <section className="remote-devices" aria-label="Connected devices"><div className="remote-devices-heading"><h3>Connected devices</h3><span>{status?.devices.length ?? 0}</span></div>
       {!status?.devices.length && <p className="remote-muted">Your paired phones will appear here. You can disconnect them at any time.</p>}
       {status?.devices.map((device) => <div className="remote-device" key={device.id}><Icon name="phone" /><div><strong>{device.name}</strong><span>{device.control ? "Can view and control" : "View only"} · paired {new Date(device.created_at * 1000).toLocaleDateString()}</span></div><button disabled={busy} onClick={() => void action(() => invoke("remote_revoke", { id: device.id }))}>Disconnect</button></div>)}
     </section>
-    <p className="remote-footnote">Keep your desktop awake and MuseCode running. Phone messages use standard agent permissions. Terminal sessions stay on your desktop.</p>
+    <p className="remote-footnote">Keep your desktop awake and VelumCode running. Phone messages use standard agent permissions. Terminal sessions stay on your desktop.</p>
   </dialog>;
 }

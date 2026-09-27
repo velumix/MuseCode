@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { providerNames } from "../providers";
 import Icon, { MuseMark } from "../components/Icon";
 import Markdown from "../components/Markdown";
 import { transcript, type Replay, type Session } from "./transcript";
@@ -64,7 +65,7 @@ export default function RemoteApp() {
     let disposed = false;
     api<{ device: Device; computer: string }>("/me").then((value) => {
       if (!disposed) { setDevice(value.device); setInvitation(""); setComputer(value.computer || "Your desktop"); saveClaim(""); setClaim(""); }
-    }).catch((e) => { if (!disposed && !(e instanceof ApiError && e.status === 401)) setError(usb ? "Check the USB cable and choose Reconnect in Connect phone on your desktop." : "Your desktop is unavailable. Connect Tailscale and make sure MuseCode is running."); })
+    }).catch((e) => { if (!disposed && !(e instanceof ApiError && e.status === 401)) setError(usb ? "Check the USB cable and choose Reconnect in Connect phone on your desktop." : "Your desktop is unavailable. Connect Tailscale and make sure Velum Code is running."); })
       .finally(() => { if (!disposed) setLoading(false); });
     const installable = (event: Event) => { event.preventDefault(); setInstall(event as InstallEvent); };
     window.addEventListener("beforeinstallprompt", installable);
@@ -186,11 +187,11 @@ export default function RemoteApp() {
   };
 
   if (!device) return <main className="phone-entry">
-    <div className="phone-entry-brand"><MuseMark size={52} /><span>MuseCode</span></div>
+    <div className="phone-entry-brand"><MuseMark size={52} /><span>Velum Code</span></div>
     <div className="phone-entry-card">
       <div className="phone-eyebrow"><Icon name="shield" size={15} />Your private workspace</div>
       <h1>{loading ? "Finding your desktop…" : claim ? "One last check." : invitation ? "Meet your desktop, here." : "Your desktop. In your pocket."}</h1>
-      <p>{claim ? "Confirm this connection in MuseCode on your desktop. Keep this screen open." : invitation ? "Pair this phone to follow your agent and keep work moving, wherever you are." : usb ? "Open Connect phone on your desktop, choose USB cable, and connect this phone." : "Open MuseCode on your desktop, choose Connect phone, and scan its QR code."}</p>
+      <p>{claim ? "Confirm this connection in Velum Code on your desktop. Keep this screen open." : invitation ? "Pair this phone to follow your agent and keep work moving, wherever you are." : usb ? "Open Connect phone on your desktop, choose USB cable, and connect this phone." : "Open Velum Code on your desktop, choose Connect phone, and scan its QR code."}</p>
       {error && <div className="phone-error" role="alert">{error}</div>}
       {claim ? <><div className="phone-pair-code" aria-label="Pairing code">{pending?.code || "Waiting…"}</div><div className="phone-wait"><span className="phone-pulse" />Waiting for desktop confirmation</div></> : !loading && invitation ? <form onSubmit={(e) => { e.preventDefault(); void pair(); }}>
         <label htmlFor="phone-name">Name this phone</label><input id="phone-name" value={name} maxLength={64} onChange={(e) => setName(e.target.value)} autoComplete="off" />
@@ -202,7 +203,7 @@ export default function RemoteApp() {
   </main>;
 
   return <main className="phone-app">
-    <header className="phone-header"><MuseMark size={35} /><div><h1>MuseCode</h1><span className={connected ? "phone-online" : "phone-offline"}><i />{connected ? "Desktop connected" : "Reconnecting…"}</span></div>
+    <header className="phone-header"><MuseMark size={35} /><div><h1>Velum Code</h1><span className={connected ? "phone-online" : "phone-offline"}><i />{connected ? "Desktop connected" : "Reconnecting…"}</span></div>
       <button className="phone-icon-button" aria-label="Phone settings" onClick={() => setInstallHelp((value) => !value)}><Icon name="phone" size={21} /></button>
     </header>
     {installHelp && <section className="phone-settings" aria-label="Phone settings"><strong>{device.name}</strong><p>{computer || "Your desktop"}</p><p>{device.control ? "View and control · standard agent permissions" : "View-only access"}</p>
@@ -211,14 +212,14 @@ export default function RemoteApp() {
       {signout && <div className="phone-signout"><p>You’ll need to scan a new QR code to reconnect.</p><button disabled={busy} onClick={() => void disconnect()}>Disconnect</button><button onClick={() => setSignout(false)}>Keep connected</button></div>}
     </section>}
     <button className="phone-session-select" aria-expanded={listOpen} aria-controls="phone-sessions" onClick={() => setListOpen((value) => !value)}><span><span className="phone-eyebrow">Conversation</span><strong>{current?.title || "Your conversations"}</strong></span><Icon name="down" size={18} /></button>
-    {listOpen && <nav className="phone-sessions" id="phone-sessions" aria-label="Conversations">{sessions.map((session) => <button key={session.id} aria-current={session.id === selected ? "true" : undefined} onClick={() => { setSelected(session.id); setReplay(cache.current.get(session.id) || null); setListOpen(false); follow.current = true; setError(""); }}><Icon name="chat" size={18} /><span><strong>{session.title}</strong><small>{session.workspace.split(/[\\/]/).filter(Boolean).pop()}</small></span><i className={session.running ? "working" : ""}>{session.running ? "Working" : session.status === "completed" ? "Done" : "Ready"}</i></button>)}</nav>}
+    {listOpen && <nav className="phone-sessions" id="phone-sessions" aria-label="Conversations">{sessions.map((session) => <button key={session.id} aria-current={session.id === selected ? "true" : undefined} onClick={() => { setSelected(session.id); setReplay(cache.current.get(session.id) || null); setListOpen(false); follow.current = true; setError(""); }}><Icon name="chat" size={18} /><span><strong>{session.title}</strong><small>{providerNames[session.provider || "muse"]} · {session.workspace.split(/[\\/]/).filter(Boolean).pop()}</small></span><i className={session.running ? "working" : ""}>{session.running ? "Working" : session.status === "completed" ? "Done" : "Ready"}</i></button>)}</nav>}
     {!connected && <div className="phone-reconnect" role="status">{usb ? "Check your USB cable and keep your desktop awake." : "Reconnect Tailscale and keep your desktop awake."} Your draft is safe.<button onClick={() => void refreshRef.current()}>Retry</button></div>}
     <div className="phone-transcript" ref={scroll} onScroll={() => { const el = scroll.current; if (el) { follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; setLatest(!follow.current); } }}>
       {!sessions.length ? <div className="phone-empty"><Icon name="chat" size={32} /><h2>No conversations yet</h2><p>Open an Agent conversation on your desktop. It will appear here automatically.</p></div> : !view.blocks.length ? <div className="phone-empty"><MuseMark size={64} /><h2>What’s next?</h2><p>Send a message to your desktop agent. Your files and tools stay on your computer.</p></div> : null}
       {replay?.truncated && <p className="phone-history-note">Showing recent activity. Earlier messages remain in the desktop conversation.</p>}
-      {view.blocks.map((block) => block.kind === "tool" ? <details className="phone-tool" key={block.id}><summary><Icon name="code" size={15} /><strong>{block.name}</strong><span>{block.status}</span></summary><pre>{block.text || "Waiting for output…"}</pre></details> : block.kind === "notice" ? <div className="phone-notice" key={block.id}>{block.text}</div> : <article className={`phone-message ${block.kind}`} key={block.id}><div className="phone-message-label">{block.kind === "user" ? "You" : <><MuseMark size={20} />Muse</>}</div>{block.kind === "user" ? <p>{block.text}</p> : <Markdown text={block.text} />}</article>)}
+      {view.blocks.map((block) => block.kind === "tool" ? <details className="phone-tool" key={block.id}><summary><Icon name="code" size={15} /><strong>{block.name}</strong><span>{block.status}</span></summary><pre>{block.text || "Waiting for output…"}</pre></details> : block.kind === "notice" ? <div className="phone-notice" key={block.id}>{block.text}</div> : <article className={`phone-message ${block.kind}`} key={block.id}><div className="phone-message-label">{block.kind === "user" ? "You" : <><MuseMark size={20} />{providerNames[current?.provider || "muse"]}</>}</div>{block.kind === "user" ? <p>{block.text}</p> : <Markdown text={block.text} />}</article>)}
       {view.todos.length > 0 && <details className="phone-todos"><summary>Task checklist <span>{view.todos.filter((todo) => todo.status === "completed").length}/{view.todos.length}</span></summary>{view.todos.map((todo, index) => <p key={index}><Icon name={todo.status === "completed" ? "check" : "code"} size={14} />{todo.text}</p>)}</details>}
-      {current?.running && <div className="phone-working" role="status"><span className="phone-pulse" />{view.activity || "Muse is working…"}</div>}
+      {current?.running && <div className="phone-working" role="status"><span className="phone-pulse" />{view.activity || `${providerNames[current?.provider || "muse"]} is working…`}</div>}
     </div>
     {latest && <button className="phone-latest" onClick={() => { follow.current = true; if (scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight; setLatest(false); }}>Latest activity <Icon name="down" size={15} /></button>}
     <footer className="phone-composer">
@@ -226,7 +227,7 @@ export default function RemoteApp() {
       {device.control ? <form onSubmit={(e) => { e.preventDefault(); void send(); }}><textarea aria-label="Message your desktop agent" placeholder={current?.running ? "Write your next thought…" : "Message your desktop agent…"} value={input} maxLength={16_000} rows={2} disabled={!selected} onChange={(e) => setDrafts((drafts) => ({ ...drafts, [selected]: e.target.value }))} onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} />
         {current?.running ? <button type="button" className="phone-stop" disabled={busy || !connected} onClick={() => void stop()} aria-label="Stop task"><span />Stop</button> : <button className="phone-send" aria-label="Send message" disabled={busy || !connected || !input.trim() || !selected}><Icon name="arrow" size={21} /></button>}
       </form> : <p className="phone-view-only"><Icon name="shield" size={15} />View-only access</p>}
-      <span className="phone-composer-note">{current?.workspace.split(/[\\/]/).filter(Boolean).pop() || "MuseCode"} · runs on your desktop</span>
+      <span className="phone-composer-note">{current?.workspace.split(/[\\/]/).filter(Boolean).pop() || "Velum Code"} · runs on your desktop</span>
     </footer>
   </main>;
 }

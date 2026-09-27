@@ -14,7 +14,7 @@ const notifications = process.argv.includes("--notifications");
 // debug build can serve that same class; --installed also verifies the packaged app.
 const existing = execFileSync("powershell.exe", ["-NoProfile", "-Command",
   "@(Get-Process muse-code-app -ErrorAction SilentlyContinue).Count"], { encoding: "utf8", windowsHide: true }).trim();
-assert.equal(existing, "0", "Quit Muse Code before native tests; single-instance tests must not attach to your conversations");
+assert.equal(existing, "0", "Quit Velum Code before native tests; single-instance tests must not attach to your conversations");
 let vite;
 if (!release) {
   try {
@@ -35,8 +35,11 @@ mkdirSync(runDir, { recursive: true });
 const logPath = path.join(runDir, "children.jsonl");
 writeFileSync(logPath, "");
 writeFileSync(path.join(runDir, "muse.cmd"), `@echo off\r\n"${process.execPath}" "${path.join(root, "tests/fixtures/muse-cli.cjs")}" %*\r\n`);
+for (const [provider, command] of [["codex", "codex"], ["antigravity", "agy"]]) {
+  writeFileSync(path.join(runDir, `${command}.cmd`), `@echo off\r\n"${process.execPath}" "${path.join(root, "tests/fixtures/provider-cli.cjs")}" ${provider} %*\r\n`);
+}
 const port = 19422;
-const appPath = installed ? path.join(process.env.LOCALAPPDATA, "Muse Code/muse-code-app.exe")
+const appPath = installed ? path.join(process.env.LOCALAPPDATA, "Velum Code/muse-code-app.exe")
   : path.join(root, `src-tauri/target/${release ? "release" : "debug"}/muse-code-app.exe`);
 const appEnv = { ...process.env, PATH: `${runDir};${process.env.PATH}`, MUSE_QA_LOG: logPath,
   MUSE_CODE_CONFIG_DIR: path.join(runDir, "settings"),
@@ -156,7 +159,7 @@ try {
   assert.equal(await invoke("plugin:window|is_visible", { label: "main" }), false);
   if (notifications) {
     const toast = await waitForNotification("Your response is ready", backgroundTab);
-    assert.equal(toast.group, "MuseCode");
+    assert.equal(toast.group, "VelumCode");
     assert(!toast.xml.includes("BACKGROUND") && !toast.xml.includes(runDir), "Notification leaked task content");
     writeFileSync(path.join(runDir, "completion-toast.xml"), toast.xml);
   }
@@ -188,7 +191,7 @@ try {
     await page.locator(`[data-session-id="${otherTab}"] .tab-close`).click();
     await page.getByRole("button", { name: "Close", exact: true }).click();
     await send("FAIL");
-    const failed = await waitForNotification("Muse needs your attention", backgroundTab);
+    const failed = await waitForNotification("Velum Code needs your attention", backgroundTab);
     assert(!failed.xml.includes("QA fixture failed deliberately"), "Notification leaked CLI output");
     writeFileSync(path.join(runDir, "failure-toast.xml"), failed.xml);
     await invoke("desktop_set_notifications", { enabled: false });
@@ -205,6 +208,41 @@ try {
   for (let i = 0; i < 100 && records().some((r) => alive(r.pid)); i++) await sleep(50);
   assert(records().every((r) => !alive(r.pid)), "Closing the tab left native children running");
   console.log("PASS: closing a busy tab cleans up both sessions and opens a usable replacement");
+  for (const provider of ["codex", "antigravity"]) {
+    await page.getByLabel("AI provider").selectOption(provider);
+    await composer.waitFor({ state: "visible" });
+    await page.locator(".chat-wrap:not(.hidden)").getByLabel("Workspace directory").fill(runDir);
+    if (await page.getByRole("button", { name: "Apply", exact: true }).count()) await page.getByRole("button", { name: "Apply", exact: true }).click();
+    await page.waitForFunction((dir) => document.querySelector('.chat-wrap:not(.hidden) [aria-label="Workspace directory"]')?.title === dir, runDir);
+    for (const prompt of ["First provider turn & $quoted", "Second provider turn"]) {
+      await send(prompt); await done();
+      assert((await page.locator(".chat-wrap:not(.hidden) .msg.assistant").last().innerText()).includes(`Reply: ${prompt}`));
+    }
+    const turns = records().filter((r) => r.kind === "provider-turn" && r.provider === provider);
+    assert.equal(turns.length, 2);
+    assert.equal(turns[0].cwd.toLowerCase(), runDir.toLowerCase());
+    assert(!turns[0].args.includes("resume") && !turns[0].args.includes("--conversation"));
+    assert(turns[1].args.includes(provider === "codex" ? "62c2d305-9dd5-4c94-b4c0-667eb612f401" : "ae283c22-1851-4d5c-a5c5-d14d53c23b72"));
+    assert(!turns[1].args.some((arg) => arg.includes("dangerously")));
+    await send("FAIL");
+    await page.locator(".chat-wrap:not(.hidden) .notice.error").filter({ hasText: "Provider fixture failure" }).waitFor();
+    await send("HOLD");
+    for (let i = 0; i < 100 && !records().some((r) => r.provider === provider && r.kind === "descendant"); i++) await sleep(50);
+    const child = records().find((r) => r.provider === provider && r.kind === "descendant");
+    assert(child, "Provider child never launched");
+    await page.getByRole("button", { name: "Stop", exact: true }).click();
+    await page.locator(".chat-wrap:not(.hidden)").getByText("Stopped.", { exact: true }).waitFor();
+    assert(!alive(child.pid), "Provider Stop left a descendant running");
+    await page.getByRole("button", { name: "YOLO mode" }).click();
+    await send("YOLO provider"); await done();
+    assert(records().find((r) => r.provider === provider && r.prompt === "YOLO provider").args.includes(provider === "codex" ? "--dangerously-bypass-approvals-and-sandbox" : "--dangerously-skip-permissions"));
+    await page.getByRole("button", { name: "Terminal", exact: true }).click();
+    for (let i = 0; i < 100 && !records().some((r) => r.provider === provider && r.kind === "terminal"); i++) await sleep(50);
+    assert(records().some((r) => r.provider === provider && r.kind === "terminal"));
+    await page.getByRole("tab", { selected: true }).locator(".tab-close").click();
+    console.log(`PASS: ${provider} native stdin, resume isolation, failures, Stop, permissions and ConPTY`);
+  }
+  await page.getByLabel("AI provider").selectOption("muse");
   await send("HOLD");
   for (let i = 0; i < 100 && records().filter((r) => r.kind === "descendant").length < 3; i++) await sleep(50);
   await page.getByRole("button", { name: "Close", exact: true }).click();

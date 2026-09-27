@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "MuseCode",
-  "short_name": "MuseCode",
-  "description": "Stay in the conversation with your desktop Muse agent.",
+  "name": "Velum Code",
+  "short_name": "Velum Code",
+  "description": "Stay in the conversation with your desktop coding agents.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

@@ -78,7 +78,7 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(windows)]
         activator_cookie: Mutex::new(None),
     });
-    let open = MenuItem::with_id(app, "open", "Open Muse Code", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "Open Velum Code", true, None::<&str>)?;
     let notify = CheckMenuItem::with_id(
         app,
         "notifications",
@@ -94,7 +94,7 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         true,
         None::<&str>,
     )?;
-    let quit = MenuItem::with_id(app, "quit", "Quit Muse Code", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Velum Code", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&open, &notify, &test, &separator, &quit])?;
     app.manage(notify);
@@ -104,7 +104,7 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 .ok_or("Application icon is missing")?
                 .clone(),
         )
-        .tooltip("Muse Code — running in the background")
+        .tooltip("Velum Code — running in the background")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
@@ -282,10 +282,10 @@ pub fn notify_turn(app: &AppHandle, tab_id: &str, outcome: &str) {
     let title = if outcome == "completed" {
         "Your response is ready"
     } else {
-        "Muse needs your attention"
+        "Velum Code needs your attention"
     };
     let body = if outcome == "completed" {
-        "Open Muse Code to continue your conversation."
+        "Open Velum Code to continue your conversation."
     } else {
         "A task couldn't finish. Open the conversation to review the error."
     };
@@ -328,8 +328,8 @@ fn send_test(app: &AppHandle) -> Result<(), String> {
     }
     send_native(
         app,
-        "Muse is ready in the background",
-        "You'll hear from Muse when a background task finishes. Click to open Muse Code.",
+        "Velum Code is ready in the background",
+        "You'll hear from Velum Code when a background task finishes. Click to open Velum Code.",
         None,
     )?;
     let state = app.state::<DesktopState>();

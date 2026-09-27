@@ -104,7 +104,7 @@ fn bad(message: impl Into<String>) -> ApiError {
 fn unauthorized() -> ApiError {
     ApiError(
         StatusCode::UNAUTHORIZED,
-        "Pair this phone with MuseCode on your desktop.".into(),
+        "Pair this phone with VelumCode on your desktop.".into(),
     )
 }
 
@@ -288,7 +288,7 @@ pub async fn remote_usb_connect(app: AppHandle, serial: String) -> Result<Status
     }
     if current.is_none() {
         if app.asset_resolver().get("remote.html".into()).is_none() {
-            return Err("Build the phone interface and restart MuseCode.".into());
+            return Err("Build the phone interface and restart VelumCode.".into());
         }
         let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, usb::PORT))
             .await
@@ -394,7 +394,7 @@ async fn start(app: &AppHandle, core: &Arc<Core>) -> Result<(), String> {
     }
     if app.asset_resolver().get("remote.html".into()).is_none() {
         return Err(
-            "The phone interface is missing. Build the frontend and restart MuseCode.".into(),
+            "The phone interface is missing. Build the frontend and restart VelumCode.".into(),
         );
     }
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
@@ -552,7 +552,7 @@ async fn boundary(
         && (supplied_origin != Some(origin.as_str())
             || headers.get("x-muse-request").and_then(|h| h.to_str().ok()) != Some("1"))
     {
-        return (StatusCode::FORBIDDEN, "Use the MuseCode phone interface.").into_response();
+        return (StatusCode::FORBIDDEN, "Use the VelumCode phone interface.").into_response();
     }
     let mut response = next.run(request).await;
     for (key, value) in [

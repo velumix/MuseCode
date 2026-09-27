@@ -1,6 +1,6 @@
 # Development and technical notes
 
-[Back to MuseCode](../README.md)
+[Back to VelumCode](../README.md)
 
 Run the commands below from the repository root.
 
@@ -8,13 +8,13 @@ Run the commands below from the repository root.
 
 - Node.js 24 + npm (the tested version is pinned in `.node-version`)
 - Rust via rustup + MSVC build tools (the tested toolchain is pinned in `rust-toolchain.toml`)
-- The `muse` CLI on your `PATH` (the app shells out to it)
+- At least one supported CLI: `muse`, `codex`, or `agy`, installed and signed in
 
 ## Develop
 
 ```sh
-git clone https://github.com/velumix/MuseCode.git
-cd MuseCode
+git clone https://github.com/velumix/VelumCode.git
+cd VelumCode
 npm ci
 npm run tauri dev
 ```
@@ -29,15 +29,15 @@ npm run tauri dev
 
 The installer is a custom NSIS bundle (`src-tauri/nsis/`): branded
 welcome/finish pages, custom header/sidebar art, plus a post-install check
-that warns when the `muse` CLI is missing from `PATH`.
+that migrates the previous default Muse Code installation and registers native notifications.
 
 Brand exports are generated from the saved transparent master with
 `.\scripts\make-assets.ps1` (UI mark, favicon, platform icons, and NSIS artwork).
 See [the brand notes](brand.md) for the master asset, generation prompt, and export process.
 
-The [Windows CI workflow](https://github.com/velumix/MuseCode/actions/workflows/windows.yml)
+The [Windows CI workflow](https://github.com/velumix/VelumCode/actions/workflows/windows.yml)
 runs the frontend, browser, Rust, formatting, and Clippy checks, then builds an NSIS installer.
-Open a successful workflow run and download **MuseCode-windows-x64** under Artifacts. These
+Open a successful workflow run and download **VelumCode-windows-x64** under Artifacts. These
 are unsigned development builds. Native tray/notification smoke tests require an interactive
 Windows desktop and are run locally using the commands below.
 
@@ -66,7 +66,7 @@ Browser tests use installed Chrome or Edge; set `BROWSER_PATH` for another Chrom
 The native test starts Vite if needed, launches a separate debug app with an isolated WebView2
 profile, and substitutes a deterministic CLI fixture only in that child's environment. It
 does not use the configured AI provider, alter the installed app, or change your CLI settings.
-Quit any running Muse instance before testing. Use `node scripts/native-smoke.mjs --release`
+Quit any running Velum Code instance before testing. Use `node scripts/native-smoke.mjs --release`
 for the packaged build, or `node scripts/native-smoke.mjs --installed --notifications` after
 installing the current bundle to also verify Windows Notification Center delivery and the
 registered COM activation path. These checks use isolated notification preferences.
@@ -74,7 +74,7 @@ Test artifacts are written to ignored `test-results/` and `.qa/` directories.
 
 The remote smoke test uses the real signed-in Tailscale client and a temporary foreground
 Serve route on 8443. It requires that port to be unused, and refuses to attach to a running
-MuseCode instance. It pairs a separate browser with isolated app settings, runs fixture
+VelumCode instance. It pairs a separate browser with isolated app settings, runs fixture
 turns while the desktop is hidden, stops a fixture process tree, reloads history, and revokes
 the phone. It removes its own route on exit. For the installed bundle use
 `node scripts/remote-smoke.mjs --installed`. This test is intentionally not run in CI because
@@ -99,17 +99,16 @@ See [the QA report](qa-2026-09-26.md) for findings, evidence, and remaining work
 
 ## Session behavior
 
-Closing the window (including Alt+F4) hides Muse in the Windows system tray. Running Agent
-turns, terminals, tabs, and drafts stay alive. Click the Muse tray icon or open the desktop
-shortcut to restore the existing instance. Right-click the tray icon and choose **Quit Muse
-Code** to stop background work and exit; Quit is also available in the command palette.
+Closing the window (including Alt+F4) hides Velum Code in the Windows system tray. Running Agent
+turns, terminals, tabs, and drafts stay alive. Click the Velum Code tray icon or open the desktop
+shortcut to restore the existing instance. Right-click the tray icon and choose **Quit Velum Code** to stop background work and exit; Quit is also available in the command palette.
 
 Background Agent turns send native Windows notifications when they complete or fail while
-Muse is hidden, minimized, or unfocused. Click a notification to open its conversation.
+Velum Code is hidden, minimized, or unfocused. Click a notification to open its conversation.
 Notification text contains no prompt, answer, or workspace details. Mute notifications using
 the footer bell or tray menu; this preference survives restarts. The tray menu and command
 palette include **Send a test Windows notification**. Windows notification settings and Do
-not disturb still control delivery. Install the NSIS bundle to register Muse's notification
+not disturb still control delivery. Install the NSIS bundle to register Velum Code's notification
 identity and activation handler; the development executable alone does not install them.
 
 Switching between Agent and Terminal preserves both views until the tab closes. Terminal is

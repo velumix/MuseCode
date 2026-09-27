@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">MuseCode</string>
+    <string name="app_name">Velum Code</string>
     <string name="home_eyebrow">YOUR DESKTOP, WITH YOU</string>
     <string name="home_title">A little more\nfreedom.</string>
     <string name="home_description">Keep the conversation going. Your desktop does the work, wherever you are.</string>
@@ -10,24 +10,24 @@
     <string name="usb_title">Connect by USB</string>
     <string name="usb_connected">USB · Connected to your desktop</string>
     <string name="usb_help">Connect a USB data cable and allow USB debugging on this phone. In the desktop app, open Connect phone → USB cable → Connect. Tailscale is not needed.</string>
-    <string name="usb_offline">Check the USB cable and allow USB debugging. Keep MuseCode open on your computer, then choose Connect phone → USB cable → Reconnect.</string>
+    <string name="usb_offline">Check the USB cable and allow USB debugging. Keep VelumCode open on your computer, then choose Connect phone → USB cable → Reconnect.</string>
     <string name="private_connection">Private with Tailscale</string>
     <string name="connection_options">Connection options</string>
     <string name="menu_symbol">•••</string>
     <string name="reload">Reload connection</string>
     <string name="scan_another">Scan a new QR code</string>
     <string name="forget">Forget this desktop</string>
-    <string name="forget_message">Remove this desktop and its saved login from this phone? You can also revoke the phone in MuseCode on your desktop.</string>
+    <string name="forget_message">Remove this desktop and its saved login from this phone? You can also revoke the phone in VelumCode on your desktop.</string>
     <string name="cancel">Cancel</string>
     <string name="connect">Connect</string>
     <string name="link_title">Your desktop link</string>
     <string name="link_hint">https://computer.tailnet.ts.net:8443/</string>
-    <string name="link_help">Enter the private address from MuseCode. Use the full QR link to pair a new phone.</string>
-    <string name="invalid_link">Use a MuseCode HTTPS link ending in .ts.net:8443, or choose Connect by USB. Pair from Connect phone on your desktop.</string>
-    <string name="scan_prompt">Scan the QR in MuseCode → Connect phone</string>
+    <string name="link_help">Enter the private address from VelumCode. Use the full QR link to pair a new phone.</string>
+    <string name="invalid_link">Use a VelumCode HTTPS link ending in .ts.net:8443, or choose Connect by USB. Pair from Connect phone on your desktop.</string>
+    <string name="scan_prompt">Scan the QR in VelumCode → Connect phone</string>
     <string name="camera_denied">Camera access is needed to scan a QR code. You can also enter the desktop link.</string>
     <string name="offline_title">Your desktop is out of reach.</string>
-    <string name="offline_description">Connect Tailscale on this phone and keep your desktop awake with MuseCode running. Then try again.</string>
+    <string name="offline_description">Connect Tailscale on this phone and keep your desktop awake with VelumCode running. Then try again.</string>
     <string name="tls_error">The desktop certificate could not be verified. Check the date on both devices and your Tailscale HTTPS setup.</string>
     <string name="retry">Try again</string>
     <string name="switch_title">Connect to another desktop?</string>

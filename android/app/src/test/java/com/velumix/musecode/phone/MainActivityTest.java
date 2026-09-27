@@ -45,7 +45,7 @@ public class MainActivityTest {
             assertFalse(web.getSettings().getAllowFileAccess());
             assertFalse(web.getSettings().getAllowContentAccess());
             assertEquals(WebSettings.MIXED_CONTENT_NEVER_ALLOW, web.getSettings().getMixedContentMode());
-            assertTrue(web.getSettings().getUserAgentString().contains("MuseCodeAndroid/"));
+            assertTrue(web.getSettings().getUserAgentString().contains("VelumCodeAndroid/"));
         }
     }
     @Test public void qrLoadsTheDesktopAndOnlyOriginSurvivesRelaunch() {

@@ -1,5 +1,7 @@
 mod desktop;
 mod events;
+mod provider_events;
+mod providers;
 mod pty;
 mod remote;
 mod remote_auth;
@@ -29,6 +31,7 @@ pub fn run() {
         .on_window_event(desktop::close_to_tray)
         .invoke_handler(tauri::generate_handler![
             pty::pty_spawn,
+            providers::provider_status,
             pty::pty_write,
             pty::pty_resize,
             pty::pty_kill,

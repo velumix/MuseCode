@@ -3,7 +3,7 @@
     <color name="muse_blue">#4285F4</color>
     <color name="muse_text">#F1F3F6</color>
     <color name="muse_muted">#9CA3AF</color>
-    <style name="Theme.MuseCode" parent="Theme.AppCompat.DayNight.NoActionBar">
+    <style name="Theme.VelumCode" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowBackground">@color/muse_background</item>
@@ -11,7 +11,7 @@
         <item name="colorAccent">@color/muse_blue</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
-    <style name="Theme.MuseCode.Scanner" parent="Theme.MuseCode">
+    <style name="Theme.VelumCode.Scanner" parent="Theme.VelumCode">
         <item name="android:windowFullscreen">true</item>
     </style>
     <style name="MuseButton" parent="Widget.AppCompat.Button.Borderless">

@@ -1,4 +1,4 @@
-MuseCode Android third-party software
+Velum Code Android third-party software
 
 AndroidX (The Android Open Source Project): https://developer.android.com/jetpack/androidx
 ZXing Android Embedded (Journey Mobile, Inc.): https://github.com/journeyapps/zxing-android-embedded
