@@ -28,7 +28,10 @@ Checked on Windows with the existing Muse, Codex and Antigravity integrations, a
 - 13 Android unit tests pass, including address validation, origin isolation, pairing intent handling, connection recovery and reclaimed-renderer handling.
 - Release lint and the signed release build pass. APK signature verification passes.
 - The signed APK updates the existing Pixel 7 Pro installation to version 0.4.0, version code 5, without changing the package identity or signing key.
-- A physical USB connection to the Pixel was established from the installed desktop app, preserving its existing paired device and remote-access preference. The phone was on its lock screen during this pass, so the final physical on-screen interaction was not verified; browser and Android lifecycle checks cover the interaction paths separately.
+- Physical checks on the unlocked Pixel 7 Pro passed with the signed release APK and installed Windows app. USB connection and reconnection preserve the existing pairing and remote-access preference.
+- Creating, saving, archiving, restoring and deleting a project memory note on the Pixel update the actual desktop vault. The note editor and message composer remain usable with the Android keyboard open. The available-model menu displays correctly.
+- An unsent draft survives an Android force-stop and cold launch. Removing the USB route shows the native disconnected screen; reconnecting from the desktop restores access without re-pairing and retains the draft.
+- The Pixel reconnects after a cold launch while the desktop window is closed to the tray. Temporary notes and drafts were removed and the normal workspace restored after testing.
 
 ## Limits
 
