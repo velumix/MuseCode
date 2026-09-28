@@ -117,6 +117,7 @@ export async function boot(page: Page, delay = 0) {
             if (q.action === "delete")
               m.notes = m.notes.filter((n: any) => n.id !== q.id);
             if (q.action === "save") {
+              if (api.holdMemorySave) await new Promise<void>(resolve => { api.releaseMemorySave = resolve; });
               if (api.memoryConflict)
                 throw "This note changed elsewhere. Refresh to load the latest copy before saving.";
               const note = {

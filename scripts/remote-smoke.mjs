@@ -123,6 +123,21 @@ try {
   await expect.poll(() => desktop.evaluate(() => JSON.parse(localStorage.getItem("velum-options-muse") || "null"))).toEqual({ model: "fixture-muse", reasoning: "high" });
   await desktop.getByRole("button", { name: "Close", exact: true }).click();
   assert.equal(await invoke("plugin:window|is_visible", { label: "main" }), false);
+  const contextReport=await phone.evaluate(async()=>{
+    const list=await (await fetch('/api/sessions')).json();
+    const response=await fetch('/api/sessions/'+encodeURIComponent(list.sessions[0].id)+'/diagnostics');
+    return {status:response.status,cache:response.headers.get('cache-control'),report:await response.json()};
+  });
+  assert.equal(contextReport.status,200);
+  assert.equal(contextReport.cache,'no-store');
+  assert.equal(contextReport.report.workspace.path,'<selected-project>');
+  assert(!JSON.stringify(contextReport.report).includes('Desktop fixture'));
+  await phone.getByRole('button',{name:'Project context & diagnostics'}).click();
+  await expect(phone.getByLabel('Velum diagnostics preview')).toContainText('not checked');
+  await phone.getByRole('button',{name:'Chat layout',exact:true}).click();
+  assert.equal(JSON.parse(await phone.getByLabel('Chat layout snapshot preview').inputValue()).source,'phone');
+  await phone.getByLabel('Close diagnostics').click();
+  console.log('PASS: native paired-phone diagnostics are sanitized, uncached and previewed with the phone layout');
   await phone.getByLabel("Message your desktop agent").fill("From phone in tray");
   await phone.getByRole("button", { name: "Send message" }).click();
   await expect(phone.getByText("Reply: From phone in tray", { exact: true })).toBeVisible();
@@ -186,6 +201,11 @@ try {
     assert.equal(existsSync(path.join(run, "route.txt")), false);
     await invoke("remote_usb_connect", { serial: "USB_FIXTURE" });
     await phone.goto("http://127.0.0.1:43827/");
+    // Explicit disconnect clears local selection. A new bot may sort before
+    // the original conversation; verify recovery by selecting that conversation.
+    await expect(phone.locator('.phone-online')).toBeVisible();
+    await phone.locator('.phone-session-select').click();
+    await phone.locator('.phone-sessions button').filter({hasText:'Desktop fixture'}).click();
     await expect(phone.getByText("Reply: From phone in tray", { exact: true })).toBeVisible();
     console.log("PASS: USB disconnect closes access and removes its mapping; reconnect preserves the paired login");
   }

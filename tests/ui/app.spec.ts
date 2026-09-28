@@ -4,6 +4,24 @@ import AxeBuilder from "@axe-core/playwright";
 import { boot } from "./fixture";
 const composer = (page: Page) => page.locator(".chat-wrap:not(.hidden) textarea");
 
+test('memory cannot close or prompt to discard while a save is pending',async({page})=>{
+  await boot(page);await page.getByRole('button',{name:'Memory',exact:true}).click();
+  await page.getByRole('button',{name:'New note',exact:true}).click();
+  await page.getByLabel('Memory title',{exact:true}).fill('Save before closing');
+  await page.getByLabel('Memory note',{exact:true}).fill('Keep this fact.');
+  await page.evaluate(()=>{(window as any).qa.holdMemorySave=true;});
+  await page.getByRole('button',{name:'Save note',exact:true}).click();
+  await expect(page.getByLabel('Close memory')).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await expect(page.getByText('Discard your unsaved changes?')).toHaveCount(0);
+  await expect(page.locator('.memory-panel')).toBeVisible();
+  await page.evaluate(()=>{(window as any).qa.releaseMemorySave();});
+  await expect(page.getByLabel('Close memory')).toBeEnabled();
+  await expect(page.getByRole('button',{name:'Cancel edits',exact:true})).toHaveCount(0);
+  await page.getByLabel('Close memory').click();await expect(page.locator('.memory-panel')).toHaveCount(0);
+  expect(await page.evaluate(()=>(window as any).qa.memory.notes[0].title)).toBe('Save before closing');
+});
+
 test("memory supports editing, archive, restore and keyboard-confirmed deletion",async({page})=>{
   await boot(page);await composer(page).fill("Keep my chat draft");
   await page.getByRole("button",{name:"Memory",exact:true}).click();

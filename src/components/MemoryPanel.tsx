@@ -69,6 +69,7 @@ export default function MemoryPanel({
     setDirty(true);
   };
   const close = () => {
+    if (busy) return;
     if (dirty) setConfirm("discard");
     else onClose();
   };
@@ -200,7 +201,7 @@ export default function MemoryPanel({
           >
             <Icon name="settings" />
           </button>
-          <button type="button" aria-label="Close memory" onClick={close}>
+          <button type="button" aria-label="Close memory" onClick={close} disabled={busy}>
             <Icon name="close" />
           </button>
         </header>
