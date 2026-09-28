@@ -8,7 +8,7 @@ Open **Project context and diagnostics** beside Send, or **Project context & dia
 
 ## What the agent receives
 
-Every request carries a small reference block with the Velum version, host OS, workspace path, Git root and branch when available, provider, model, reasoning, permission mode and request source (desktop, phone or scheduler). A fresh directory-listing check is included. No process is launched to inspect Git, and repository remotes and credentials are not read.
+Every request carries a reference block capped at 4 KB with the Velum version, host OS, workspace path, Git root and branch when available, provider, model, reasoning, permission mode and request source (desktop, phone or scheduler). A fresh directory-listing check is included. Exceptionally long fields are omitted with an explanation instead of supplying an incomplete path. No process is launched to inspect Git, and repository remotes and credentials are not read.
 
 The reference block describes available context; it does not add tools or grant permissions. Installed does not mean signed in. Authentication, MCP connections, browser attachments and native UI access are **not** verified by this check.
 
@@ -25,6 +25,6 @@ Memory remains a separate Markdown vault. Search and inspect saved notes in **Me
 
 Antigravity can return a successful process exit even when a tool was denied because headless mode could not ask for permission. Velum marks these turns **blocked**, preserves partial output, skips memory proposals and board actions, and immediately pauses scheduled work. Background notifications also report blocked turns.
 
-In the Terminal view, open `agy` and use `/permissions` to review the command rule in `~/.gemini/antigravity-cli/settings.json`. Allow the specific command needed, then retry the conversation or resume the paused job. Deny and ask rules take precedence over allow rules; plain command matching on Windows is exact. Velum does not silently enable YOLO or rewrite global permission settings.
+On the desktop, open Terminal in an Antigravity tab and enter `/permissions` to review the command rule in `~/.gemini/antigravity-cli/settings.json`. Velum already launches the selected CLI in that tab. Allow the specific command needed, then retry the conversation or resume the paused job. Deny and ask rules take precedence over allow rules; plain command matching on Windows is exact. Velum does not silently enable YOLO or rewrite global permission settings.
 
 See Google's [headless mode](https://antigravity.google/docs/cli/headless/) and [permission rules](https://antigravity.google/docs/permissions?tab=cli) documentation.

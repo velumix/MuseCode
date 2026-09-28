@@ -176,7 +176,7 @@ fn mark_permission_blocked(terminal: &mut Option<AgentEvent>, denied: bool) {
     if let Some(AgentEvent::TurnEnd { status, reason, .. }) = terminal {
         if denied && status != "cancelled" {
             *status = "blocked".into();
-            *reason = Some("Antigravity blocked a tool because headless mode cannot ask for permission. Open Terminal, run agy, then /permissions to review the command rule in settings.json. Allow only the command needed, then retry. Scheduled work is paused; partial output is not a completed task.".into());
+            *reason = Some("Antigravity blocked a tool because headless mode cannot ask for permission. On your desktop, open Terminal in an Antigravity tab and enter /permissions to review the command rule in settings.json. Allow only the command needed, then retry. Scheduled work is paused; partial output is not a completed task.".into());
         }
     }
 }

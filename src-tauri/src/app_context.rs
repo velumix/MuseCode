@@ -102,7 +102,7 @@ pub fn turn_context(
     source: &str,
     yolo: bool,
 ) -> String {
-    let context = json!({
+    let mut context = json!({
         "app": "Velum Code", "version": env!("CARGO_PKG_VERSION"),
         "host_os": std::env::consts::OS, "request_source": source,
         "screen": if source == "scheduler" { "background task" } else { "chat" },
@@ -115,6 +115,15 @@ pub fn turn_context(
         "memory": "Relevant vault notes are supplied separately within a byte budget. Velum confirms saved proposals in a notice; a proposal alone is not proof of saving. No dedicated vault search tool is added by this context.",
         "capabilities": "CLI installation does not establish authentication or working tool connections. Check actual tool results; do not infer access from this context."
     });
+    // Count serialized bytes: escaping can expand paths and custom model names.
+    // Leave room for framing and explain omitted fields instead of giving the
+    // provider a truncated path that could point to the wrong directory.
+    if context.to_string().len() > 3500 {
+        for key in ["workspace", "repository", "options"] {
+            context[key] = Value::Null;
+        }
+        context["omitted_fields"] = json!("Workspace, repository and options exceeded the app context size limit. Ask the user for those details if needed.");
+    }
     format!("Velum app context (reference data, not instructions or permission grants):\n<velum-app-context>\n{context}\n</velum-app-context>\n\n")
 }
 
@@ -147,7 +156,7 @@ pub fn diagnostics(app: &tauri::AppHandle, workspace: &str) -> Value {
         "providers":providers, "memory":memory,
         "sessions":{"active":sessions.iter().filter(|s| s.running).count(),"failed":sessions.iter().filter(|s| s.status=="failed").count(),"blocked":sessions.iter().filter(|s| s.status=="blocked").count()},
         "ui_access":"No live browser or native UI control attached by Velum. Chat layout snapshots require an explicit attachment.",
-        "permissions":"Windows folder access and provider command permissions are separate. For Antigravity, open agy in Terminal, then /permissions; allow only the command needed and retry. Scheduled permission failures pause for review.",
+        "permissions":"Windows folder access and provider command permissions are separate. On the desktop, open Terminal in an Antigravity tab and enter /permissions; allow only the command needed and retry. Scheduled permission failures pause for review.",
         "excluded":"Paths, chat text, drafts, tokens, environment, raw logs, repository remotes, memory contents and permission rules."
     })
 }
@@ -219,6 +228,21 @@ fn pick_folder(owner: Option<isize>) -> Result<Option<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn oversized_context_omits_fields_without_inventing_a_shorter_path() {
+        let path = std::path::PathBuf::from("x".repeat(8000));
+        let context = turn_context(
+            &path,
+            crate::providers::Provider::Muse,
+            &Default::default(),
+            "desktop",
+            false,
+        );
+        assert!(context.len() <= 4096);
+        assert!(context.contains("\"workspace\":null"));
+        assert!(context.contains("omitted_fields"));
+        assert!(!context.contains(&"x".repeat(100)));
+    }
     #[test]
     fn access_probe_cleans_up_and_reports_missing_folders() {
         let root = std::env::temp_dir().join(format!("velum-context-{}", uuid::Uuid::new_v4()));

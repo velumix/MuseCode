@@ -11,9 +11,9 @@ permission denials.
   exact attachment previews, no automatic sending, view-only access, revocation,
   keyboard focus and accessibility. Desktop and phone previews were also visually
   inspected from browser screenshots.
-- 98 Rust tests passed; the existing live GitHub plugin download test remains
+- 99 Rust tests passed; the existing live GitHub plugin download test remains
   ignored. New tests cover temporary-file cleanup, missing folders, Git worktree
-  context without remote credentials, and permission denials overriding success
+  context without remote credentials, the 4 KB context cap, and permission denials overriding success
   while preserving partial output and user cancellation.
 - Rust formatting, Clippy with warnings denied, and the plugin SDK test passed.
 - Windows x64 NSIS installer built successfully.
