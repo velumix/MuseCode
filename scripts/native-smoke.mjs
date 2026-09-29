@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, expect } from "@playwright/test";
+import { checkStartup } from "./startup-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test requires Windows/WebView2.");
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -67,7 +68,10 @@ try {
   }
   assert(page, "No native webview page");
   page.on("pageerror", (e) => errors.push(e.message));
+  await expect(page.locator("#startup")).toHaveCount(0);
+  await expect(page.locator("#root")).not.toHaveAttribute("inert", "");
   await page.waitForSelector("textarea:enabled");
+  await checkStartup(page, runDir);
   const invoke = (cmd, args = {}) => page.evaluate(({ cmd, args }) => window.__TAURI_INTERNALS__.invoke(cmd, args), { cmd, args });
   const notificationProbe = (action, conversation) => execFileSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass",
     "-File", path.join(root, "tests/fixtures/windows-notifications.ps1"), "-Action", action,
@@ -99,7 +103,8 @@ try {
   const access=await invoke('workspace_check',{workspace:runDir,write:true});
   assert(access.readable && access.writable, 'Workspace probe failed in writable fixture');
   const diagnostic=await invoke('app_diagnostics',{workspace:runDir});
-  assert.equal(diagnostic.workspace.directory_listing,true);
+  assert.equal(diagnostic.workspace_access.host.checks[0].status,'pass');
+  assert(diagnostic.workspace_access.agent.checks.every(c=>c.status==='untested'));
   assert(!JSON.stringify(diagnostic).includes(runDir),'Diagnostics leaked the workspace path');
 
   // Validate workspace in the actual Rust backend, including a rejected path.
@@ -134,10 +139,26 @@ try {
   assert.equal(new Set(museTurns.map((r) => r.args[r.args.indexOf("--session-id") + 1])).size, 1);
   console.log("PASS: native model catalog, reasoning argv, workspace validation, consecutive turns, final-only answers");
 
+  await send('NO_COMPLETION');
+  await page.locator('.notice.error').filter({hasText:'Muse ended without a completion event'}).waitFor();
+  await send('RETRY_RECOVER');
+  await page.locator('.provider-wait').filter({hasText:'HTTP 503'}).waitFor();
+  await page.getByRole('button',{name:'Project context and diagnostics',exact:true}).click();
+  await page.getByLabel('Velum diagnostics preview').filter({visible:true}).waitFor();
+  await expect.poll(async () => JSON.parse(await page.getByLabel('Velum diagnostics preview').inputValue() || '{}').provider_runtime?.last_retry?.http_status).toBe(503);
+  const retryReport=JSON.parse(await page.getByLabel('Velum diagnostics preview').inputValue());
+  assert.equal(retryReport.provider_runtime.last_retry.attempt,2);
+  assert(!JSON.stringify(retryReport).includes('PRIVATE_'),'Provider metadata leaked into diagnostics');
+  await page.getByRole('button',{name:'Close diagnostics',exact:true}).click();
+  await done();
+  assert((await page.locator('.msg.assistant').last().innerText()).includes('Recovered after service retry'));
+  assert.equal(await page.locator('.provider-wait').count(),0);
+  console.log('PASS: incomplete zero-exit Muse run fails; service retry, recovery and sanitized diagnostics reach the native UI');
+
   // Exercise memory through the actual Rust store and streaming CLI bridge.
   const memory = (request) => invoke("memory_request", { workspace: runDir, request });
   await send("MEMORY_FAIL");
-  await page.locator(".notice.error").last().waitFor();
+  await page.locator(".notice.error").filter({hasText:"Muse exited unexpectedly (code Some(7))"}).waitFor();
   assert.equal((await memory({ action: "list" })).notes.length, 0, "Failed turn saved a memory");
   await send("MEMORY_PROPOSAL"); await done();
   assert(!(await page.locator(".msg.assistant").last().innerText()).includes("velum-memory"));
@@ -291,7 +312,9 @@ try {
     assert(!turns[1].input.includes("SQLite with WAL"), "Unchanged memory was injected again");
     for (const turn of turns) {
       assert(turn.input.includes('<velum-app-context>'),'Provider did not receive app context');
-      assert(turn.input.includes('"directory_listing":"passed in Velum"'));
+      assert(turn.input.includes('"workspace_access":'));
+      assert(turn.input.includes('Velum host process'));
+      assert(turn.input.includes('"status":"untested"'));
       assert(turn.args.includes(provider === "codex" ? "fixture-codex" : "fixture-agy-high"));
       assert(turn.args.includes(provider === "codex" ? "model_reasoning_effort='high'" : "high"));
     }
@@ -304,6 +327,7 @@ try {
     if(provider==='antigravity') {
       await send('DENIED');
       await page.locator('.chat-wrap:not(.hidden) .notice.error').filter({hasText:'Antigravity blocked a tool'}).waitFor();
+      assert.equal(await page.locator('.chat-wrap:not(.hidden) .tool-status').last().innerText(),'blocked');
       assert((await page.locator('.chat-wrap:not(.hidden) .msg.assistant').last().innerText()).includes('Reply: DENIED'));
       assert(!records().find(r=>r.prompt==='DENIED').args.includes('--dangerously-skip-permissions'));
     }

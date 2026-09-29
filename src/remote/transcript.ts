@@ -1,6 +1,8 @@
 export interface AgentEvent { kind: string; [key: string]: unknown }
 export interface Entry { seq: number; event: AgentEvent }
 import type { Provider, RunOptions } from "../providers";
+import { mergeUsage, type UsageSnapshot } from "../usage";
+import type { ProviderProgress } from '../providerProgress';
 export interface Session { bot?: import('../bots').BotIdentity|null;options?: RunOptions; provider?: Provider; id: string; title: string; workspace: string; running: boolean; status: string; revision: number }
 export interface Replay { session: Session; events: Entry[]; truncated: boolean }
 export interface Block { id: number; kind: "user" | "assistant" | "tool" | "notice"; text: string; name?: string; task?: string; status?: string }
@@ -9,6 +11,9 @@ export function transcript(entries: Entry[]) {
   const blocks: Block[] = [];
   let todos: { text: string; status: string }[] = [];
   let activity = "";
+  let providerProgress: ProviderProgress | null = null;
+  let usage: UsageSnapshot = {};
+  let memory: { titles: string[]; bytes: number } | null = null;
   let assistant: Block | undefined;
   let seenAssistant = false;
   const tools = new Map<string, Block>();
@@ -16,7 +21,13 @@ export function transcript(entries: Entry[]) {
   for (const { seq, event: e } of entries) {
     const task = text(e.task_id);
     switch (e.kind) {
+      case "usage": usage = mergeUsage(usage, e); break;
+      case "usage_reset": usage = {}; memory = null; providerProgress = null; break;
+      case "memory_context":
+        memory = { titles: Array.isArray(e.titles) ? e.titles.filter((title): title is string => typeof title === "string") : [], bytes: typeof e.bytes === "number" && Number.isSafeInteger(e.bytes) && e.bytes >= 0 ? e.bytes : 0 }; break;
       case "turn_start":
+        providerProgress = null;
+        usage = { ...usage, turn: null }; memory = null;
         assistant = undefined; seenAssistant = false; activity = "Working…";
         blocks.push({ id: seq, kind: "user", text: text(e.prompt) }); break;
       case "assistant_delta":
@@ -38,9 +49,11 @@ export function transcript(entries: Entry[]) {
       case "tool_end": { const tool = tools.get(task); if (tool) { tool.status = text(e.status); if (e.reason) tool.text += `\n${text(e.reason)}`; } break; }
       case "todos": if (Array.isArray(e.items)) todos = e.items as typeof todos; break;
       case "activity": activity = text(e.text); break;
+      case "provider_progress": providerProgress = e.progress as ProviderProgress; break;
       case "notice": blocks.push({ id: seq, kind: "notice", text: text(e.text) }); break;
       case "approval": blocks.push({ id: seq, kind: "notice", text: `${text(e.tool) || "Approval"}: ${text(e.summary)} (${text(e.status)})` }); break;
       case "turn_end":
+        providerProgress = null;
         activity = "";
         if (!seenAssistant && text(e.text)) blocks.push({ id: seq, kind: "assistant", text: text(e.text) });
         if (e.status === "failed" || e.status === "blocked" || e.status === "cancelled") blocks.push({ id: seq, kind: "notice", text: text(e.reason) || (e.status === "cancelled" ? "Task stopped." : "Task failed. Check the desktop for details.") });
@@ -49,5 +62,5 @@ export function transcript(entries: Entry[]) {
         break;
     }
   }
-  return { blocks, todos, activity };
+  return { blocks, todos, activity, usage, memory, providerProgress };
 }

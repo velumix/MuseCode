@@ -1,0 +1,95 @@
+/* Loaded from index.html so the launch screen paints before the app bundle. */
+.startup {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #18191b;
+  color: #e8eaed;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  user-select: none;
+  opacity: 1;
+  transition: opacity 180ms ease-out;
+}
+.startup[data-leaving] { opacity: 0; }
+.startup-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform: translateY(-12px);
+}
+.startup-emblem {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 144px;
+  height: 132px;
+}
+.startup-halo {
+  position: absolute;
+  inset: -44px;
+  background: radial-gradient(ellipse, #3988f61c 0%, #3988f608 38%, transparent 68%);
+  animation: startup-glow 1000ms ease-out both;
+}
+.startup-mark {
+  position: relative;
+  display: block;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 22px #3988f624);
+  animation: startup-mark-in 650ms cubic-bezier(.16, 1, .3, 1) both;
+}
+.startup-wordmark {
+  margin-top: 8px;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 600;
+  letter-spacing: -.65px;
+  animation: startup-type-in 500ms 100ms ease-out both;
+}
+.startup-wordmark span { color: #adb1b9; font-weight: 400; }
+.startup-caption {
+  margin-top: 6px;
+  color: #949aa5;
+  font-size: 12px;
+  line-height: 20px;
+  letter-spacing: .25px;
+  animation: startup-type-in 500ms 180ms ease-out both;
+}
+.startup-track {
+  width: 88px;
+  height: 2px;
+  margin-top: 28px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: #84baff14;
+  animation: startup-type-in 400ms 220ms ease-out both;
+}
+.startup-sweep {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, #84baff, transparent);
+  animation: startup-sweep 1300ms cubic-bezier(.45, 0, .55, 1) infinite;
+}
+@keyframes startup-mark-in {
+  from { opacity: 0; transform: translateY(10px) scale(.9); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes startup-type-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes startup-glow {
+  from { opacity: 0; transform: scale(.8); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes startup-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .startup { transition: none; }
+  .startup *, .startup *::before, .startup *::after { animation: none; }
+  .startup-sweep { opacity: .5; }
+}

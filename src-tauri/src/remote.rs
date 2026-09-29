@@ -827,7 +827,7 @@ async fn diagnostics(
     let app = state.app.ok_or_else(|| bad("Desktop unavailable."))?;
     let workspace = session_workspace(&app, &id)?;
     let report = tauri::async_runtime::spawn_blocking(move || {
-        crate::app_context::diagnostics(&app, &workspace)
+        crate::app_context::diagnostics(&app, &workspace, Some(&id))
     })
     .await
     .map_err(|e| bad(e.to_string()))?;

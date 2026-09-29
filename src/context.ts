@@ -1,4 +1,5 @@
 import type { Provider, RunOptions } from './providers';
+import type { ProviderProgress } from './providerProgress';
 
 export interface AccessCheck {
   path: string;
@@ -6,14 +7,35 @@ export interface AccessCheck {
   readable: boolean;
   writable: boolean | null;
   message: string;
+  report?: AccessReport;
+  sanitized?: AccessReport;
+}
+export type CheckStatus = 'pass' | 'fail' | 'blocked' | 'untested';
+export interface OperationCheck {
+  operation: string; status: CheckStatus; path: string; checked_at: number | null;
+  environment: string; detail: string; error_code: string | null; exit_code: number | null;
+}
+export interface AccessReport {
+  checked_at: number; environment: string; checks: OperationCheck[]; running: boolean;
+  revision: number; permission_mode: string; host_cleanup?: OperationCheck | null;
 }
 export interface Diagnostics {
   app: string;
   version: string;
   host_os: string;
   checked_at: number;
-  workspace: { directory_listing: boolean; git_repository: boolean; message: string };
+  workspace: { directory_listing?: boolean; git_repository: boolean; message: string };
+  workspace_access?: { host: AccessReport; agent: AccessReport;
+    collection?: { method: string; detail: string };
+    selection?: { kind: string; guidance: string | null; write_probe_scope: string };
+    permissions: {
+    requested_mode: string; launched_mode: string | null; revision: number;
+    effective: { status: CheckStatus; sandbox?: string; approval_policy?: string; detail?: string };
+  }};
+  connections?: { name: string; status: CheckStatus; detail: string }[];
+  attachments?: { detail: string };
   providers: { provider: Provider; installed: boolean; authentication: string; tool_connections: string }[];
+  provider_runtime?: { provider: Provider; turn_status: string; running: boolean; progress: ProviderProgress | null; last_retry: ProviderProgress | null; detail: string } | null;
   memory: { readable: boolean; enabled?: boolean; notes?: number; budget_bytes?: number; capture?: string };
   sessions: { active: number; failed: number; blocked: number };
 }

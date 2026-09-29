@@ -74,6 +74,16 @@ installing the current bundle to also verify Windows Notification Center deliver
 registered COM activation path. These checks use isolated notification preferences.
 Test artifacts are written to ignored `test-results/` and `.qa/` directories.
 
+For real signed-in Muse and Agy checks, opt in with
+`node scripts/providers-live-smoke.mjs --live --installed` (omit `--installed`
+for the debug build). This uses the existing provider accounts and creates new
+CLI sessions, isolated Velum preferences and a disposable project. It verifies
+replies, resume, Standard file probes, cleanup and permission-session resets;
+provider rate limits or outages can fail it. Agy's configured headless policy
+may block the shell probe, which must be reported as blocked rather than passed.
+It does not edit permission rules or run a YOLO turn. See the
+[Muse and Agy validation report](provider-validation-2026-09-29.md).
+
 `scripts/bots-smoke.mjs` substitutes all three CLI protocols, checks identity and private
 recall across providers, runs a Muse → Codex → Antigravity task handoff, and verifies stale
 board rejection, cancellation, non-overlap, bounded history, and restart behavior. Use

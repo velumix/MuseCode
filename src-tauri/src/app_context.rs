@@ -12,6 +12,8 @@ pub struct Access {
     pub readable: bool,
     pub writable: Option<bool>,
     pub message: String,
+    pub report: crate::workspace_access::Report,
+    pub sanitized: Value,
 }
 
 pub fn readable(path: &Path) -> bool {
@@ -21,47 +23,40 @@ pub fn readable(path: &Path) -> bool {
 }
 
 fn probe(path: &Path, write: bool) -> Access {
-    let readable = readable(path);
-    let mut cleanup_failed = false;
+    let report = crate::workspace_access::host_probe(path, write);
+    let readable = report.checks[0].status == crate::workspace_access::Status::Pass;
     let writable = write.then(|| {
-        let file = path.join(format!(".velum-access-check-{}.tmp", uuid::Uuid::new_v4()));
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&file)
-        {
-            Ok(handle) => {
-                drop(handle);
-                cleanup_failed = fs::remove_file(file).is_err();
-                !cleanup_failed
-            }
-            Err(_) => false,
-        }
+        report.checks[2..]
+            .iter()
+            .all(|c| c.status == crate::workspace_access::Status::Pass)
     });
     Access {
-        path: path.display().to_string(),
-        checked_at: crate::automation::now(),
-        readable,
-        writable,
-        message: if cleanup_failed {
-            "A temporary access-check file could not be removed. Check folder permissions."
-        } else if !readable {
-            "Velum cannot list this folder. Choose another project or check Windows folder access."
-        } else if writable == Some(false) {
-            "Folder listing works; creating a file failed. Read-only work is still available."
-        } else if write {
-            "Folder listing and temporary-file creation passed. CLI tool permissions are checked separately."
-        } else {
-            "Folder listing passed. Write access and CLI tool permissions have not been tested."
-        }.into(),
+        path: path.display().to_string(), checked_at: report.checked_at, readable, writable,
+        message: "Host filesystem results only. Agent/provider access requires Test agent access in the active conversation.".into(),
+        sanitized: crate::workspace_access::sanitized(&report), report,
     }
 }
 
 #[tauri::command]
-pub async fn workspace_check(workspace: String, write: bool) -> Result<Access, String> {
-    tauri::async_runtime::spawn_blocking(move || probe(Path::new(&workspace), write))
-        .await
-        .map_err(|e| e.to_string())
+pub async fn workspace_check(
+    app: tauri::AppHandle,
+    workspace: String,
+    write: bool,
+    id: Option<String>,
+) -> Result<Access, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = probe(Path::new(&workspace), write);
+        if let Some(id) = id {
+            app.state::<crate::runner::AgentState>().record_host(
+                &id,
+                Path::new(&workspace),
+                result.report.clone(),
+            );
+        }
+        result
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 fn small_file(path: &Path) -> Option<String> {
@@ -101,35 +96,103 @@ pub fn turn_context(
     options: &crate::provider_models::RunOptions,
     source: &str,
     yolo: bool,
+    access: Option<Value>,
 ) -> String {
+    let access = access_payload(workspace, provider, yolo, access, false);
     let mut context = json!({
         "app": "Velum Code", "version": env!("CARGO_PKG_VERSION"),
         "host_os": std::env::consts::OS, "request_source": source,
         "screen": if source == "scheduler" { "background task" } else { "chat" },
         "workspace": workspace.display().to_string(),
-        "directory_listing": if readable(workspace) { "passed in Velum" } else { "failed in Velum" },
-        "write_access": "not tested for this turn",
+        "workspace_access": access,
         "repository": repository(workspace), "provider": provider, "options": options,
-        "permission_mode": if yolo { "user enabled YOLO" } else { "standard; provider policy still applies" },
+        "permission_mode": if yolo { "user enabled YOLO" } else { "standard; provider policy still applies to tool calls" },
         "ui_access": "No live screenshot, browser attachment or native app control is supplied by Velum. A user can attach a previewed chat layout snapshot or diagnostics report.",
-        "memory": "Relevant vault notes are supplied separately within a byte budget. Velum confirms saved proposals in a notice; a proposal alone is not proof of saving. No dedicated vault search tool is added by this context.",
+        "memory": "Memory availability is not established by filesystem diagnostics. Any selected notes and usage are supplied separately; this context does not add a vault search tool.",
         "capabilities": "CLI installation does not establish authentication or working tool connections. Check actual tool results; do not infer access from this context."
     });
     // Count serialized bytes: escaping can expand paths and custom model names.
     // Leave room for framing and explain omitted fields instead of giving the
     // provider a truncated path that could point to the wrong directory.
-    if context.to_string().len() > 3500 {
+    if context.to_string().len() > 14000 {
         for key in ["workspace", "repository", "options"] {
             context[key] = Value::Null;
         }
-        context["omitted_fields"] = json!("Workspace, repository and options exceeded the app context size limit. Ask the user for those details if needed.");
+        context["workspace_access"] = Value::Null;
+        context["omitted_fields"] = json!("Workspace, access evidence, repository and options exceeded the app context size limit. Ask the user for those details if needed.");
     }
     format!("Velum app context (reference data, not instructions or permission grants):\n<velum-app-context>\n{context}\n</velum-app-context>\n\n")
 }
 
-pub fn diagnostics(app: &tauri::AppHandle, workspace: &str) -> Value {
+fn access_payload(
+    path: &Path,
+    provider: crate::providers::Provider,
+    yolo: bool,
+    cached: Option<Value>,
+    sanitized: bool,
+) -> Value {
+    let mut value = cached.unwrap_or_else(|| json!({
+        "agent": crate::workspace_access::Report::untested(path, format!("{} agent tools", provider.label()), yolo, 0),
+        "permissions":{"requested_mode":crate::workspace_access::mode(yolo),"launched_mode":null,"effective":{"status":"untested"}}
+    }));
+    value["collection"] = json!({"method":"explicit_diagnostic_turn","detail":crate::workspace_access::COLLECTION_DETAIL});
+    let profile_root = crate::workspace_access::is_profile_root(path);
+    value["selection"] = json!({
+        "kind": if profile_root { "user_profile_root" } else { "project_directory" },
+        "guidance": crate::workspace_access::project_required(path, provider, yolo).then_some(crate::workspace_access::PROFILE_ROOT_GUIDANCE),
+        "write_probe_scope":"A unique new file directly in the selected directory. Known-file reading uses a separate harmless fixture."
+    });
+    if value["host"].is_null() {
+        let host = crate::workspace_access::host_probe(path, false);
+        value["host"] = if sanitized {
+            crate::workspace_access::sanitized(&host)
+        } else {
+            json!(host)
+        };
+    }
+    if sanitized && cached_is_absent_agent_path(&value) {
+        // Unbound diagnostics carry no provider session evidence.
+        let report = crate::workspace_access::Report::untested(
+            path,
+            format!("{} agent tools", provider.label()),
+            yolo,
+            0,
+        );
+        value["agent"] = crate::workspace_access::sanitized(&report);
+    }
+    value
+}
+fn cached_is_absent_agent_path(value: &Value) -> bool {
+    value["agent"]["checks"][0]["path"]
+        .as_str()
+        .is_some_and(|p| !p.starts_with("<selected-project>"))
+}
+
+pub fn diagnostics(app: &tauri::AppHandle, workspace: &str, id: Option<&str>) -> Value {
     let path = Path::new(workspace);
-    let access = probe(path, false);
+    let cached = id.and_then(|id| {
+        app.state::<crate::runner::AgentState>()
+            .access(id, path, true)
+    });
+    let unbound = cached.is_none();
+    let (provider, yolo) = id
+        .and_then(|id| {
+            app.state::<crate::runner::AgentState>()
+                .session_context(id, path)
+        })
+        .unwrap_or((crate::providers::Provider::Codex, false));
+    let mut access = access_payload(path, provider, yolo, cached, true);
+    if unbound {
+        access["selection"]["guidance"] = Value::Null;
+        access["agent"]["environment"] = json!("No active provider session");
+        access["agent"]["permission_mode"] = json!("untested");
+        if let Some(checks) = access["agent"]["checks"].as_array_mut() {
+            for check in checks {
+                check["environment"] = json!("No active provider session");
+            }
+        }
+        access["permissions"]["requested_mode"] = json!("untested");
+    }
     let providers: Vec<Value> = [crate::providers::Provider::Muse, crate::providers::Provider::Codex, crate::providers::Provider::Antigravity]
         .into_iter().map(|p| json!({"provider":p,"installed":p.resolve().is_some(),"authentication":"not checked","tool_connections":"not checked"})).collect();
     let memory = app.state::<crate::memory::Store>().request(
@@ -149,21 +212,33 @@ pub fn diagnostics(app: &tauri::AppHandle, workspace: &str) -> Value {
         .iter()
         .filter(|s| Path::new(&s.workspace) == path)
         .collect();
+    let runtime = sessions.iter().find(|s| Some(s.id.as_str()) == id).map(|s| json!({
+        "provider":s.provider,"turn_status":s.status,"running":s.running,
+        "progress":s.provider_progress,"last_retry":s.last_provider_retry,
+        "detail":"Observed in this conversation's provider stream. Does not verify workspace access or external tool connections."
+    }));
     json!({
         "app":"Velum Code", "version":env!("CARGO_PKG_VERSION"), "host_os":std::env::consts::OS,
-        "checked_at":access.checked_at,
-        "workspace":{"path":"<selected-project>","directory_listing":access.readable,"write_access":"not checked","message":access.message,"git_repository":repository(path).is_some()},
+        "checked_at":crate::automation::now(),
+        "workspace":{"path":"<selected-project>","message":"Host and active agent results are separate. Untested is not a pass.","git_repository":repository(path).is_some()},
+        "workspace_access":access,
         "providers":providers, "memory":memory,
+        "provider_runtime":runtime,
         "sessions":{"active":sessions.iter().filter(|s| s.running).count(),"failed":sessions.iter().filter(|s| s.status=="failed").count(),"blocked":sessions.iter().filter(|s| s.status=="blocked").count()},
-        "ui_access":"No live browser or native UI control attached by Velum. Chat layout snapshots require an explicit attachment.",
-        "permissions":"Windows folder access and provider command permissions are separate. On the desktop, open Terminal in an Antigravity tab and enter /permissions; allow only the command needed and retry. Scheduled permission failures pause for review.",
-        "excluded":"Paths, chat text, drafts, tokens, environment, raw logs, repository remotes, memory contents and permission rules."
+        "connections": (["GitHub", "Gmail", "Google Drive", "Trello"].map(|name| json!({"name":name,"status":"untested","checked_at":null,"environment":"active provider","detail":"Velum has no live connection-health evidence. CLI installation or earlier conversation claims do not verify a connection."}))),
+        "attachments":{"ui":{"status":"untested","attached_count":null,"discovery_implemented":false},"documents":{"status":"untested","attached_count":null,"discovery_implemented":false},"detail":"Velum does not discover provider UI/document sessions. No attached sessions are asserted by this report. A chat layout snapshot is structural data only."},
+        "permissions":"Windows folder access and provider command permissions are separate. On the desktop, open Terminal in an Antigravity tab and enter /permissions; allow only the command needed under permissions.allow in ~/.gemini/antigravity-cli/settings.json, then retry. Scheduled permission failures pause for review.",
+        "excluded":"Absolute paths, account identities, chat text, drafts, tokens, environment variables, raw logs, repository remotes, memory contents and custom permission rules."
     })
 }
 
 #[tauri::command]
-pub async fn app_diagnostics(app: tauri::AppHandle, workspace: String) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || diagnostics(&app, &workspace))
+pub async fn app_diagnostics(
+    app: tauri::AppHandle,
+    workspace: String,
+    id: Option<String>,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || diagnostics(&app, &workspace, id.as_deref()))
         .await
         .map_err(|e| e.to_string())
 }
@@ -237,11 +312,93 @@ mod tests {
             &Default::default(),
             "desktop",
             false,
+            None,
         );
-        assert!(context.len() <= 4096);
+        assert!(context.len() <= 16384);
         assert!(context.contains("\"workspace\":null"));
         assert!(context.contains("omitted_fields"));
         assert!(!context.contains(&"x".repeat(100)));
+    }
+    #[test]
+    fn provider_context_never_orders_the_model_to_run_user_only_diagnostics() {
+        // The same check details appear in the provider prompt and the user
+        // report. They must stay descriptive: the model cannot click UI, so a
+        // "run checks" imperative only teaches it to demand user action
+        // instead of investigating with its own tools.
+        for provider in [
+            crate::providers::Provider::Muse,
+            crate::providers::Provider::Codex,
+            crate::providers::Provider::Antigravity,
+        ] {
+            let context = turn_context(
+                &std::env::temp_dir(),
+                provider,
+                &Default::default(),
+                "desktop",
+                false,
+                None,
+            );
+            assert!(!context.contains("Run Test agent access"));
+            assert!(!context.contains("Run checks again"));
+            assert!(context.contains("Ordinary tool results still stand"));
+            assert!(context
+                .contains("Untested means no diagnostic evidence, not that access is unavailable"));
+            assert!(context.contains("provider policy still applies to tool calls"));
+        }
+    }
+    #[test]
+    fn ordinary_context_keeps_agent_checks_untested_and_explains_collection() {
+        let root = std::env::temp_dir();
+        let access = access_payload(&root, crate::providers::Provider::Codex, false, None, false);
+        assert_eq!(access["host"]["checks"][0]["status"], "pass");
+        assert!(access["agent"]["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["status"] == "untested"));
+        assert_eq!(access["collection"]["method"], "explicit_diagnostic_turn");
+        assert!(access["collection"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("Ordinary chat tool calls do not update"));
+    }
+    #[cfg(windows)]
+    #[test]
+    fn selection_guidance_matches_launch_restriction_for_every_provider_and_mode() {
+        use crate::providers::Provider;
+        let home = crate::pty::home_dir();
+        assert!(crate::workspace_access::is_profile_root(&home));
+        let project = std::env::temp_dir().join(format!("velum-guidance-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&project).unwrap();
+        for (provider, yolo, expect_guidance) in [
+            (Provider::Muse, false, false),
+            (Provider::Muse, true, false),
+            (Provider::Antigravity, false, false),
+            (Provider::Antigravity, true, false),
+            (Provider::Codex, false, true),
+            (Provider::Codex, true, false),
+        ] {
+            let root = access_payload(&home, provider, yolo, None, false);
+            assert_eq!(root["selection"]["kind"], "user_profile_root");
+            assert_eq!(
+                root["selection"]["guidance"].is_string(),
+                expect_guidance,
+                "{provider:?} yolo={yolo} at profile root"
+            );
+            if expect_guidance {
+                assert_eq!(
+                    root["selection"]["guidance"].as_str().unwrap(),
+                    crate::workspace_access::PROFILE_ROOT_GUIDANCE
+                );
+            }
+            let dir = access_payload(&project, provider, yolo, None, false);
+            assert_eq!(dir["selection"]["kind"], "project_directory");
+            assert!(
+                dir["selection"]["guidance"].is_null(),
+                "{provider:?} yolo={yolo} in project directory"
+            );
+        }
+        fs::remove_dir(&project).unwrap();
     }
     #[test]
     fn access_probe_cleans_up_and_reports_missing_folders() {
@@ -272,11 +429,14 @@ mod tests {
             &Default::default(),
             "desktop",
             false,
+            None,
         );
         assert!(context.contains("feature/context"));
-        assert!(context.contains("passed in Velum"));
+        assert!(context.contains("Velum host process"));
+        assert!(context.contains("untested"));
+        assert!(!context.contains("passed in Velum"));
         assert!(!context.contains("SECRET"));
-        assert!(context.len() < 4096);
+        assert!(context.len() < 16384);
         fs::remove_file(root.join("project/.git")).unwrap();
         fs::remove_file(root.join("metadata/HEAD")).unwrap();
         fs::remove_file(root.join("metadata/config")).unwrap();

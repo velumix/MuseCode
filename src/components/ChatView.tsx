@@ -9,6 +9,10 @@ import type { PluginChatHandle } from "../plugins";
 import { readDraft, saveDraft } from "../desktopHistory";
 import type { BotIdentity } from '../bots';
 import BotAvatar from './BotAvatar';
+import UsageStrip from './UsageStrip';
+import ProviderWait from './ProviderWait';
+import { progressMessage, type ProviderProgress } from '../providerProgress';
+import { mergeUsage, type UsageSnapshot } from '../usage';
 import { attachment, chatSnapshot, type AccessCheck, type Diagnostics } from '../context';
 const ContextPanel = lazy(() => import('./ContextPanel'));
 
@@ -50,6 +54,7 @@ interface NewInfo {
   id: string;
   session_id: string;
   workspace: string;
+  workspace_notice?: string | null;
   restored?: AgentEventEnvelope["event"][];
   truncated?: boolean;
 }
@@ -257,13 +262,18 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
   const [input, setInput] = useState("");
   const [running, setRunning] = useState(false);
   const [ready, setReady] = useState(false);
+  const [initializing, setInitializing] = useState(true);
   const [activity, setActivity] = useState("");
+  const [providerProgress, setProviderProgress] = useState<ProviderProgress | null>(null);
   const [yolo, setYolo] = useState(false);
+  const [permissionBusy, setPermissionBusy] = useState(false);
+  const yoloRef = useRef(yolo); yoloRef.current = yolo;
   // Workspace bound to this tab's session at creation; null selects the
   // backend default (home). Changing it restarts the session via the effect
   // below, so a session never straddles two directories.
   const [workspace, setWorkspace] = useState<string | null>(initialWorkspace || null);
   const [draft, setDraft] = useState("");
+  const workspaceDraftRevision = useRef(0);
   const [effective, setEffective] = useState("");
   // Bump to retry session creation with the same workspace (e.g. the
   // directory was fixed externally after a failed Apply).
@@ -273,8 +283,10 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
   const [elapsed, setElapsed] = useState(0);
   const [applying, setApplying] = useState(false);
   const [workspaceError, setWorkspaceError] = useState("");
+  const [workspaceNotice, setWorkspaceNotice] = useState<string | null>(null);
   const [showLatest, setShowLatest] = useState(false);
   const [memoryUsage,setMemoryUsage]=useState<{titles:string[];bytes:number}|null>(null);
+  const [usage, setUsage] = useState<UsageSnapshot>({});
   const [draftError, setDraftError] = useState(false);
   const identityRef = useRef({ workspace, sessionKey });
   useEffect(() => {
@@ -321,22 +333,35 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
     [sessionId],
   );
 
+  useEffect(() => {
+    let dispose: (() => void) | undefined;
+    let closed = false;
+    void listen<{tab_id:string;yolo:boolean}>('agent-permissions', event => {
+      if (event.payload.tab_id === sessionId) setYolo(event.payload.yolo);
+    }).then(stop => { if (closed) stop(); else dispose = stop; });
+    return () => { closed = true; dispose?.(); };
+  }, [sessionId]);
+
   // Mount: subscribe, then register the agent session. Unmount: stop the
   // turn (via destroy) and drop the subscription.
   useEffect(() => {
     let disposed = false;
+    const draftRevision = workspaceDraftRevision.current;
+    setInitializing(true);
     let unlisten: (() => void) | undefined;
     // A fresh native identity prevents old readers/events from touching a
     // replacement session, including StrictMode's mount/cleanup replay.
     const nativeId = `${sessionId}-agent-${crypto.randomUUID()}`;
-    const restarting = identityRef.current.workspace !== workspace || identityRef.current.sessionKey !== sessionKey;
+    const explicitRestart = identityRef.current.sessionKey !== sessionKey;
+    const restarting = identityRef.current.workspace !== workspace || explicitRestart;
     identityRef.current = { workspace, sessionKey };
     let replaying = false;
     nativeIdRef.current = null;
     idRef.current = 0;
     setBlocks([]);
     setTodos([]);
-    setInput(restarting ? "" : readDraft(sessionId));
+    // Choosing a usable project is a recovery step; keep the unsent prompt.
+    setInput(explicitRestart ? "" : readDraft(sessionId));
     setRunning(false);
     runningRef.current = false;
     assistantSeenRef.current = false;
@@ -345,8 +370,10 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
     stickRef.current = true;
     setShowLatest(false);
     setMemoryUsage(null);
+    setUsage({});
     titleAssignedRef.current = false;
     setActivity("");
+    setProviderProgress(null);
     setReady(false);
     setStatus({ kind: "starting" });
 
@@ -354,8 +381,13 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
       if (disposed || envelope.id !== nativeId) return;
       const e = envelope.event;
       switch (e.kind) {
+        case "usage": setUsage(previous => mergeUsage(previous, e)); break;
+        case "usage_reset": setUsage({}); setMemoryUsage(null); setProviderProgress(null); break;
         case "memory_context": setMemoryUsage({titles:Array.isArray(e.titles)?e.titles as string[]:[],bytes:typeof e.bytes==="number"?e.bytes:0}); break;
         case "turn_start": {
+          setProviderProgress(null);
+          setUsage(previous => ({ ...previous, turn: null }));
+          setMemoryUsage(null);
           if (!e.remote && !replaying) break;
           const prompt = asString(e.prompt) ?? "";
           assistantSeenRef.current = false;
@@ -389,6 +421,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
           break;
         }
         case "turn_end": {
+          setProviderProgress(null);
           const status = asString(e.status) ?? "completed";
           const reason = asString(e.reason);
           const finalText = asString(e.text);
@@ -508,6 +541,14 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
           }
           break;
         }
+        case "provider_progress": {
+          if (!runningRef.current) break;
+          const progress = e.progress as unknown as ProviderProgress;
+          setProviderProgress(progress);
+          setActivity(progressMessage(progress));
+          setStatus({ kind: "running", detail: progressMessage(progress) });
+          break;
+        }
         case "activity": {
           // Fleeting progress detail for the running indicator. Guarded by
           // the live running flag so a late duplicate can never flip an
@@ -541,8 +582,13 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
           for (const event of info.restored || []) applyEvent({ id: nativeId, event });
           replaying = false;
           nativeIdRef.current = nativeId;
+          await invoke('agent_set_permissions', {id:nativeId,yolo:yoloRef.current});
+          if (disposed) return;
           setEffective(info.workspace);
-          setDraft(info.workspace);
+          setWorkspaceNotice(info.workspace_notice || null);
+          // A late registration must not replace a path the user just typed
+          // or selected while the provider was starting.
+          if (workspaceDraftRevision.current === draftRevision) setDraft(info.workspace);
           setReady(true);
           setStatus({ kind: "idle" });
           onWorkspace(sessionId, info.workspace);
@@ -553,6 +599,8 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
           setStatus({ kind: "error", message });
           setBlocks((prev) => [...prev, { id: ++idRef.current, kind: "notice", text: message, tone: "error" }]);
         }
+      } finally {
+        if (!disposed) setInitializing(false);
       }
     })();
 
@@ -648,6 +696,8 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
         titleAssignedRef.current = true;
       }
       setInput("");
+      setUsage(previous => ({ ...previous, turn: null }));
+      setMemoryUsage(null);
       setHistIdx(null);
       historyRef.current = [...historyRef.current.slice(-49), prompt];
       turnStartRef.current = Date.now();
@@ -681,7 +731,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
   }, [sessionId]);
 
   const applyWorkspace = useCallback(async () => {
-    if (runningRef.current || applyingRef.current) return;
+    if (runningRef.current || applyingRef.current || initializing) return;
     applyingRef.current = true;
     setApplying(true);
     setWorkspaceError("");
@@ -698,7 +748,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
       applyingRef.current = false;
       setApplying(false);
     }
-  }, [draft, effective, workspace, ready]);
+  }, [draft, effective, workspace, ready, initializing]);
 
   const openTodos = todos.filter((t) => t.status !== "completed");
   const doneTodos = todos.filter((t) => t.status === "completed");
@@ -783,13 +833,15 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
         {running && (
           <div className="chat-running" role="status">
             <span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span>
-            Working…{elapsed >= 1000 ? ` ${fmtElapsed(elapsed)}` : ""}
-            {activity ? ` · ${activity}` : ""}
+            {providerProgress?.phase === 'retrying' ? <ProviderWait progress={providerProgress}/> : <>
+              Working…{elapsed >= 1000 ? ` ${fmtElapsed(elapsed)}` : ""}
+              {activity ? ` · ${activity}` : ""}
+            </>}
           </div>
         )}
       </div>
       <div className="composer-dock">
-      {memoryUsage&&memoryUsage.bytes>0&&<p className="memory-usage" title={memoryUsage.titles.join(" · ")}>Memory · {memoryUsage.titles.length?`${memoryUsage.titles.length} note${memoryUsage.titles.length===1?"":"s"} recalled`:"Learning enabled"}<span>{memoryUsage.bytes.toLocaleString()} bytes added · ~{Math.ceil(memoryUsage.bytes/4)} tokens</span></p>}
+      <UsageStrip usage={usage} memory={memoryUsage} provider={provider} running={running} elapsed={elapsed} active={active} />
       {showLatest && <div className="latest-wrap"><button type="button" className="latest-btn" onClick={jumpToLatest}><Icon name="down" size={14} />Back to latest</button></div>}
       {todos.length > 0 && (
         <div className="todos">
@@ -803,6 +855,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
         </div>
       )}
       {workspaceError && <div className="notice error" role="alert">{workspaceError}</div>}
+      {!yolo && workspaceNotice && <div className="notice" role="status">{workspaceNotice}</div>}
       {draftError && <div className="notice error" role="alert">Your draft could not be saved. Copy it before closing Velum Code.</div>}
       <div className={`composer${running ? " is-running" : ""}${input.trim() ? " has-draft" : ""}`}>
         <textarea
@@ -848,7 +901,13 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
           }}
         />
         <div className="composer-actions">
-        <button type="button" className={yolo ? "yolo-btn on" : "yolo-btn"} onClick={() => setYolo((v) => !v)} aria-pressed={yolo} aria-label="YOLO mode" title={yolo ? "YOLO is on: turns skip approvals and sandboxing" : "Turn on YOLO: skip approvals and sandboxing"}>
+        <button type="button" className={yolo ? "yolo-btn on" : "yolo-btn"} disabled={!ready || running || permissionBusy} onClick={async () => {
+          if (!nativeIdRef.current) return;
+          setPermissionBusy(true);
+          try { await invoke('agent_set_permissions', {id:nativeIdRef.current,yolo:!yolo}); setYolo(!yolo); }
+          catch (e) { setWorkspaceError(String(e)); }
+          finally { setPermissionBusy(false); }
+        }} aria-pressed={yolo} aria-label="YOLO mode" title={yolo ? "YOLO is on: turns skip approvals and sandboxing" : "Turn on YOLO: skip approvals and sandboxing"}>
           {yolo ? <YoloIcon /> : <Icon name="shield" size={16} />}<span>{yolo ? "YOLO on" : "Standard"}</span>
         </button>
         <span className="composer-hint">Shift + Enter for a new line</span>
@@ -875,18 +934,24 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
         <button type="button" className="workspace-btn" aria-label="Choose project folder" title="Choose project folder, then Apply" disabled={running || applying} onClick={async () => {
           if (runningRef.current || applyingRef.current) return;
           applyingRef.current = true; setApplying(true); setWorkspaceError('');
-          try { const path = await invoke<string | null>('workspace_pick'); if (path) setDraft(path); }
+          try { const path = await invoke<string | null>('workspace_pick'); if (path) { workspaceDraftRevision.current++; setDraft(path); } }
           catch (e) { setWorkspaceError(String(e)); }
           finally { applyingRef.current = false; setApplying(false); }
         }}><Icon name="folder" size={14} /></button>
-        <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => {
+        <input value={draft} disabled={applying} onChange={(e) => { workspaceDraftRevision.current++; setDraft(e.target.value); }} onKeyDown={(e) => {
           if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); void applyWorkspace(); }
         }} placeholder={effective || "Choose a workspace"} aria-label="Workspace directory" title={effective || "default (home)"} spellCheck={false} />
-        {(draft !== effective || !ready || workspaceError) && <button type="button" className="workspace-btn" onClick={applyWorkspace} disabled={running || applying} title="Apply workspace (restarts this tab's session)">Apply</button>}
+        {(draft !== effective || !ready || workspaceError) && <button type="button" className="workspace-btn" onClick={applyWorkspace} disabled={running || applying || initializing} title="Apply workspace (restarts this tab's session)">Apply</button>}
         <span className="workspace-label">Workspace</span>
       </div>
       </div>
-      {contextSnapshot !== null && active && <Suspense fallback={null}><ContextPanel snapshot={contextSnapshot} load={() => invoke<Diagnostics>('app_diagnostics', { workspace: effective })} check={() => invoke<AccessCheck>('workspace_check', { workspace: effective, write: true })} onClose={() => setContextSnapshot(null)} onAttach={(label, text) => {
+      {contextSnapshot !== null && active && <Suspense fallback={null}><ContextPanel key={`${nativeIdRef.current}:${yolo}`} snapshot={contextSnapshot} load={() => invoke<Diagnostics>('app_diagnostics', { workspace: effective, id: nativeIdRef.current })} check={() => invoke<AccessCheck>('workspace_check', { workspace: effective, write: true, id: nativeIdRef.current })} agentBusy={running || !ready} checkAgent={async () => {
+        if (!nativeIdRef.current || runningRef.current) throw new Error('Wait for the active turn to finish.');
+        runningRef.current = true; setRunning(true); setActivity('Checking workspace access'); setStatus({kind:'running',detail:'Checking workspace access'});
+        turnStartRef.current = Date.now(); assistantSeenRef.current = false;
+        try { await invoke('agent_check_access', {id:nativeIdRef.current,yolo}); }
+        catch (e) { runningRef.current = false; setRunning(false); setStatus({kind:'error',message:String(e)}); throw e; }
+      }} onClose={() => setContextSnapshot(null)} onAttach={(label, text) => {
         const extra = attachment(label, text);
         if (input.length + extra.length > 64000) throw new Error('The message is too long to add this report. Copy it instead, or shorten your draft.');
         setInput(previous => previous + extra); setContextSnapshot(null); composerRef.current?.focus();

@@ -11,6 +11,7 @@ pub struct Stream {
     muse: Fold,
     text: HashMap<String, String>,
     tools: HashSet<String>,
+    agy_last_tool: Option<(u64, Option<String>)>,
     pub session_id: Option<String>,
 }
 fn text(value: &Value, key: &str) -> String {
@@ -41,6 +42,7 @@ impl Stream {
             muse: Fold::default(),
             text: HashMap::new(),
             tools: HashSet::new(),
+            agy_last_tool: None,
             session_id: None,
         }
     }
@@ -74,6 +76,23 @@ impl Stream {
             Provider::Muse => unreachable!(),
         }
     }
+    /// Some Agy runs omit the structured tool error and only report a
+    /// headless denial on stderr. Correct only the latest command without
+    /// result evidence; never relabel a completed, evidenced operation.
+    pub fn permission_denied(&mut self) -> Vec<Event> {
+        self.agy_last_tool
+            .as_mut()
+            .and_then(|(_, id)| id.take())
+            .map(|task_id| Event::ToolEnd {
+                task_id,
+                status: "blocked".into(),
+                reason: Some(
+                    "Antigravity's headless permission policy rejected this command.".into(),
+                ),
+            })
+            .into_iter()
+            .collect()
+    }
     fn codex(&mut self, value: Value) -> Vec<Event> {
         match value["type"].as_str().unwrap_or_default() {
             "thread.started" => {
@@ -83,7 +102,17 @@ impl Stream {
             "turn.started" => vec![Event::Activity {
                 text: "Thinking…".into(),
             }],
-            "turn.completed" => vec![end("completed", None, None)],
+            "turn.completed" => {
+                let mut events = Vec::new();
+                if let Some(turn) = crate::provider_usage::codex_turn(&value["usage"]) {
+                    events.push(Event::Usage {
+                        context: None,
+                        turn: Some(turn),
+                    });
+                }
+                events.push(end("completed", None, None));
+                events
+            }
             "turn.failed" => vec![end("failed", None, Some(text(&value["error"], "message")))],
             "error" => vec![Event::Notice {
                 text: text(&value, "message"),
@@ -164,7 +193,22 @@ impl Stream {
                     });
                 }
                 if completed {
-                    let status = if item["status"] == "failed"
+                    let shell_error = (kind == "command_execution"
+                        && crate::workspace_access::powershell_error(
+                            item["aggregated_output"].as_str().unwrap_or(""),
+                        ))
+                    .then(|| {
+                        crate::workspace_access::failure(
+                            item["aggregated_output"].as_str().unwrap_or(""),
+                        )
+                    })
+                    .flatten();
+                    let status = if shell_error
+                        .is_some_and(|(s, _, _)| s == crate::workspace_access::Status::Blocked)
+                    {
+                        "blocked"
+                    } else if item["status"] == "failed"
+                        || shell_error.is_some()
                         || item["exit_code"].as_i64().is_some_and(|n| n != 0)
                     {
                         "failed"
@@ -188,7 +232,8 @@ impl Stream {
                     events.push(Event::ToolEnd {
                         task_id: id,
                         status: status.into(),
-                        reason: error(&item["error"]),
+                        reason: error(&item["error"])
+                            .or_else(|| shell_error.map(|(_, detail, _)| detail.into())),
                     });
                 }
                 events
@@ -208,15 +253,36 @@ impl Stream {
                 let result = &value["result"];
                 self.remember(&result["conversation_id"]);
                 let status = match result["status"].as_str() {
+                    Some("SUCCESS")
+                        if result["denied_actions"]
+                            .as_array()
+                            .is_some_and(|actions| !actions.is_empty()) =>
+                    {
+                        "blocked"
+                    }
                     Some("SUCCESS") => "completed",
                     Some("CANCELED" | "INTERRUPTED") => "cancelled",
                     _ => "failed",
                 };
-                vec![end(
+                let mut events = if status == "blocked"
+                    && result["denied_actions"]
+                        .as_array()
+                        .is_some_and(|actions| actions.iter().any(|a| a["action"] == "command"))
+                {
+                    self.permission_denied()
+                } else {
+                    vec![]
+                };
+                events.push(end(
                     status,
                     Some(text(result, "response")),
-                    error(&result["error"]),
-                )]
+                    if status == "blocked" {
+                        Some("Antigravity denied a tool under the current permissions. Review the command with /permissions in Terminal, or add a scoped rule such as \"command(...)\" under permissions.allow in ~/.gemini/antigravity-cli/settings.json; allow only what is needed, then retry.".into())
+                    } else {
+                        error(&result["error"])
+                    },
+                ));
+                events
             }
             "step_update" => {
                 let step = &value["step_update"];
@@ -244,23 +310,45 @@ impl Stream {
                     });
                 }
                 let info = &step["tool_info"];
-                let output = self.append(&id, text(info, "output"));
+                let output = info["output"]
+                    .as_str()
+                    .map(|output| self.append(&id, bounded(output)))
+                    .unwrap_or_default();
+                if self
+                    .agy_last_tool
+                    .as_ref()
+                    .is_none_or(|(last, _)| index >= *last)
+                {
+                    let unconfirmed = step["tool_name"] == "run_command"
+                        && info["error"].is_null()
+                        && self.text.get(&id).is_none_or(String::is_empty);
+                    self.agy_last_tool = Some((index, unconfirmed.then(|| id.clone())));
+                }
                 if !output.is_empty() {
                     events.push(Event::ToolDelta {
                         task_id: id.clone(),
                         text: output,
                     });
                 }
-                if step["state"] == "DONE" {
+                if matches!(step["state"].as_str(), Some("DONE" | "ERROR")) {
+                    let reason = error(&info["error"]);
+                    let policy_blocked = reason
+                        .as_deref()
+                        .and_then(crate::workspace_access::failure)
+                        .is_some_and(|(status, _, _)| {
+                            status == crate::workspace_access::Status::Blocked
+                        });
                     events.push(Event::ToolEnd {
                         task_id: id,
-                        status: if info.get("error").is_some_and(|e| !e.is_null()) {
+                        status: if policy_blocked {
+                            "blocked"
+                        } else if step["state"] == "ERROR" || reason.is_some() {
                             "failed"
                         } else {
                             "completed"
                         }
                         .into(),
-                        reason: error(&info["error"]),
+                        reason,
                     });
                 }
                 events
@@ -273,6 +361,46 @@ impl Stream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn stderr_denial_corrects_only_the_latest_command_without_output_evidence() {
+        let done = r#"{"event":"step_update","step_update":{"step_index":8,"step_type":"tool","tool_name":"run_command","state":"DONE","tool_info":{"parameters":{"CommandLine":"probe"}}}}"#;
+        let mut stream = Stream::new(Provider::Antigravity);
+        stream.fold_line(done);
+        assert!(
+            matches!(&stream.permission_denied()[0], Event::ToolEnd{task_id,status,..} if task_id == "agy-8" && status == "blocked")
+        );
+        assert!(stream.permission_denied().is_empty());
+        let mut stream = Stream::new(Provider::Antigravity);
+        stream.fold_line(r#"{"event":"step_update","step_update":{"step_index":8,"step_type":"tool","tool_name":"run_command","state":"ACTIVE","tool_info":{"output":"actual tool output"}}}"#);
+        stream.fold_line(done); // Terminal snapshot omits previously emitted output.
+        assert!(stream.permission_denied().is_empty());
+        let mut stream = Stream::new(Provider::Antigravity);
+        stream.fold_line(done);
+        stream.fold_line(r#"{"event":"step_update","step_update":{"step_index":9,"step_type":"tool","tool_name":"read_file","state":"ACTIVE","tool_info":{}}}"#);
+        assert!(stream.permission_denied().is_empty());
+    }
+    #[test]
+    fn antigravity_error_state_and_denied_actions_do_not_report_success() {
+        let mut stream = Stream::new(Provider::Antigravity);
+        let events = stream.fold_line(r#"{"event":"step_update","step_update":{"step_index":2,"step_type":"tool","tool_name":"run_command","state":"ERROR","tool_info":{"error":{"type":"TOOL_ERROR","message":"permission check failed: user denied permission to run command"}}}}"#);
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, Event::ToolEnd{status,..} if status == "blocked")));
+        let events = stream.fold_line(r#"{"event":"result","result":{"status":"SUCCESS","response":"","denied_actions":[{"action":"command","display_name":"RunCommand"}]}}"#);
+        assert!(
+            matches!(&events[0], Event::TurnEnd{status,reason:Some(reason),..} if status == "blocked"
+                && reason.contains("permissions.allow")
+                && reason.contains("~/.gemini/antigravity-cli/settings.json"))
+        );
+    }
+    #[test]
+    fn codex_shell_access_error_is_failed_even_with_zero_exit() {
+        let mut stream = Stream::new(Provider::Codex);
+        let events = stream.fold_line(r#"{"type":"item.completed","item":{"id":"zero","type":"command_execution","status":"completed","exit_code":0,"aggregated_output":"Get-ChildItem : Access is denied.\n    + CategoryInfo : PermissionDenied\n    + FullyQualifiedErrorId : UnauthorizedAccessException"}}"#);
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, Event::ToolEnd {status,reason:Some(_),..} if status == "failed")));
+    }
     #[test]
     fn codex_resumes_only_its_own_id_and_does_not_duplicate_message_updates() {
         let mut stream = Stream::new(Provider::Codex);

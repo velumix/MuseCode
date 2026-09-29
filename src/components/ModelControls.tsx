@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { resolveOptions, type ModelCatalog, type Provider, type RunOptions } from "../providers";
 import ChoiceMenu from "./ChoiceMenu";
 import Icon from "./Icon";
 import "./ModelControls.css";
 const effortLabels: Record<string, string> = { none: "None", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Maximum", ultra: "Ultra" };
 const effortDescriptions: Record<string, string> = { none: "No extra reasoning", minimal: "Lightest reasoning", low: "Quicker responses for straightforward work", medium: "A balance of speed and depth", high: "More thought for complex work", xhigh: "Deeper reasoning; takes longer", max: "Maximum depth for demanding tasks", ultra: "The provider's highest reasoning setting" };
-export default function ModelControls({ provider, options, onChange, load, disabled, refreshKey = 0 }: { provider: Provider; options: RunOptions; onChange: (options: RunOptions) => Promise<void>; load: (provider: Provider, refresh: boolean) => Promise<ModelCatalog>; disabled?: boolean; refreshKey?: number }) {
+export default function ModelControls({ provider, options, onChange, load, disabled, refreshKey = 0, children, onRefresh, refreshLabel = "Refresh available models" }: { provider: Provider; options: RunOptions; onChange: (options: RunOptions) => Promise<void>; load: (provider: Provider, refresh: boolean) => Promise<ModelCatalog>; disabled?: boolean; refreshKey?: number; children?: ReactNode; onRefresh?: () => void; refreshLabel?: string }) {
   const [catalog, setCatalog] = useState<ModelCatalog>({ models: [], notice: null });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -64,7 +64,8 @@ export default function ModelControls({ provider, options, onChange, load, disab
       }} />
       {efforts.length ? <ChoiceMenu label="Reasoning" choices={efforts} value={display.reasoning} placeholder="Choose level…" disabled={disabled || busy || !ready} onChange={(reasoning) => void apply({ model: effective.model, reasoning })} /> :
         <div className="choice-field"><span className="choice-label">Reasoning</span><span className="choice-trigger choice-static" role="status" aria-label={`Reasoning: ${reasoningStatus}`} title={model ? "This model does not expose adjustable reasoning levels." : "Select an available model to see its reasoning levels."}>{reasoningStatus}</span></div>}
-      <button type="button" className="models-refresh" aria-label="Refresh available models" title="Refresh available models" disabled={loading || busy} onClick={() => setRefresh((n) => n + 1)}><Icon name="reset" size={14} /></button>
+      {children}
+      <button type="button" className="models-refresh" aria-label={refreshLabel} title={refreshLabel} disabled={loading || busy} onClick={() => { setRefresh((n) => n + 1); onRefresh?.(); }}><Icon name="reset" size={14} /></button>
     </div>
     {custom && <div className="custom-model"><input aria-label="Custom model ID" autoFocus value={modelId} maxLength={200} placeholder="provider/model-id" onChange={(e) => setModelId(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();e.stopPropagation();if(modelId.trim())void apply(resolveOptions({model:modelId.trim(),reasoning:''},catalog));}}}/><button type="button" disabled={busy || disabled || !modelId.trim()} onClick={()=>void apply(resolveOptions({model:modelId.trim(),reasoning:''},catalog))}>Apply model</button><button type="button" onClick={() => setCustom(false)}>Cancel</button></div>}
     {(error || catalog.notice || loading) && <p className={`model-note${error ? " error" : ""}`} role={error ? "alert" : "status"}>{error || (loading ? "Loading available models…" : catalog.notice)}</p>}

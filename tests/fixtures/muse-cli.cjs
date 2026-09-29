@@ -28,6 +28,23 @@ if (args[0] === "serve") {
     record("task.lifecycle.proposed", { task_id: "hold", event: { task_kind: "tool.powershell" } });
     spawn(process.execPath, [__filename, "--descendant"], { stdio: "inherit", windowsHide: true });
     setInterval(() => {}, 1000);
+  } else if (prompt === "NO_COMPLETION") {
+    record("run.output.delta", { text: "Incomplete output" });
+    // Real launchers can exit zero without a provider terminal event.
+  } else if (prompt === "RETRY_RECOVER") {
+    const status = (phase, extra = {}) => record("task.lifecycle.status", { event: {
+      message: "Provider status", details: { phase, facets: [
+        { kind: "external_attempt", system: "meta", operation: "model.response", attempt: 1, max_attempts: 10, ...extra },
+        { kind: "producer", detail: { request_id: "PRIVATE_REQUEST", token: "PRIVATE_TOKEN" } },
+      ] },
+    } });
+    status("retry_scheduled", { next_attempt: 2, retry_delay_ms: 3000, http_status: 503 });
+    setTimeout(() => {
+      status("opening_stream", { attempt: 2 });
+      record("run.output.delta", { text: "Recovered after service retry" });
+      status("stream_succeeded", { attempt: 2 });
+      record("run.terminal.completed", { terminal: "completed", text: "Recovered after service retry" });
+    }, 3000);
   } else if (prompt === "MEMORY_PROPOSAL" || prompt === "MEMORY_FAIL") {
     const answer = 'Saved idea.\n```velum-memory\n[{"title":"Database choice","body":"The project uses SQLite with WAL mode.","tags":["database"]}]\n```';
     for (const text of answer) record("run.output.delta", { text });

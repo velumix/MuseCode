@@ -17,6 +17,8 @@ use tauri::{Emitter, Manager, State};
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Saved {
     #[serde(default)]
+    pub permission_mode: Option<bool>,
+    #[serde(default)]
     pub bot_id: Option<String>,
     pub version: u32,
     pub workspace: String,
@@ -26,6 +28,7 @@ pub struct Saved {
     pub truncated: bool,
 }
 struct Binding {
+    permission_mode: Option<bool>,
     bot_id: Option<String>,
     tab: String,
     workspace: String,
@@ -130,6 +133,7 @@ impl HistoryState {
         self.bindings.lock().unwrap().insert(
             id.into(),
             Binding {
+                permission_mode: None,
                 bot_id: None,
                 tab,
                 workspace,
@@ -159,6 +163,12 @@ impl HistoryState {
             }
         }
     }
+    pub fn permission_mode(&self, id: &str, yolo: bool) {
+        if let Some(binding) = self.bindings.lock().unwrap().get_mut(id) {
+            binding.permission_mode = Some(yolo);
+            binding.dirty = true;
+        }
+    }
     pub fn bind_bot(&self, id: &str, bot_id: Option<String>) {
         if let Some(binding) = self.bindings.lock().unwrap().get_mut(id) {
             binding.bot_id = bot_id;
@@ -182,6 +192,7 @@ impl HistoryState {
                     id.clone(),
                     b.tab.clone(),
                     Saved {
+                        permission_mode: b.permission_mode,
                         bot_id: b.bot_id.clone(),
                         version: 1,
                         workspace: b.workspace.clone(),

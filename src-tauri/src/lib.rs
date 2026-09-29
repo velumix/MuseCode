@@ -13,6 +13,8 @@ mod plugins;
 mod provider_auth;
 mod provider_events;
 mod provider_models;
+mod provider_progress;
+mod provider_usage;
 mod providers;
 mod pty;
 mod remote;
@@ -22,6 +24,7 @@ mod session_log;
 mod storage;
 mod tailscale;
 mod usb;
+mod workspace_access;
 
 use pty::PtyState;
 use runner::AgentState;
@@ -77,6 +80,8 @@ pub fn run() {
             providers::provider_status,
             provider_models::provider_models,
             runner::agent_configure,
+            runner::agent_set_permissions,
+            runner::agent_check_access,
             provider_auth::antigravity_login_start,
             provider_auth::antigravity_login_status,
             provider_auth::antigravity_login_submit,

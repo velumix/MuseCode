@@ -459,17 +459,6 @@
 .bot-run-detail {
   overflow-wrap: anywhere;
 }
-.bot-conversation-picker {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-.bot-conversation-picker .choice-field {
-  min-width: 160px;
-}
-.bot-conversation-picker .choice-label {
-  display: none;
-}
 @media (max-width: 650px) {
   .bots-overlay {
     padding: 0;

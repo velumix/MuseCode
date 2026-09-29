@@ -1,6 +1,27 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+test('phone replays the original Muse retry deadline and clears it after recovery', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-09-29T20:00:00Z') });
+  const remote = await boot(page);
+  remote.sessions[0].running = true; remote.sessions[0].revision++;
+  const now = await page.evaluate(() => Date.now());
+  remote.entries.push({ seq: 4, event: { kind: 'turn_start', prompt: 'Retry fixture' } },
+    { seq: 5, event: { kind: 'provider_progress', progress: { phase: 'retrying', checked_at_ms: now - 30_000, retry_at_ms: now + 30_000, attempt: 2, max_attempts: 10, http_status: 503 } } });
+  await page.evaluate(() => (window as any).remoteEvent());
+  await expect(page.locator('.provider-wait')).toContainText('HTTP 503');
+  await expect(page.locator('.provider-wait')).toContainText('Retrying in 30s');
+  await page.clock.fastForward(10_000);
+  await expect(page.locator('.provider-wait')).toContainText('Retrying in 20s');
+  expect(await page.locator('.phone-working').evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true);
+  await page.screenshot({ path: '.qa/provider-retry-phone.png' });
+  remote.entries.push({ seq: 6, event: { kind: 'turn_end', status: 'completed', text: 'Recovered' } });
+  remote.sessions[0].running = false; remote.sessions[0].revision++;
+  await page.evaluate(() => (window as any).remoteEvent());
+  await expect(page.locator('.provider-wait')).toHaveCount(0);
+  await expect(page.locator('.phone-message.assistant').last()).toContainText('Recovered');
+});
+
 async function boot(page: Page, paired = true, control = true, provider = "muse") {
   const remote = {
     paired, control, pending: false, failSend: false, revoked: false, sends: [] as string[],
@@ -87,6 +108,61 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
   return remote;
 }
 
+test('phone usage replays provider counters, resets per turn, and never invents unknown capacity', async ({ page }) => {
+  const remote = await boot(page, true, true, 'codex');
+  remote.entries.push({ seq: 4, event: { kind: 'memory_context', titles: ['Phone preference'], bytes: 288 } },
+    { seq: 5, event: { kind: 'usage', context: { used_tokens: 80000, window_tokens: 100000, measured_at: Date.now() }, turn: { input_tokens: 1200, cached_input_tokens: 200, output_tokens: 120, reasoning_output_tokens: 20, elapsed_ms: 2000 } } });
+  remote.sessions[0].revision = 5;
+  await page.evaluate(() => (window as any).remoteEvent());
+  await expect(page.locator('.usage-summary')).toContainText('Context 80%');
+  await expect(page.locator('.usage-speed')).toContainText('60 tok/s');
+  await page.locator('.usage-summary').click();
+  await expect(page.getByRole('dialog', { name: 'Context and usage', exact: true })).toContainText('80,000 / 100,000');
+  await expect(page.locator('.usage-details')).toContainText('Phone preference');
+  expect((await new AxeBuilder({ page }).include('.usage-strip').analyze()).violations).toEqual([]);
+  await page.getByLabel('Close usage details').click();
+  await page.getByLabel('Message your desktop agent').fill('A new turn');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await expect(page.locator('.usage-speed')).toHaveText('— tok/s');
+  await expect(page.locator('.usage-context')).toContainText('80%');
+  await page.getByRole('button', { name: 'Stop task' }).click();
+  remote.entries.push({ seq: remote.entries.length + 1, event: { kind: 'usage_reset' } });
+  remote.sessions[0].revision = remote.entries.length;
+  await page.evaluate(() => (window as any).remoteEvent());
+  await expect(page.locator('.usage-context')).toHaveClass(/unknown/);
+  await page.locator('.usage-summary').click();
+  await expect(page.locator('.usage-details')).not.toContainText('Phone preference');
+  await expect(page.locator('.usage-details')).toContainText('has not reported a context snapshot');
+});
+
+test('phone controls and usage fit the physical keyboard and landscape viewport sizes', async ({ page }) => {
+  await boot(page);
+  await page.getByLabel('Message your desktop agent').fill('Keep my draft while resizing');
+  for (const size of [{ width: 411, height: 774 }, { width: 411, height: 447 }, { width: 852, height: 299 }]) {
+    await page.setViewportSize(size);
+    await expect(page.getByRole('button', { name: 'Send message' })).toBeInViewport();
+    await expect(page.getByRole('button', { name: 'Project context & diagnostics' })).toBeInViewport();
+    await expect(page.locator('.usage-summary')).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(await page.locator('.phone-transcript').evaluate(el => el.clientHeight)).toBeGreaterThan(100);
+    await page.locator('.phone-session-select').click();
+    const select = await page.locator('.phone-session-select').boundingBox();
+    const menu = await page.locator('.phone-sessions').boundingBox();
+    expect(menu!.y).toBeGreaterThanOrEqual(select!.y + select!.height - 1);
+    await page.locator('.phone-sessions button').first().click();
+    await page.locator('.usage-summary').click();
+    await expect(page.getByLabel('Close usage details')).toBeInViewport();
+    await page.getByLabel('Close usage details').click();
+  }
+  await expect(page.getByLabel('Message your desktop agent')).toHaveValue('Keep my draft while resizing');
+  await page.setViewportSize({ width: 850, height: 65 });
+  await expect(page.getByLabel('Message your desktop agent')).toBeInViewport();
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeInViewport();
+  expect(await page.locator('.phone-composer').evaluate(el => el.getBoundingClientRect().bottom <= innerHeight + 1)).toBe(true);
+  await page.setViewportSize({ width: 411, height: 774 });
+  await expect(page.locator('.usage-summary')).toBeVisible();
+});
+
 test('phone diagnostics preserve drafts, fit the screen and disappear after revocation',async({page})=>{
   const remote=await boot(page);
   await page.getByLabel('Message your desktop agent').fill('Keep phone draft');
@@ -109,7 +185,7 @@ test('view-only phone diagnostics expose no attachment or write check controls',
   await boot(page,true,false);await page.getByRole('button',{name:'Project context & diagnostics'}).click();
   await expect(page.getByLabel('Velum diagnostics preview')).toContainText('not checked');
   await expect(page.getByRole('button',{name:'Add to message'})).toHaveCount(0);
-  await expect(page.getByRole('button',{name:'Test file access'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Test host access'})).toHaveCount(0);
 });
 
 test('phone creates a bot with personality, model and schedule controls',async({page})=>{
@@ -216,6 +292,46 @@ test("phone drafts survive reload and are removed when access is revoked",async(
   remote.revoked=true;await page.evaluate(()=>(window as any).remoteEvent());await expect(page.locator(".phone-message")).toHaveCount(0);
   await expect.poll(()=>page.evaluate(()=>localStorage.getItem("velum-phone-drafts-v1"))).toBeNull();
   await page.reload();await expect(page.getByLabel("Message your desktop agent")).toHaveCount(0);
+});
+
+async function durableDrafts(page: Page) {
+  return page.evaluate(() => new Promise<Record<string, string>>((resolve, reject) => {
+    const open = indexedDB.open('velum-phone-drafts', 1);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('state', 'readonly');
+      const request = tx.objectStore('state').get('velum-phone-drafts-v1');
+      tx.oncomplete = () => { db.close(); resolve(request.result?.drafts || {}); };
+      tx.onabort = () => { db.close(); reject(tx.error); };
+    };
+    open.onerror = () => reject(open.error);
+  }));
+}
+
+test('durable phone drafts recover stale WebView local storage and revoke both stores', async ({ page }) => {
+  const remote = await boot(page);
+  await page.getByLabel('Message your desktop agent').fill('Durable phone draft');
+  await expect.poll(() => durableDrafts(page)).toEqual({ 'session-one': 'Durable phone draft' });
+  await page.evaluate(() => localStorage.setItem('velum-phone-drafts-v1', JSON.stringify({ time: Date.now() - 60000, drafts: { 'session-one': 'Stale WebView copy' } })));
+  await page.reload();
+  await expect(page.getByLabel('Message your desktop agent')).toHaveValue('Durable phone draft');
+  remote.revoked = true;
+  await page.evaluate(() => (window as any).remoteEvent('revoked'));
+  await expect(page.getByLabel('Message your desktop agent')).toHaveCount(0);
+  await expect.poll(() => durableDrafts(page)).toEqual({});
+  expect(await page.evaluate(() => localStorage.getItem('velum-phone-drafts-v1'))).toBeNull();
+  await page.reload();
+  await expect(page.getByLabel('Message your desktop agent')).toHaveCount(0);
+  await expect.poll(() => durableDrafts(page)).toEqual({});
+});
+
+test('phone storage failure leaves editing and the local fallback usable', async ({ page }) => {
+  await page.addInitScript(() => { Object.defineProperty(window, 'indexedDB', { value: { open() { throw new Error('Storage disabled'); } } }); });
+  await boot(page);
+  await page.getByLabel('Message your desktop agent').fill('Fallback draft');
+  await page.reload();
+  await expect(page.getByLabel('Message your desktop agent')).toHaveValue('Fallback draft');
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeEnabled();
 });
 
 test("view-only phone memory cannot be edited",async({page})=>{

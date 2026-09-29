@@ -53,6 +53,38 @@ test("memory review, settings and conflicts preserve the unsaved note",async({pa
   const results=await new AxeBuilder({page}).include(".memory-panel").withTags(["wcag2a","wcag2aa","wcag21aa"]).analyze();expect(results.violations).toEqual([]);
 });
 
+test("conversation selectors share one row and one refresh updates providers and models", async ({ page }) => {
+  await boot(page);
+  const controls = [page.getByLabel("AI provider"), page.getByRole("button", { name: "Model: Deep model", exact: true }), page.getByRole("button", { name: "Reasoning: High", exact: true }), page.getByRole("button", { name: "Bot: Provider assistant", exact: true })];
+  await expect(controls[1]).toBeEnabled();
+  for (const width of [1560, 1200, 980, 760]) {
+    await page.setViewportSize({ width, height: 800 });
+    const bounds = await Promise.all(controls.map((control) => control.boundingBox()));
+    for (const [index, box] of bounds.entries()) {
+      expect(box!.y).toBeCloseTo(bounds[0]!.y, 0);
+      expect(box!.height).toBe(bounds[0]!.height);
+      if (index > 0) expect(box!.x).toBeGreaterThanOrEqual(bounds[index - 1]!.x + bounds[index - 1]!.width);
+      await expect(controls[index]).toBeInViewport();
+    }
+    expect(await page.locator(".provider-bar").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  }
+  const refresh = page.locator(".provider-bar").getByRole("button", { name: /Refresh/ });
+  await expect(refresh).toHaveCount(1);
+  await expect(refresh).toHaveAccessibleName("Refresh providers and models");
+  await composer(page).fill("Keep this draft");
+  const callsBefore = await page.evaluate(() => (window as any).qa.calls.length);
+  await refresh.click();
+  await expect(controls[1]).toBeEnabled();
+  const calls = await page.evaluate((from) => (window as any).qa.calls.slice(from), callsBefore);
+  expect(calls.filter((c: any) => c.cmd === "provider_status")).toHaveLength(1);
+  expect(calls.filter((c: any) => c.cmd === "provider_models")).toEqual([{ cmd: "provider_models", args: { provider: "muse", refresh: true } }]);
+  expect(calls.filter((c: any) => c.cmd === "agent_new" || c.cmd === "agent_stop")).toHaveLength(0);
+  await expect(composer(page)).toHaveValue("Keep this draft");
+  await page.screenshot({ path: ".qa/toolbar-compact.png", animations: "disabled" });
+  await page.setViewportSize({ width: 1560, height: 800 });
+  await page.screenshot({ path: ".qa/toolbar-desktop.png", animations: "disabled" });
+});
+
 test("model and reasoning changes preserve the conversation and persist per provider", async ({ page }) => {
   await boot(page);
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("velum-options-muse") || "null"))).toEqual({ model: "muse-deep", reasoning: "high" });
@@ -92,7 +124,7 @@ test("catalog defaults resolve empty preferences without replacing saved choices
   await boot(page);
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("velum-options-muse") || "null"))).toEqual({ model: "muse-deep", reasoning: "high" });
   await page.evaluate(() => { (window as any).qa.modelDefaults = { model: "muse-fast", reasoning: "low" }; });
-  await page.getByRole("button", { name: "Refresh available models" }).click();
+  await page.getByRole("button", { name: "Refresh providers and models" }).click();
   await expect(page.locator(".model-controls")).toHaveAttribute("aria-busy", "false");
   await expect(page.getByRole("button", { name: "Model: Deep model", exact: true })).toBeEnabled();
   await page.evaluate(() => {
@@ -152,7 +184,7 @@ test("failed settings keep the selection and terminal changes wait for Restart",
 test("unavailable catalogs retain saved settings and accept a custom model", async ({ page }) => {
   await boot(page);
   await page.evaluate(() => { (window as any).qa.failModels = true; });
-  await page.getByRole("button", { name: "Refresh available models" }).click();
+  await page.getByRole("button", { name: "Refresh providers and models" }).click();
   await expect(page.getByText("Sign in to load models.")).toBeVisible();
   await page.getByRole("button", { name: "Model: muse-deep", exact: true }).click();
   await page.getByRole("option", { name: /^Enter model ID/ }).click();
@@ -164,7 +196,7 @@ test("unavailable catalogs retain saved settings and accept a custom model", asy
 test("Antigravity sign-in keeps codes out of conversations and preserves drafts", async ({ page }) => {
   await boot(page);
   await page.evaluate(() => { (window as any).qa.antigravityInstalled = true; });
-  await page.getByLabel("Refresh installed providers").click();
+  await page.getByLabel("Refresh providers and models").click();
   await page.getByLabel("AI provider").selectOption("antigravity");
   await composer(page).fill("Keep this draft");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();

@@ -47,7 +47,9 @@ Retrieval ranks active notes by words shared with the request, with extra weight
 
 Each live native conversation tracks the revision of notes already supplied. Unchanged excerpts are normally omitted for the next seven turns and become eligible again on the eighth. Edits are eligible immediately; archived/deleted notes get a withdrawal instruction. New conversations retrieve afresh. Failed or stopped turns reset the reuse cache, since the CLI may not have accepted its input.
 
-The usage indicator reports actual bytes added. Desktop token figures are rough estimates, not billing counts; tokenization varies by model and language. This budget limits the memory added by Velum, not the provider's full conversation history or tool output. Providers may retain earlier context, so disabling or deleting a memory cannot erase it from an existing conversation. Start a fresh conversation to clear that context.
+The compact status strip above the desktop composer shows a context ring, average output-token speed, elapsed time, and memory added. Click it for exact provider counters and remaining context capacity. See [context and usage](usage.md) for availability and measurement details.
+
+Memory usage reports actual bytes added. Memory token figures marked `~` are rough estimates, not billing counts; tokenization varies by model and language. This budget limits the memory added by Velum, not the provider's full conversation history or tool output. Providers may retain earlier context, so disabling or deleting a memory cannot erase it from an existing conversation. Start a fresh conversation to clear that context.
 
 No vector database, embeddings, background summarizer, or full chat archive is created. This first version uses lexical matching rather than semantic search. Similar facts with different wording can still become separate notes; review and merge them manually. Terminal sessions keep their own CLI behavior and do not receive this prompt augmentation.
 

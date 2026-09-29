@@ -9,6 +9,14 @@ export async function boot(page: Page, delay = 0) {
       const callbacks = new Map();
       const listeners = new Map();
       let serial = 0;
+      let permissionMode = false, revision = 0, agentChecked = false, hostChecked = false;
+      function accessReport(environment: string, agent: boolean) {
+        return {checked_at:1800000001, environment, running:false, revision, permission_mode:permissionMode?'yolo':'standard', checks:
+          ['directory_listing','known_file_read','file_creation','file_editing','read_back','cleanup'].map((operation,index)=>({operation,
+            status:agent ? (agentChecked ? (api.blockAgentWrites && index>=2?'blocked':'pass') : 'untested') : (index===0?'pass':hostChecked?(api.readOnlyFolder&&index>=2?'fail':'pass'):'untested'),
+            path:'<selected-project>/<unique-probe>',checked_at:agent&&!agentChecked?null:1800000001,environment,
+            detail:agent&&api.blockAgentWrites&&index>=2?'Provider policy rejected the operation.':'Independent operation evidence.',error_code:null,exit_code:null}))};
+      }
       const api = (w.qa = {
         calls: [] as any[],
         sessions: new Map(),
@@ -266,13 +274,32 @@ export async function boot(page: Page, delay = 0) {
             return args.workspace || "C:\\QA";
           }
           if (cmd === 'workspace_pick') return api.pickedFolder || null;
-          if (cmd === 'workspace_check') return {path:args.workspace,checked_at:1800000001,readable:true,writable:!api.readOnlyFolder,message:api.readOnlyFolder ? 'Folder listing works; creating a file failed. Read-only work is still available.' : 'Folder listing and temporary-file creation passed.'};
+          if (cmd === 'workspace_check') {
+            hostChecked=true;
+            return {path:args.workspace,checked_at:1800000001,readable:true,writable:!api.readOnlyFolder,message:'Host filesystem results only.',sanitized:accessReport('Velum host process',false)};
+          }
+          if (cmd === 'agent_set_permissions') {
+            const changed=permissionMode!==args.yolo;
+            if(changed){revision++;agentChecked=false;hostChecked=false;}
+            permissionMode=args.yolo;
+            if(changed)api.emit('agent-event',{id:args.id,event:{kind:'notice',text:'Permission mode changed. A fresh provider conversation will start. Workspace checks were invalidated.'}});
+            return {yolo:permissionMode,new_session:changed,checks_invalidated:changed};
+          }
+          if (cmd === 'agent_check_access') {
+            agentChecked=true;hostChecked=true;
+            setTimeout(()=>api.emit('agent-event',{id:args.id,event:{kind:'turn_end',status:'completed'}}),10);
+            return {id:args.id,turn_id:'probe-turn'};
+          }
           if (cmd === 'app_diagnostics') {
             if (api.failDiagnostics) throw 'Diagnostics unavailable';
-            return {app:'Velum Code',version:'0.6.1',host_os:'windows',checked_at:1800000000,workspace:{path:'<selected-project>',directory_listing:true,git_repository:true,write_access:'not checked',message:'Folder listing passed. Write access and CLI tool permissions have not been tested.'},providers:[{provider:'muse',installed:true,authentication:'not checked',tool_connections:'not checked'},{provider:'antigravity',installed:true,authentication:'not checked',tool_connections:'not checked'}],memory:{readable:true,enabled:true,notes:2,budget_bytes:3000,capture:'review'},sessions:{active:0,failed:0,blocked:0}};
+            return {app:'Velum Code',version:'0.6.1',host_os:'windows',checked_at:1800000000,workspace:{path:'<selected-project>',git_repository:true,message:'Host and agent results are separate.'},
+              workspace_access:{host:accessReport('Velum host process',false),agent:accessReport('Muse agent tools',true),selection:{kind:args.workspace==='C:\\profile-home'?'user_profile_root':'project_directory',guidance:args.workspace==='C:\\profile-home'?'Choose a project folder and Apply it before coding in Codex Standard mode.':null},permissions:{requested_mode:permissionMode?'yolo':'standard',launched_mode:agentChecked?(permissionMode?'yolo':'standard'):null,revision,effective:{status:'untested'}}},
+              connections:[{name:'GitHub',status:'untested',detail:'No live health evidence.'}],attachments:{detail:'Velum does not discover provider UI/document sessions.'},
+              providers:[{provider:'muse',installed:true,authentication:'not checked',tool_connections:'not checked'},{provider:'antigravity',installed:true,authentication:'not checked',tool_connections:'not checked'}],memory:{readable:true,enabled:true,notes:2,budget_bytes:3000,capture:'review'},sessions:{active:0,failed:0,blocked:0}};
           }
           if (cmd === "agent_new") {
             if (delay) await new Promise((r) => setTimeout(r, delay));
+            if (api.holdAgentNew) await new Promise<void>(resolve => { api.releaseAgentNew = resolve; });
             if (args.workspace?.includes("missing"))
               throw "workspace is not a directory";
             api.sessions.set(args.id, "agent");
@@ -282,6 +309,7 @@ export async function boot(page: Page, delay = 0) {
               id: args.id,
               session_id: `native-${args.id}`,
               workspace: args.workspace || "C:\\QA",
+              workspace_notice: args.workspace==='C:\\profile-home'?'Choose a project folder and Apply it before coding in Codex Standard mode.':null,
             };
           }
           if (cmd === "agent_send") {
@@ -323,6 +351,8 @@ export async function boot(page: Page, delay = 0) {
     { delay },
   );
   await page.goto("/");
+  await expect(page.locator("#startup")).toHaveCount(0);
+  await expect(page.locator("#root")).not.toHaveAttribute("inert", "");
   await expect(page.locator(".chat-wrap:not(.hidden) textarea")).toBeEnabled();
   await expect(page.locator(".model-controls")).toHaveAttribute(
     "aria-busy",

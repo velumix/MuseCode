@@ -15,6 +15,8 @@ pub struct Entry {
 
 #[derive(Clone, Serialize)]
 pub struct Summary {
+    pub provider_progress: Option<crate::provider_progress::Progress>,
+    pub last_provider_retry: Option<crate::provider_progress::Progress>,
     pub bot: Option<crate::bots::Identity>,
     pub options: crate::provider_models::RunOptions,
     pub provider: crate::providers::Provider,
@@ -59,6 +61,8 @@ impl SessionLog {
             id.into(),
             Log {
                 summary: Summary {
+                    provider_progress: None,
+                    last_provider_retry: None,
                     bot: None,
                     options: crate::provider_models::RunOptions::default(),
                     provider,
@@ -100,6 +104,8 @@ impl SessionLog {
                 log.summary.bot = Some(bot.clone());
             }
             AgentEvent::TurnStart { prompt, .. } => {
+                log.summary.provider_progress = None;
+                log.summary.last_provider_retry = None;
                 if !log.started {
                     log.started = true;
                     log.summary.title = prompt
@@ -112,6 +118,16 @@ impl SessionLog {
                 }
                 log.summary.running = true;
                 log.summary.status = "running".into();
+            }
+            AgentEvent::ProviderProgress { progress } => {
+                log.summary.provider_progress = Some(progress.clone());
+                if progress.phase == crate::provider_progress::Phase::Retrying {
+                    log.summary.last_provider_retry = Some(progress.clone());
+                }
+            }
+            AgentEvent::UsageReset => {
+                log.summary.provider_progress = None;
+                log.summary.last_provider_retry = None;
             }
             AgentEvent::TurnEnd { status, .. } => {
                 log.summary.running = false;
@@ -170,6 +186,70 @@ impl SessionLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn provider_retry_evidence_survives_recovery_but_not_new_turns_or_permission_resets() {
+        use crate::provider_progress::{Phase, Progress};
+        let log = SessionLog::default();
+        log.register("one", "workspace".into());
+        let retry = Progress {
+            phase: Phase::Retrying,
+            checked_at_ms: 1000,
+            attempt: Some(2),
+            max_attempts: Some(10),
+            http_status: Some(503),
+            retry_at_ms: Some(61_000),
+        };
+        log.record(
+            "one",
+            &AgentEvent::ProviderProgress {
+                progress: retry.clone(),
+            },
+        );
+        let connected = Progress {
+            phase: Phase::Connected,
+            http_status: None,
+            retry_at_ms: None,
+            ..retry.clone()
+        };
+        log.record(
+            "one",
+            &AgentEvent::ProviderProgress {
+                progress: connected.clone(),
+            },
+        );
+        log.record(
+            "one",
+            &AgentEvent::TurnEnd {
+                status: "completed".into(),
+                text: None,
+                reason: None,
+            },
+        );
+        let summary = log.summaries().remove(0);
+        assert_eq!(summary.provider_progress, Some(connected));
+        assert_eq!(summary.last_provider_retry, Some(retry.clone()));
+        assert!(!summary.running);
+        for reset in [
+            AgentEvent::TurnStart {
+                prompt: "new".into(),
+                remote: false,
+            },
+            AgentEvent::UsageReset,
+        ] {
+            log.record(
+                "one",
+                &AgentEvent::ProviderProgress {
+                    progress: retry.clone(),
+                },
+            );
+            log.record("one", &reset);
+            let summary = log.summaries().remove(0);
+            assert_eq!(summary.provider_progress, None);
+            assert_eq!(summary.last_provider_retry, None);
+        }
+        log.register("one", "other workspace".into());
+        assert_eq!(log.summaries()[0].last_provider_retry, None);
+    }
     #[test]
     fn bot_identity_does_not_prevent_the_first_prompt_from_naming_a_conversation() {
         let log = SessionLog::default();

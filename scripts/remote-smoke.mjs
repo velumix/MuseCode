@@ -86,7 +86,7 @@ try {
   await phone.goto(invitation.url);
   if (release) {
     await phone.evaluate(() => navigator.serviceWorker.ready.then(() => true));
-    await expect.poll(() => phone.evaluate(() => caches.keys())).toEqual(["velum-phone-v6"]);
+    await expect.poll(() => phone.evaluate(() => caches.keys())).toEqual(["velum-phone-v7"]);
     await context.setOffline(true);
     const offline = await context.newPage();
     await offline.goto(new URL("/", invitation.url).href);
@@ -94,7 +94,7 @@ try {
     assert(!(await offline.locator("body").innerText()).includes("Old phone shell"));
     await offline.close();
     await context.setOffline(false);
-    const cached = await phone.evaluate(async () => (await (await caches.open("velum-phone-v6")).keys()).map((r) => r.url));
+    const cached = await phone.evaluate(async () => (await (await caches.open("velum-phone-v7")).keys()).map((r) => r.url));
     assert(cached.every((url) => !url.includes("/api/") && !url.includes("pair=")), "Phone cache contains private data");
     console.log("PASS: old phone cache migrates, offline launch has current branding, private data stays uncached");
   }

@@ -58,6 +58,9 @@ if (provider === "codex" && args[0] === "app-server") {
     emit({ type: "turn.completed" });
   } else {
     if (prompt === 'DENIED') {
+      // Agy sometimes supplies an empty DONE snapshot and reports the denial
+      // only on stderr. The UI must correct the unconfirmed tool's status.
+      emit({event:'step_update',step_update:{step_index:8,step_type:'tool',tool_name:'run_command',state:'DONE',tool_info:{parameters:{CommandLine:'fixture command'}}}});
       console.error('jetski: a tool required the command permission that headless mode cannot prompt for, so it was auto-denied.');
       for (let i=0;i<40;i++) console.error('Following stderr diagnostic '+i);
     }

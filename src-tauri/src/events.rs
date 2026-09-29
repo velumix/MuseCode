@@ -32,6 +32,16 @@ pub struct TodoItem {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AgentEvent {
+    ProviderProgress {
+        progress: crate::provider_progress::Progress,
+    },
+    Usage {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        context: Option<crate::provider_usage::ContextUsage>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        turn: Option<crate::provider_usage::TurnUsage>,
+    },
+    UsageReset,
     BotIdentity {
         bot: crate::bots::Identity,
     },
@@ -290,6 +300,17 @@ impl Fold {
             }
             "task.lifecycle.status" => {
                 let event = payload.get("event").cloned().unwrap_or(Value::Null);
+                if let Some(progress) = crate::provider_progress::muse(
+                    &event["details"],
+                    crate::provider_progress::now_ms(),
+                ) {
+                    return vec![
+                        AgentEvent::Activity {
+                            text: progress.message(),
+                        },
+                        AgentEvent::ProviderProgress { progress },
+                    ];
+                }
                 str_field(&event, "message")
                     .map(|text| AgentEvent::Activity {
                         text: truncate_activity(text),
@@ -579,6 +600,17 @@ mod tests {
                 r#"{"payload_type":"task.lifecycle.status","payload":{"event":{"kind":"status"}}}"#
             )
             .is_empty());
+    }
+
+    #[test]
+    fn muse_retry_details_reach_ui_and_diagnostics_as_safe_structured_progress() {
+        let mut fold = Fold::default();
+        let events = fold.fold_line(r#"{"payload_type":"task.lifecycle.status","payload":{"event":{"kind":"status","message":"retrying meta model stream in 60000ms (attempt 2/10)","details":{"phase":"retry_scheduled","facets":[{"kind":"external_attempt","system":"meta","operation":"model.response","attempt":1,"next_attempt":2,"max_attempts":10,"http_status":503,"retry_delay_ms":60000},{"kind":"producer","detail":{"request_id":"PRIVATE"}}]}}}}"#);
+        assert!(matches!(&events[0], AgentEvent::Activity{text} if text.contains("HTTP 503")));
+        assert!(
+            matches!(&events[1], AgentEvent::ProviderProgress{progress} if progress.http_status == Some(503) && progress.attempt == Some(2))
+        );
+        assert!(!serde_json::to_string(&events).unwrap().contains("PRIVATE"));
     }
 
     #[test]

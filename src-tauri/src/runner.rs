@@ -5,7 +5,10 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
+};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::events::AgentEvent;
@@ -18,6 +21,8 @@ use crate::pty::home_dir;
 const STDERR_TAIL_LINES: usize = 30;
 
 pub struct AgentSession {
+    registration: u64,
+    access: Mutex<AccessState>,
     bot_id: Option<String>,
     bot_identity: Mutex<Option<crate::bots::Identity>>,
     task_id: Option<String>,
@@ -33,9 +38,89 @@ pub struct AgentSession {
     prompt: Mutex<Option<std::path::PathBuf>>,
 }
 
+struct AccessState {
+    fresh_session_pending: bool,
+    requested: bool,
+    applied: Option<bool>,
+    revision: u64,
+    host: Option<crate::workspace_access::Report>,
+    agent: crate::workspace_access::Report,
+    restrictions: serde_json::Value,
+}
+
+/// If staging or launching fails, publish untested evidence and cleanup results
+/// instead of leaving the diagnostics panel stuck on a running probe.
+struct PendingProbe {
+    probe: Option<crate::workspace_access::Probe>,
+    session: Arc<AgentSession>,
+}
+impl Drop for PendingProbe {
+    fn drop(&mut self) {
+        if let Some(probe) = self.probe.as_mut() {
+            self.session.access.lock().unwrap().agent = probe.finish();
+        }
+    }
+}
+impl AccessState {
+    fn new(workspace: &std::path::Path, provider: Provider, applied: Option<bool>) -> Self {
+        Self {
+            fresh_session_pending: false,
+            requested: false,
+            applied,
+            revision: 0,
+            host: None,
+            agent: crate::workspace_access::Report::untested(
+                workspace,
+                format!("{} agent tools", provider.label()),
+                false,
+                0,
+            ),
+            restrictions: serde_json::json!({"status":"untested","detail":"No effective provider metadata observed in this process."}),
+        }
+    }
+    fn change(&mut self, yolo: bool, has_resume: bool) -> bool {
+        let reset = self.requested != yolo
+            || self.applied.is_some_and(|mode| mode != yolo)
+            || (has_resume && self.applied.is_none() && !self.fresh_session_pending);
+        if reset {
+            self.revision += 1;
+            self.agent.invalidate(self.revision, yolo);
+            self.host = None;
+            self.restrictions = serde_json::json!({"status":"untested","detail":"Permission mode changed; a new provider session is required."});
+            self.applied = None;
+            self.fresh_session_pending = true;
+        }
+        self.requested = yolo;
+        reset
+    }
+    fn value(&self, sanitized: bool) -> serde_json::Value {
+        let report = |r: &crate::workspace_access::Report| {
+            if sanitized {
+                crate::workspace_access::sanitized(r)
+            } else {
+                serde_json::to_value(r).unwrap()
+            }
+        };
+        serde_json::json!({"host":self.host.as_ref().map(report),"agent":report(&self.agent),
+            "permissions":{"requested_mode":crate::workspace_access::mode(self.requested),"launched_mode":self.applied.map(crate::workspace_access::mode),"revision":self.revision,"effective":self.restrictions,
+            "session_transition":"Mode changes start a fresh provider conversation. The visible transcript remains; previous provider context is not replayed."}})
+    }
+    fn observe_session(&mut self, previous: &str, current: &str) -> bool {
+        if previous.is_empty() || previous == current {
+            return false;
+        }
+        self.revision += 1;
+        self.agent.invalidate(self.revision, self.requested);
+        self.host = None;
+        self.restrictions = serde_json::json!({"status":"untested","detail":"Provider session changed; earlier access evidence was invalidated."});
+        true
+    }
+}
+
 #[derive(Default)]
 pub struct AgentState {
     sessions: Mutex<HashMap<String, Arc<AgentSession>>>,
+    next_registration: AtomicU64,
 }
 
 impl AgentSession {
@@ -53,6 +138,50 @@ impl AgentSession {
 }
 
 impl AgentState {
+    pub fn record_host(
+        &self,
+        id: &str,
+        workspace: &std::path::Path,
+        report: crate::workspace_access::Report,
+    ) {
+        if let Some(session) = self.sessions.lock().unwrap().get(id) {
+            if session.workspace == workspace {
+                session.access.lock().unwrap().host = Some(report);
+            }
+        }
+    }
+    pub fn access(
+        &self,
+        id: &str,
+        workspace: &std::path::Path,
+        sanitized: bool,
+    ) -> Option<serde_json::Value> {
+        let session = self.sessions.lock().ok()?.get(id)?.clone();
+        if std::fs::canonicalize(&session.workspace).ok()?
+            != std::fs::canonicalize(workspace).ok()?
+        {
+            return None;
+        }
+        let value = session.access.lock().ok()?.value(sanitized);
+        Some(value)
+    }
+    /// Provider and requested permission mode for a session bound to this
+    /// workspace. Diagnostics guidance must reflect the actual session, never
+    /// a hardcoded provider or mode.
+    pub fn session_context(
+        &self,
+        id: &str,
+        workspace: &std::path::Path,
+    ) -> Option<(Provider, bool)> {
+        let session = self.sessions.lock().ok()?.get(id)?.clone();
+        if std::fs::canonicalize(&session.workspace).ok()?
+            != std::fs::canonicalize(workspace).ok()?
+        {
+            return None;
+        }
+        let requested = session.access.lock().ok()?.requested;
+        Some((session.provider, requested))
+    }
     pub fn stop_id(&self, id: &str) {
         let session = self.sessions.lock().ok().and_then(|s| s.get(id).cloned());
         if let Some(s) = session {
@@ -80,6 +209,7 @@ pub struct NewInfo {
     pub id: String,
     pub session_id: String,
     pub workspace: String,
+    pub workspace_notice: Option<String>,
     pub restored: Vec<AgentEvent>,
     pub truncated: bool,
 }
@@ -147,7 +277,19 @@ pub(crate) fn resolve_workspace(workspace: Option<String>) -> Result<std::path::
             if !path.is_dir() {
                 return Err(format!("workspace is not a directory: {dir}"));
             }
-            Ok(path)
+            let canonical = std::fs::canonicalize(&path)
+                .map_err(|e| format!("Cannot resolve the selected project: {e}"))?;
+            // Keep Windows paths usable in CLI prompts and PowerShell LiteralPath.
+            #[cfg(windows)]
+            let canonical = {
+                let text = canonical.display().to_string();
+                if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+                    std::path::PathBuf::from(format!(r"\\{unc}"))
+                } else {
+                    std::path::PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(&text))
+                }
+            };
+            Ok(canonical)
         }
     }
 }
@@ -176,7 +318,7 @@ fn mark_permission_blocked(terminal: &mut Option<AgentEvent>, denied: bool) {
     if let Some(AgentEvent::TurnEnd { status, reason, .. }) = terminal {
         if denied && status != "cancelled" {
             *status = "blocked".into();
-            *reason = Some("Antigravity blocked a tool because headless mode cannot ask for permission. On your desktop, open Terminal in an Antigravity tab and enter /permissions to review the command rule in settings.json. Allow only the command needed, then retry. Scheduled work is paused; partial output is not a completed task.".into());
+            *reason = Some("Antigravity blocked a tool because headless mode cannot ask for permission. On your desktop, open Terminal in an Antigravity tab and enter /permissions, or add a scoped rule such as \"command(...)\" under permissions.allow in ~/.gemini/antigravity-cli/settings.json. Allow only the command needed, then retry. Scheduled work is paused; partial output is not a completed task.".into());
         }
     }
 }
@@ -257,8 +399,13 @@ fn reap_child(session: &AgentSession) -> Option<Option<i32>> {
 }
 
 struct TurnContext {
+    probe: Option<crate::workspace_access::Probe>,
     memory_mode: crate::memory::Capture,
     action_context: Option<crate::bot_actions::Context>,
+    started: std::time::Instant,
+    started_at: i64,
+    usage_session: String,
+    usage_baseline: Option<crate::provider_usage::TurnUsage>,
 }
 fn spawn_reader(
     app: AppHandle,
@@ -270,18 +417,32 @@ fn spawn_reader(
     context: TurnContext,
 ) {
     let TurnContext {
+        mut probe,
         memory_mode,
         action_context,
+        started,
+        started_at,
+        usage_session,
+        usage_baseline,
     } = context;
     // Drain stderr on a side thread so verbose children can never block on
     // a full pipe; the tail is only surfaced when the turn dies silently.
     let stderr_tail: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let probe_errors: Arc<Mutex<HashMap<&'static str, crate::workspace_access::OperationFailure>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+    let probe_id = probe.as_ref().map(|p| p.id.clone());
     let permission_denied = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stderr_handle = stderr.map(|err| {
         let tail = Arc::clone(&stderr_tail);
         let denied = Arc::clone(&permission_denied);
+        let errors = Arc::clone(&probe_errors);
         std::thread::spawn(move || {
             for line in BufReader::new(err).lines().map_while(Result::ok) {
+                if let Some(id) = &probe_id {
+                    for error in crate::workspace_access::error_evidence(id, &line) {
+                        errors.lock().unwrap().insert(error.operation, error);
+                    }
+                }
                 if headless_permission_denied(&line) {
                     denied.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
@@ -299,6 +460,91 @@ fn spawn_reader(
     std::thread::spawn(move || {
         let state = app.state::<AgentState>();
         let mut fold = Stream::new(session.provider);
+        let mut turn_usage = None;
+        let fresh_provider_session = usage_session.is_empty();
+        // Exec does not stream context counters on stdout. Watch only this
+        // thread's numeric metadata, and join before publishing completion.
+        let (usage_stop, usage_receiver) = std::sync::mpsc::channel::<u64>();
+        let usage_handle = (session.provider == Provider::Codex).then(|| {
+            let app = app.clone();
+            let session = Arc::clone(&session);
+            let id = id.clone();
+            std::thread::spawn(move || {
+                let mut last = None;
+                let mut last_turn = None;
+                let mut known_session = usage_session;
+                let mut baseline = usage_baseline;
+                let mut path = None;
+                loop {
+                    let completed_ms =
+                        match usage_receiver.recv_timeout(std::time::Duration::from_secs(1)) {
+                            Ok(elapsed) => Some(elapsed),
+                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                                Some(started.elapsed().as_millis().min(u64::MAX as u128) as u64)
+                            }
+                        };
+                    let resume = session.session_id.lock().unwrap().clone();
+                    if known_session != resume {
+                        known_session = resume;
+                        path = None;
+                        last = None;
+                        last_turn = None;
+                        baseline = Some(crate::provider_usage::TurnUsage::zero());
+                    }
+                    if path.is_none() && !known_session.is_empty() {
+                        path = crate::provider_usage::codex_session_file(&known_session);
+                    }
+                    let snapshot = path
+                        .as_deref()
+                        .and_then(|p| crate::provider_usage::codex_usage(p, started_at));
+                    if let Some(snapshot) = snapshot.filter(|s| last.as_ref() != Some(&s.context)) {
+                        let elapsed_ms = completed_ms.unwrap_or_else(|| {
+                            started.elapsed().as_millis().min(u64::MAX as u128) as u64
+                        });
+                        let turn = snapshot
+                            .total
+                            .as_ref()
+                            .zip(baseline.as_ref())
+                            .map(|(total, baseline)| total.since(baseline, elapsed_ms));
+                        let state = app.state::<AgentState>();
+                        let sessions = state.sessions.lock().unwrap();
+                        if sessions.get(&id).is_some_and(|s| Arc::ptr_eq(s, &session)) {
+                            emit(
+                                &app,
+                                &id,
+                                AgentEvent::Usage {
+                                    context: Some(snapshot.context.clone()),
+                                    turn: turn.clone(),
+                                },
+                            );
+                        }
+                        last = Some(snapshot.context);
+                        if turn.is_some() {
+                            last_turn = turn;
+                        }
+                    }
+                    if let Some(elapsed_ms) = completed_ms {
+                        if let Some(turn) = last_turn.as_mut() {
+                            turn.elapsed_ms = Some(elapsed_ms);
+                            let state = app.state::<AgentState>();
+                            let sessions = state.sessions.lock().unwrap();
+                            if sessions.get(&id).is_some_and(|s| Arc::ptr_eq(s, &session)) {
+                                emit(
+                                    &app,
+                                    &id,
+                                    AgentEvent::Usage {
+                                        context: None,
+                                        turn: Some(turn.clone()),
+                                    },
+                                );
+                            }
+                        }
+                        return last_turn;
+                    }
+                }
+            })
+        });
         let mut terminal = None;
         let mut memory_filter = crate::memory::Filter::default();
         let mut final_proposal = None;
@@ -310,13 +556,40 @@ fn spawn_reader(
         let mut action_error = None;
         let mut action_report = None;
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if let Some(probe) = probe.as_mut() {
+                probe.observe_line(session.provider, &line);
+            }
             let events = fold.fold_line(&line);
             if let Some(resume_id) = &fold.session_id {
-                *session.session_id.lock().unwrap() = resume_id.clone();
+                let mut previous = session.session_id.lock().unwrap();
+                let mut access = session.access.lock().unwrap();
+                if access.observe_session(&previous, resume_id) {
+                    if let Some(probe) = probe.as_mut() {
+                        probe.report.revision = access.revision;
+                        access.agent = probe.report.clone();
+                    }
+                }
+                *previous = resume_id.clone();
+                drop(access);
+                drop(previous);
                 app.state::<crate::history::HistoryState>()
                     .resume_id(&id, resume_id);
             }
             for mut event in events {
+                if let AgentEvent::Usage {
+                    turn: Some(usage), ..
+                } = &mut event
+                {
+                    // For resumed Codex threads, normalize against the saved
+                    // session counters. This also works with CLI versions
+                    // whose completion event contains cumulative totals.
+                    if session.provider == Provider::Codex && !fresh_provider_session {
+                        continue;
+                    }
+                    usage.elapsed_ms =
+                        Some(started.elapsed().as_millis().min(u64::MAX as u128) as u64);
+                    turn_usage = Some(usage.clone());
+                }
                 if matches!(&event, AgentEvent::ToolEnd { reason: Some(reason), .. } | AgentEvent::TurnEnd { reason: Some(reason), .. } if headless_permission_denied(reason))
                 {
                     permission_denied.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -379,15 +652,47 @@ fn spawn_reader(
                 }
             }
         }
+        let turn_elapsed = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        let _ = usage_stop.send(turn_elapsed);
+        if let Some(handle) = usage_handle {
+            if let Ok(Some(usage)) = handle.join() {
+                turn_usage = Some(usage);
+            }
+        }
         if let Some(handle) = stderr_handle {
             let _ = handle.join();
         }
+        let headless_denial = session.provider == Provider::Antigravity
+            && permission_denied.load(std::sync::atomic::Ordering::Relaxed);
+        let policy_tool_events = if headless_denial {
+            fold.permission_denied()
+        } else {
+            vec![]
+        };
+        let probe_report = if let Some(mut probe) = probe {
+            if let Ok(errors) = probe_errors.lock() {
+                for error in errors.values() {
+                    probe.record_failure(error);
+                }
+            }
+            if headless_denial {
+                probe.permission_denied();
+            }
+            Some(probe.finish())
+        } else {
+            None
+        };
+        let restrictions = if session.provider == Provider::Codex {
+            let resume = session.session_id.lock().unwrap().clone();
+            Some(crate::workspace_access::codex_restrictions(&resume))
+        } else {
+            None
+        };
         let exit = reap_child(&session);
         if terminal.is_none() || exit.is_none() || exit.is_some_and(|code| code != Some(0)) {
             // Reaped by us: exit code decides the status. Already reaped by
             // `kill_session`: the user stopped the turn.
             let (status, reason) = match exit {
-                Some(Some(0)) if session.provider == Provider::Muse => ("completed".to_owned(), None),
                 Some(Some(0)) => ("failed".to_owned(), Some(format!("{} ended without a completion event. Open Terminal to check its sign-in and setup.", session.provider.label()))),
                 Some(code) => {
                     let structured = match &terminal {
@@ -437,8 +742,30 @@ fn spawn_reader(
                 .is_some_and(|current| Arc::ptr_eq(current, &session))
         };
         *session.running.lock().unwrap() = false;
+        {
+            let mut access = session.access.lock().unwrap();
+            if let Some(report) = probe_report {
+                access.agent = report;
+            }
+            if let Some(restrictions) = restrictions {
+                access.restrictions = restrictions;
+            }
+        }
         let mut outcome = None;
         if current {
+            if turn_usage.is_none() {
+                emit(
+                    &app,
+                    &id,
+                    AgentEvent::Usage {
+                        context: None,
+                        turn: Some(crate::provider_usage::TurnUsage {
+                            elapsed_ms: Some(turn_elapsed),
+                            ..Default::default()
+                        }),
+                    },
+                );
+            }
             let tail = if action_context.is_some() {
                 bot_output.finish()
             } else {
@@ -530,6 +857,9 @@ fn spawn_reader(
                     }
                 }
             }
+            for event in policy_tool_events {
+                emit(&app, &id, event);
+            }
             if let Some(event) = terminal {
                 emit(&app, &id, event.clone());
                 if let AgentEvent::TurnEnd { status, reason, .. } = event {
@@ -605,6 +935,11 @@ pub fn agent_new(
     } else {
         String::new()
     };
+    let restored_mode = saved.as_ref().and_then(|s| s.permission_mode);
+    let mut access = AccessState::new(&workspace, provider, restored_mode);
+    // Muse allocates its ID before launching. A new ID is not a resumed
+    // conversation with an unknown legacy permission mode.
+    access.fresh_session_pending = saved.is_none();
     let old = state
         .sessions
         .lock()
@@ -612,6 +947,8 @@ pub fn agent_new(
         .insert(
             id.clone(),
             Arc::new(AgentSession {
+                registration: state.next_registration.fetch_add(1, Ordering::Relaxed),
+                access: Mutex::new(access),
                 bot_id: bot_id.clone(),
                 bot_identity: Mutex::new(bot.as_ref().map(|p| p.identity())),
                 task_id,
@@ -635,7 +972,10 @@ pub fn agent_new(
     app.state::<crate::session_log::SessionLog>()
         .configure(&id, options);
     let truncated = saved.as_ref().is_some_and(|saved| saved.truncated);
-    let restored = saved.map(|saved| saved.events).unwrap_or_default();
+    let mut restored = saved.map(|saved| saved.events).unwrap_or_default();
+    if session_id.is_empty() {
+        restored.push(AgentEvent::UsageReset);
+    }
     for event in &restored {
         app.state::<crate::session_log::SessionLog>()
             .record(&id, event);
@@ -648,6 +988,9 @@ pub fn agent_new(
         session_id.clone(),
     );
     history.bind_bot(&id, bot_id);
+    if let Some(mode) = restored_mode {
+        history.permission_mode(&id, mode);
+    }
     if let Some(profile) = &bot {
         emit(
             &app,
@@ -666,9 +1009,31 @@ pub fn agent_new(
         id,
         session_id,
         workspace: workspace.display().to_string(),
+        workspace_notice: crate::workspace_access::project_required(&workspace, provider, false)
+            .then(|| crate::workspace_access::PROFILE_ROOT_GUIDANCE.into()),
         restored,
         truncated,
     })
+}
+
+fn configuration_target<'a>(
+    sessions: &'a HashMap<String, Arc<AgentSession>>,
+    id: &str,
+    by_tab: bool,
+) -> Option<(&'a String, &'a Arc<AgentSession>)> {
+    // A WebView reload can leave an older native session behind. Desktop model
+    // controls belong to the most recently registered owner of that tab. Phone
+    // controls carry an exact native ID and must continue targeting that ID.
+    sessions
+        .iter()
+        .filter(|(key, session)| {
+            if by_tab {
+                session.tab_id == id
+            } else {
+                key.as_str() == id
+            }
+        })
+        .max_by_key(|(_, session)| session.registration)
 }
 
 pub fn configure_session(
@@ -682,21 +1047,21 @@ pub fn configure_session(
         .sessions
         .lock()
         .map_err(|_| "Agent state unavailable.")?;
-    let (id, session) = sessions
-        .iter()
-        .find(|(key, session)| {
-            if by_tab {
-                session.tab_id == id
-            } else {
-                key.as_str() == id
-            }
-        })
+    let (id, session) = configuration_target(&sessions, id, by_tab)
         .ok_or("Conversation is still starting. Try again in a moment.")?;
     if *session.running.lock().unwrap() {
         return Err("Wait for the current response or stop it before changing models.".into());
     }
     options.validate(session.provider)?;
-    *session.options.lock().unwrap() = options.clone();
+    let model_changed = {
+        let mut previous = session.options.lock().unwrap();
+        let changed = previous.model != options.model;
+        *previous = options.clone();
+        changed
+    };
+    if model_changed {
+        emit(app, id, AgentEvent::UsageReset);
+    }
     app.state::<crate::session_log::SessionLog>()
         .configure(id, options.clone());
     let _ = app.emit(
@@ -727,6 +1092,80 @@ pub fn agent_send(
     prompt: String,
     yolo: bool,
     remote: Option<bool>,
+) -> Result<TurnInfo, String> {
+    send_inner(app, state, id, prompt, yolo, remote, false)
+}
+
+#[tauri::command]
+pub fn agent_check_access(
+    app: AppHandle,
+    state: State<AgentState>,
+    id: String,
+    yolo: bool,
+) -> Result<TurnInfo, String> {
+    send_inner(
+        app,
+        state,
+        id,
+        "Check workspace access (Velum diagnostics)".into(),
+        yolo,
+        None,
+        true,
+    )
+}
+
+fn change_permissions(app: &AppHandle, id: &str, session: &AgentSession, yolo: bool) -> bool {
+    let mut resume = session.session_id.lock().unwrap();
+    let mut access = session.access.lock().unwrap();
+    let changed = access.change(yolo, !resume.is_empty());
+    if changed {
+        *resume = if session.provider == Provider::Muse {
+            uuid::Uuid::new_v4().to_string()
+        } else {
+            String::new()
+        };
+        *session.memory.lock().unwrap() = Default::default();
+        *session.shared_memory.lock().unwrap() = Default::default();
+        app.state::<crate::history::HistoryState>()
+            .resume_id(id, &resume);
+        emit(app, id, AgentEvent::UsageReset);
+        emit(app, id, AgentEvent::Notice { text: format!("Permission mode is now {}. The next turn starts a fresh provider conversation; the visible transcript is retained, but previous provider context is not replayed. Workspace checks were invalidated. Run Test agent access to verify this mode.", crate::workspace_access::mode(yolo)) });
+    }
+    let _ = app.emit(
+        "agent-permissions",
+        serde_json::json!({"tab_id":session.tab_id,"yolo":yolo}),
+    );
+    changed
+}
+
+#[tauri::command]
+pub fn agent_set_permissions(
+    app: AppHandle,
+    state: State<AgentState>,
+    id: String,
+    yolo: bool,
+) -> Result<serde_json::Value, String> {
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "Agent state unavailable.")?;
+    let session = sessions.get(&id).ok_or("Conversation is still starting.")?;
+    if *session.running.lock().unwrap() {
+        return Err("Wait for the current turn or stop it before changing permissions.".into());
+    }
+    let changed = change_permissions(&app, &id, session, yolo);
+    Ok(serde_json::json!({"yolo":yolo,"new_session":changed,"checks_invalidated":changed}))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn send_inner(
+    app: AppHandle,
+    state: State<AgentState>,
+    id: String,
+    prompt: String,
+    yolo: bool,
+    remote: Option<bool>,
+    check_access: bool,
 ) -> Result<TurnInfo, String> {
     if prompt.trim().is_empty() {
         return Err("prompt is empty".to_string());
@@ -763,9 +1202,36 @@ pub fn agent_send(
         return Err("This bot is disabled. Enable it from Bots before starting work.".into());
     }
     let provider = session.provider;
+    // Apply the requested mode even when workspace validation prevents launch.
+    // A rejected Standard turn must not leave stale unrestricted diagnostics.
+    change_permissions(&app, &id, &session, yolo);
+    if !check_access
+        && crate::workspace_access::project_required(&session.workspace, provider, yolo)
+    {
+        return Err(crate::workspace_access::PROFILE_ROOT_GUIDANCE.into());
+    }
     let cli_path = provider.resolve().ok_or_else(|| provider.missing())?;
     let session_id = session.session_id.lock().unwrap().clone();
     let workspace = &session.workspace;
+    let probe = if check_access {
+        let mut access = session.access.lock().unwrap();
+        access.host = Some(crate::workspace_access::host_probe(workspace, true));
+        let mut probe = crate::workspace_access::Probe::prepare(
+            workspace,
+            format!("{} agent tools", provider.label()),
+            yolo,
+            access.revision,
+        );
+        probe.report.running = true;
+        access.agent = probe.report.clone();
+        Some(probe)
+    } else {
+        None
+    };
+    let mut pending = PendingProbe {
+        probe,
+        session: Arc::clone(&session),
+    };
     // Prompt via file so quoting/newlines can never corrupt argv.
     let turn_id = uuid::Uuid::new_v4().to_string();
     let staged = StagedPrompt(prompt_file(&turn_id));
@@ -775,7 +1241,13 @@ pub fn agent_send(
     }
     let mut next_memory = session.memory.lock().unwrap().clone();
     let mut next_shared = session.shared_memory.lock().unwrap().clone();
-    let memory_result = if let Some(bot) = &bot {
+    let memory_result = if let Some(probe) = &pending.probe {
+        Ok((
+            probe.prompt(provider),
+            crate::memory::Usage::default(),
+            crate::memory::Capture::Manual,
+        ))
+    } else if let Some(bot) = &bot {
         (|| {
             let global = app.state::<crate::memory::Store>();
             let shared_budget = if bot.shared_memory {
@@ -831,7 +1303,7 @@ pub fn agent_send(
             )
         }
     };
-    let action_context = if let Some(bot) = &bot {
+    let action_context = if let Some(bot) = bot.as_ref().filter(|_| !check_access) {
         let identity = app.state::<crate::bots::Store>().context(bot)?;
         let (context, board) = crate::bot_actions::prepare(
             &app,
@@ -860,7 +1332,14 @@ pub fn agent_send(
     };
     prepared = format!(
         "{}{prepared}",
-        crate::app_context::turn_context(workspace, provider, &options, source, yolo)
+        crate::app_context::turn_context(
+            workspace,
+            provider,
+            &options,
+            source,
+            yolo,
+            Some(session.access.lock().unwrap().value(false))
+        )
     );
     std::fs::write(file, provider.input(&prepared))
         .map_err(|e| format!("failed to stage prompt: {e}"))?;
@@ -874,9 +1353,33 @@ pub fn agent_send(
         yolo,
         &options,
     )?;
-    let child = cmd
-        .spawn()
-        .map_err(|e| format!("failed to launch `{}`: {e}", cli_path.display()))?;
+    let usage_session = if provider == Provider::Codex {
+        session_id.clone()
+    } else {
+        String::new()
+    };
+    let usage_baseline = if usage_session.is_empty() {
+        Some(crate::provider_usage::TurnUsage::zero())
+    } else {
+        crate::provider_usage::codex_session_file(&usage_session)
+            .and_then(|path| crate::provider_usage::codex_usage(&path, i64::MIN))
+            .and_then(|usage| usage.total)
+    };
+    let started = std::time::Instant::now();
+    let started_at = chrono::Utc::now().timestamp_millis();
+    let child = cmd.spawn().map_err(|e| {
+        if let Some(probe) = pending.probe.as_mut() {
+            session.access.lock().unwrap().agent = probe.finish();
+        }
+        format!("failed to launch `{}`: {e}", cli_path.display())
+    })?;
+    {
+        let mut access = session.access.lock().unwrap();
+        access.applied = Some(yolo);
+        access.fresh_session_pending = false;
+    }
+    app.state::<crate::history::HistoryState>()
+        .permission_mode(&id, yolo);
 
     let mut child = child;
     *session.memory.lock().unwrap() = next_memory;
@@ -936,8 +1439,13 @@ pub fn agent_send(
         stdout,
         stderr,
         TurnContext {
+            probe: pending.probe.take(),
             memory_mode,
             action_context,
+            started,
+            started_at,
+            usage_session,
+            usage_baseline,
         },
     );
     Ok(TurnInfo { id, turn_id })
@@ -976,6 +1484,153 @@ pub fn agent_destroy(app: AppHandle, state: State<AgentState>, id: String) -> Re
 #[cfg(test)]
 mod tests {
     use super::{home_dir, resolve_workspace, safe_fragment};
+    #[test]
+    fn configuration_targets_latest_tab_owner_after_reload_and_preserves_exact_ids() {
+        use super::*;
+        let session = |tab: &str, registration| {
+            let workspace = std::path::PathBuf::from("project");
+            Arc::new(AgentSession {
+                registration,
+                access: Mutex::new(AccessState::new(&workspace, Provider::Codex, Some(false))),
+                bot_id: None,
+                bot_identity: Mutex::new(None),
+                task_id: None,
+                shared_memory: Mutex::new(Default::default()),
+                tab_id: tab.into(),
+                session_id: Mutex::new(String::new()),
+                provider: Provider::Codex,
+                options: Mutex::new(RunOptions::default()),
+                memory: Mutex::new(Default::default()),
+                workspace,
+                child: Mutex::new(None),
+                running: Mutex::new(false),
+                prompt: Mutex::new(None),
+            })
+        };
+        let sessions = HashMap::from([
+            ("old-native-z".into(), session("desktop-tab", 1)),
+            ("current-native-a".into(), session("desktop-tab", 2)),
+            ("unrelated-native".into(), session("another-tab", 3)),
+        ]);
+        assert_eq!(
+            configuration_target(&sessions, "desktop-tab", true)
+                .unwrap()
+                .0,
+            "current-native-a"
+        );
+        assert_eq!(
+            configuration_target(&sessions, "old-native-z", false)
+                .unwrap()
+                .0,
+            "old-native-z"
+        );
+        assert!(configuration_target(&sessions, "missing", true).is_none());
+    }
+
+    #[test]
+    fn session_context_reports_actual_provider_and_requested_mode() {
+        use super::*;
+        let workspace = std::env::temp_dir();
+        let mut access = AccessState::new(&workspace, Provider::Muse, None);
+        access.requested = true;
+        let state = AgentState::default();
+        state.sessions.lock().unwrap().insert(
+            "native-1".into(),
+            Arc::new(AgentSession {
+                registration: 0,
+                access: Mutex::new(access),
+                bot_id: None,
+                bot_identity: Mutex::new(None),
+                task_id: None,
+                shared_memory: Mutex::new(Default::default()),
+                tab_id: "tab".into(),
+                session_id: Mutex::new(String::new()),
+                provider: Provider::Muse,
+                options: Mutex::new(RunOptions::default()),
+                memory: Mutex::new(Default::default()),
+                workspace: workspace.clone(),
+                child: Mutex::new(None),
+                running: Mutex::new(false),
+                prompt: Mutex::new(None),
+            }),
+        );
+        assert_eq!(
+            state.session_context("native-1", &workspace),
+            Some((Provider::Muse, true))
+        );
+        assert_eq!(state.session_context("missing", &workspace), None);
+        let other = std::env::temp_dir().join(format!("velum-context-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&other).unwrap();
+        assert_eq!(state.session_context("native-1", &other), None);
+        std::fs::remove_dir(&other).unwrap();
+    }
+
+    #[test]
+    fn replacement_provider_thread_invalidates_evidence_without_changing_mode() {
+        let mut access = super::AccessState::new(
+            std::path::Path::new("project"),
+            crate::providers::Provider::Codex,
+            Some(false),
+        );
+        access.agent.checks[0].status = crate::workspace_access::Status::Pass;
+        assert!(!access.observe_session("", "first"));
+        assert!(!access.observe_session("first", "first"));
+        assert!(access.observe_session("first", "replacement"));
+        assert_eq!(access.revision, 1);
+        assert_eq!(access.applied, Some(false));
+        assert!(access
+            .agent
+            .checks
+            .iter()
+            .all(|c| c.status == crate::workspace_access::Status::Untested));
+        assert_eq!(access.restrictions["status"], "untested");
+    }
+    #[test]
+    fn permission_changes_invalidate_and_require_fresh_provider_session() {
+        let mut access = super::AccessState::new(
+            std::path::Path::new("project"),
+            crate::providers::Provider::Codex,
+            Some(false),
+        );
+        assert!(!access.change(false, true));
+        assert!(access.change(true, true));
+        assert_eq!(access.revision, 1);
+        assert_eq!(access.applied, None);
+        assert!(
+            !access.change(true, true),
+            "A pending fresh Muse ID must not reset twice"
+        );
+        assert!(access
+            .agent
+            .checks
+            .iter()
+            .all(|c| c.status == crate::workspace_access::Status::Untested));
+        access.applied = Some(true);
+        assert!(!access.change(true, true));
+        assert!(access.change(false, true));
+        assert_eq!(access.revision, 2);
+        let mut restored = super::AccessState::new(
+            std::path::Path::new("project"),
+            crate::providers::Provider::Codex,
+            None,
+        );
+        assert!(
+            restored.change(false, true),
+            "Legacy session with unknown mode must not silently resume"
+        );
+    }
+    #[test]
+    fn new_muse_id_does_not_report_a_permission_change_before_first_turn() {
+        let mut fresh = super::AccessState::new(
+            std::path::Path::new("project"),
+            crate::providers::Provider::Muse,
+            None,
+        );
+        fresh.fresh_session_pending = true;
+        assert!(!fresh.change(false, true));
+        assert_eq!(fresh.revision, 0);
+        assert!(fresh.change(true, true));
+    }
     fn build_exec_command(path: &std::path::Path, yolo: bool) -> std::process::Command {
         crate::providers::exec_command(
             crate::providers::Provider::Muse,
@@ -1004,7 +1659,7 @@ mod tests {
         });
         mark_permission_blocked(&mut event, true);
         assert!(
-            matches!(&event, Some(AgentEvent::TurnEnd { status, text: Some(text), reason: Some(reason) }) if status == "blocked" && text == "Partial answer" && reason.contains("/permissions"))
+            matches!(&event, Some(AgentEvent::TurnEnd { status, text: Some(text), reason: Some(reason) }) if status == "blocked" && text == "Partial answer" && reason.contains("/permissions") && reason.contains("permissions.allow") && reason.contains("command(...)"))
         );
         let mut stopped = Some(AgentEvent::TurnEnd {
             status: "cancelled".into(),

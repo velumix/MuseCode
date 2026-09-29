@@ -5,6 +5,7 @@
     <link rel="icon" type="image/png" href="/velum-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Velum Code</title>
+    <link rel="stylesheet" href="/src/startup.css" />
     <style>
       html {
         background: #18191b;
@@ -13,7 +14,18 @@
   </head>
 
   <body>
-    <div id="root"></div>
+    <div id="startup" class="startup" role="status" aria-label="Starting Velum Code">
+      <div class="startup-brand" aria-hidden="true">
+        <div class="startup-emblem">
+          <div class="startup-halo"></div>
+          <img class="startup-mark" src="/src/assets/velum-mark.png" width="88" height="88" alt="" draggable="false" />
+        </div>
+        <div class="startup-wordmark">Velum <span>Code</span></div>
+        <div class="startup-caption">Your space to create</div>
+        <div class="startup-track"><div class="startup-sweep"></div></div>
+      </div>
+    </div>
+    <div id="root" inert aria-busy="true"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

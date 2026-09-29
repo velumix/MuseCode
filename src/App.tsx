@@ -16,7 +16,6 @@ import type { PaletteAction } from "./components/CommandPalette";
 import "./App.css";
 import ProviderPicker from "./components/ProviderPicker";
 import ChoiceMenu from './components/ChoiceMenu';
-import BotAvatar from './components/BotAvatar';
 import type {BotProfile,BotView} from './bots';
 import type {ModelCatalog} from './providers';
 const BotsPanel=lazy(()=>import('./components/BotsPanel'));
@@ -27,6 +26,7 @@ import { taskPrompt, type Board, type Card } from "./kanban";
 import type { PluginSelection } from "./components/PluginPanel";
 import type { InstalledPlugin, PluginChatHandle } from "./plugins";
 import { loadDesktop, saveDesktop, saveDraft, recoveryError } from "./desktopHistory";
+import { finishStartup } from "./startup";
 import type { MemoryView } from "./memory";
 import { preferredProvider, preferredOptions, saveOptions, providerNames, type Provider, type RunOptions } from "./providers";
 
@@ -318,6 +318,8 @@ export default function App() {
     });
   }, [setMode]);
 
+  useEffect(() => finishStartup(focusComposer), [focusComposer]);
+
   const jumpTab = useCallback(
     (idx: number) => {
       const t = stateRef.current.tabs[idx];
@@ -421,7 +423,6 @@ export default function App() {
   }, []);
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
-  const activeBot=bots.find(b=>b.id===activeTab?.bot_id);
   const failed = activeTab && (tabStatus(activeTab).kind === "error" || tabStatus(activeTab).kind === "exited");
 
   const paletteActions: PaletteAction[] = [
@@ -501,18 +502,14 @@ export default function App() {
           <Icon name="reset" size={17} />
         </button>
       </div>
-      {activeTab && <ProviderPicker key={activeTab.id} value={activeTab.provider} options={activeTab.options} onOptionsChange={(options) => configure(activeTab, options)} disabled={activeTab.agentStatus.kind === "starting" || activeTab.agentStatus.kind === "running"} terminal={activeTab.mode === "terminal"} failure={activeTab.agentStatus.kind === "error" ? activeTab.agentStatus.message : undefined} onChange={(provider) => { if (provider !== activeTab.provider) openProvider(provider); }} />}
-      {activeTab?.mode==='agent'&&<div className="persona-bar">
-        <div className="bot-conversation-picker">{activeBot&&<BotAvatar bot={activeBot} size={28}/>}
-          <ChoiceMenu label="Bot" value={activeTab.bot_id||'provider'} choices={[{id:'provider',label:'Provider assistant',description:'Use the CLI without a custom personality'},...bots.filter(b=>b.enabled).map(b=>({id:b.id,label:b.name,description:b.role||providerNames[b.provider]})),{id:'manage',label:'Create or edit bots…'}]} onChange={id=>{
+      {activeTab && <ProviderPicker key={activeTab.id} value={activeTab.provider} options={activeTab.options} onOptionsChange={(options) => configure(activeTab, options)} disabled={activeTab.agentStatus.kind === "starting" || activeTab.agentStatus.kind === "running"} terminal={activeTab.mode === "terminal"} failure={activeTab.agentStatus.kind === "error" ? activeTab.agentStatus.message : undefined} onChange={(provider) => { if (provider !== activeTab.provider) openProvider(provider); }}
+        botPicker={activeTab.mode === 'agent' && <ChoiceMenu label="Bot" value={activeTab.bot_id||'provider'} choices={[{id:'provider',label:'Provider assistant',description:'Use the CLI without a custom personality'},...bots.filter(b=>b.enabled).map(b=>({id:b.id,label:b.name,description:b.role||providerNames[b.provider]})),{id:'manage',label:'Create or edit bots…'}]} onChange={id=>{
             if(id==='manage')setBotPanel('manage');
             else if(id==='provider')openProvider(activeTab.provider,false);
             else{const bot=bots.find(b=>b.id===id);if(bot)openBot(bot);}
-          }}/>
-        </div>
-        {activeBot&&<span className="persona-role">{activeBot.role}</span>}<span className="persona-spacer"/>
-        {bots.length>0&&<button className="status-btn" onClick={()=>setBotPanel('handoff')} title="Prepare a handoff in a new bot conversation">Hand off</button>}
-      </div>}
+          }}/>}
+        actions={activeTab.mode === 'agent' && bots.length > 0 && <button className="status-btn" onClick={()=>setBotPanel('handoff')} title="Prepare a handoff in a new bot conversation">Hand off</button>}
+      />}
       <div className="terminal-wrap">
         {tabs.map((t) => (
           <Fragment key={t.id}>

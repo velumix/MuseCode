@@ -143,8 +143,16 @@ pub fn exec_command(
                 "approval_policy=\"never\"",
                 "-c",
                 "sandbox_mode=\"workspace-write\"",
-                "exec",
             ]);
+            // Explicitly bind fresh and resumed turns to the selected project.
+            // Do not add the user's home or inherit a previous session's roots.
+            cmd.arg("-C").arg(workspace);
+            cmd.arg("-c").arg(format!(
+                "sandbox_workspace_write.writable_roots={}",
+                serde_json::to_string(&[workspace.display().to_string()])
+                    .map_err(|e| e.to_string())?
+            ));
+            cmd.arg("exec");
             if !session.is_empty() {
                 cmd.arg("resume");
             }
@@ -185,4 +193,53 @@ pub fn exec_command(
         cmd.creation_flags(0x08000000);
     }
     Ok(cmd)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn codex_fresh_and_resumed_turns_receive_only_the_selected_write_root() {
+        let prompt = std::env::temp_dir().join(format!("velum-argv-{}.txt", uuid::Uuid::new_v4()));
+        std::fs::write(&prompt, "probe").unwrap();
+        let workspace = Path::new(r"C:\projects\selected & quoted's project");
+        for resume in ["", "62c2d305-9dd5-4c94-b4c0-667eb612f401"] {
+            for yolo in [false, true] {
+                let command = exec_command(
+                    Provider::Codex,
+                    Path::new("codex.exe"),
+                    resume,
+                    workspace,
+                    &prompt,
+                    yolo,
+                    &Default::default(),
+                )
+                .unwrap();
+                let args: Vec<_> = command
+                    .get_args()
+                    .map(|a| a.to_string_lossy().into_owned())
+                    .collect();
+                assert_eq!(command.get_current_dir(), Some(workspace));
+                assert_eq!(
+                    args[args.iter().position(|a| a == "-C").unwrap() + 1],
+                    workspace.display().to_string()
+                );
+                let roots = args
+                    .iter()
+                    .find_map(|a| a.strip_prefix("sandbox_workspace_write.writable_roots="))
+                    .unwrap();
+                assert_eq!(
+                    serde_json::from_str::<Vec<String>>(roots).unwrap(),
+                    [workspace.display().to_string()]
+                );
+                assert!(args.contains(&"sandbox_mode=\"workspace-write\"".into()));
+                assert_eq!(
+                    args.contains(&"--dangerously-bypass-approvals-and-sandbox".into()),
+                    yolo
+                );
+                assert_eq!(args.contains(&"resume".into()), !resume.is_empty());
+            }
+        }
+        std::fs::remove_file(prompt).unwrap();
+    }
 }
