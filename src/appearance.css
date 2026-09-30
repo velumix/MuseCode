@@ -1,0 +1,550 @@
+/* Every surface uses the same semantic palette. Glass stays inside the app's
+   canvas; solid mode and device accessibility preferences remove transparency. */
+:root {
+  font-family: var(--ui-font);
+}
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+select,
+input,
+textarea {
+  color: var(--text);
+  color-scheme: inherit;
+}
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+::selection {
+  background: var(--selection);
+  color: var(--text);
+}
+.app,
+.phone-app {
+  position: relative;
+  isolation: isolate;
+  background:
+    radial-gradient(ellipse at 4% 2%, var(--glow-a), transparent 50%),
+    radial-gradient(ellipse at 100% 95%, var(--glow-b), transparent 58%),
+    var(--bg);
+}
+.app::before,
+.phone-app::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: url("./assets/grain.svg");
+  opacity: var(--grain-opacity);
+}
+.app .sidebar {
+  background:
+    linear-gradient(150deg, var(--glass-highlight), transparent 60%),
+    var(--glass-sidebar);
+  backdrop-filter: var(--glass-filter);
+  border-color: var(--border);
+}
+.app :is(.titlebar, .conversation-toolbar, .provider-bar, .statusbar) {
+  background: var(--glass-sidebar);
+  backdrop-filter: var(--glass-filter);
+  border-color: var(--border);
+}
+.app .conversation-pane {
+  background: transparent;
+}
+.app .titlebar-brand {
+  width: var(--sidebar-width);
+}
+.app .msg,
+.app .starter-btn,
+.app .tool-card {
+  background:
+    linear-gradient(135deg, var(--glass-highlight), transparent 55%),
+    var(--glass-panel);
+  border-color: var(--border);
+  border-radius: var(--radius);
+}
+.app .msg.user {
+  background-color: var(--glass-panel);
+}
+.app .composer {
+  background:
+    linear-gradient(120deg, var(--glass-highlight), transparent 55%),
+    var(--glass-panel);
+  backdrop-filter: var(--glass-filter);
+  border-color: var(--strong-border);
+  border-radius: var(--radius);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    var(--glass-shadow);
+}
+.app .composer:focus-within {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 2px var(--selection),
+    var(--glass-shadow);
+}
+:root
+  :is(
+    .palette,
+    .choice-menu,
+    .usage-details,
+    .searchbar,
+    .memory-panel,
+    .kanban-panel,
+    .bots-panel,
+    .plugin-panel,
+    .remote-dialog,
+    .context-panel,
+    .auth-dialog
+  ) {
+  background:
+    linear-gradient(135deg, var(--glass-highlight), transparent 65%),
+    var(--glass-panel);
+  backdrop-filter: var(--glass-filter);
+  border-color: var(--strong-border);
+  border-radius: var(--radius);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    var(--glass-shadow);
+}
+:root
+  :is(
+    .palette-scrim,
+    .memory-overlay,
+    .bots-overlay,
+    .kanban-overlay,
+    .context-overlay,
+    .plugin-overlay
+  ) {
+  background: var(--scrim);
+}
+.app .chat-scroll {
+  padding-inline: var(--gutter);
+  gap: calc(16px * var(--density));
+}
+.app .chat-scroll > * {
+  width: min(100%, var(--chat-width));
+}
+.app .composer-dock {
+  width: min(calc(100% - var(--gutter) * 2), var(--chat-width));
+}
+.app .msg {
+  padding: calc(18px * var(--density)) calc(21px * var(--density));
+}
+.app .tab {
+  padding-block: calc(12px * var(--density));
+  border-radius: var(--radius);
+}
+.app .conversation-toolbar {
+  flex-basis: calc(64px * var(--density));
+}
+.app .provider-bar {
+  padding-block: calc(10px * var(--density));
+}
+.app .sidebar-footer button {
+  padding-block: calc(10px * var(--density));
+}
+.app .sidebar-project {
+  margin-bottom: calc(23px * var(--density));
+}
+.app .sidebar-label {
+  padding-top: calc(28px * var(--density));
+}
+.app .sidebar-footer {
+  flex-shrink: 0;
+  padding-top: calc(12px * var(--density));
+}
+.app .sidebar-footnote {
+  padding-top: calc(7px * var(--density));
+}
+.app .starter-btn {
+  padding-block: calc(17px * var(--density));
+}
+.app .chat-starters {
+  gap: calc(11px * var(--density));
+}
+.app .msg > pre,
+.md,
+.phone-app .phone-message .md,
+.phone-app .phone-message.user p {
+  font-family: var(--chat-font);
+  font-size: var(--chat-font-size);
+  line-height: var(--chat-line-height);
+}
+.md h1 {
+  font-size: calc(var(--chat-font-size) * 1.57);
+}
+.md h2 {
+  font-size: calc(var(--chat-font-size) * 1.22);
+}
+.md h3,
+.md h4 {
+  font-size: inherit;
+}
+.md table {
+  font-size: calc(var(--chat-font-size) * 0.9);
+}
+.app .composer textarea {
+  font-family: var(--chat-font);
+  font-size: var(--chat-font-size);
+}
+:root
+  :is(
+    .md-inline,
+    .md-code pre,
+    .tool-output,
+    .approval-card pre,
+    .context-preview,
+    .phone-tool pre
+  ) {
+  font-family: var(--code-font);
+  font-size: var(--code-font-size);
+}
+.md-code code.md-inline {
+  font: inherit;
+  color: var(--text);
+}
+.composer-btn,
+.phone-send,
+.phone-primary {
+  color: var(--on-accent);
+}
+.composer-btn:hover:not(:disabled) {
+  background: var(--blue);
+  filter: brightness(1.08);
+}
+.composer-btn:disabled,
+.phone-send:disabled {
+  color: var(--muted);
+}
+.composer-btn.stop {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.composer-btn.stop:hover {
+  background: var(--danger-border);
+}
+.app .welcome-mark::before {
+  background: radial-gradient(ellipse, var(--selection), transparent 68%);
+}
+.app .tab.active::before {
+  background: var(--accent);
+}
+.app .sidebar-footer button:hover,
+.app .tool-head:hover {
+  background: var(--hover);
+}
+.app .mode-toggle::before {
+  background: var(--accent-dim);
+}
+.app .mode-toggle button.active {
+  color: var(--accent);
+}
+.app .tab-new {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+.app .tab-new:hover {
+  background: var(--accent-hover);
+}
+.app .user-avatar,
+.app .assistant-badge {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.app .starter-btn:hover:not(:disabled) {
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
+}
+.app .status-dot.running,
+.app .status-dot.starting,
+.app .thinking-dots i {
+  background: var(--accent);
+}
+:root[data-starters="false"] .chat-starters {
+  display: none;
+}
+:root[data-hints="false"]
+  :is(.composer-hint, .footer-hint, .sidebar-footnote, .phone-composer-note) {
+  display: none;
+}
+:root[data-avatars="false"]
+  :is(
+    .message-avatar,
+    .phone-message-label > .velum-mark,
+    .phone-message-label > .bot-avatar
+  ) {
+  display: none;
+}
+:root[data-copy="always"] .msg-copy {
+  opacity: 1;
+}
+:root[data-sidebar="rail"] .app :is(.sidebar, .titlebar-brand) {
+  width: 76px;
+}
+:root[data-sidebar="rail"] .app .sidebar {
+  padding-inline: 9px;
+}
+:root[data-sidebar="rail"] .app .titlebar-brand {
+  justify-content: center;
+  padding-left: 0;
+}
+:root[data-sidebar="rail"]
+  .app
+  :is(
+    .titlebar-brand > span,
+    .sidebar-project > div,
+    .tab-new > span,
+    .sidebar-label > span:first-child,
+    .tab-copy,
+    .sidebar-footer button > span,
+    .sidebar-footer kbd,
+    .sidebar-footnote
+  ) {
+  display: none;
+}
+:root[data-sidebar="rail"] .app .sidebar-project {
+  margin-inline: auto;
+}
+:root[data-sidebar="rail"]
+  .app
+  :is(.tab, .sidebar-label, .sidebar-footer button) {
+  justify-content: center;
+}
+:root[data-sidebar="rail"] .app .tab {
+  padding-inline: 8px;
+  min-height: 48px;
+}
+:root[data-sidebar="rail"] .app .tab .status-dot {
+  position: absolute;
+  right: 8px;
+  bottom: 7px;
+}
+:root[data-sidebar="rail"] .app .tab-close {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  width: 17px;
+  height: 17px;
+  background: var(--raised);
+}
+.phone-app
+  :is(
+    .phone-header,
+    .phone-tools,
+    .phone-models,
+    .phone-session-select,
+    .phone-composer,
+    .phone-settings
+  ) {
+  background: var(--glass-sidebar);
+  backdrop-filter: var(--glass-filter);
+  border-color: var(--border);
+}
+.phone-app .phone-composer form,
+.phone-app .phone-message.user {
+  background:
+    linear-gradient(135deg, var(--glass-highlight), transparent 55%),
+    var(--glass-panel);
+  border-color: var(--strong-border);
+  border-radius: var(--radius);
+}
+/* A filtered ancestor captures fixed popovers and clips them when a landscape
+   keyboard makes this dock scroll. Keep the blur on the inner input surface. */
+.phone-app .phone-composer {
+  backdrop-filter: none;
+}
+.phone-app .phone-composer form {
+  backdrop-filter: var(--glass-filter);
+}
+.phone-app .phone-sessions {
+  background: var(--glass-panel);
+  backdrop-filter: var(--glass-filter);
+}
+.phone-app .phone-transcript {
+  padding-inline: var(--gutter);
+}
+.phone-app .phone-message {
+  margin-bottom: calc(27px * var(--density));
+}
+.phone-app .phone-message.user {
+  padding-block: calc(14px * var(--density));
+}
+.phone-app .phone-tool {
+  border-radius: var(--radius);
+}
+.phone-tool-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  text-align: left;
+  padding: 14px;
+  min-height: 46px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+.phone-tool-head strong {
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.phone-tool-head > span {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: calc(10px * var(--ui-scale));
+}
+.phone-app .phone-composer textarea {
+  font-family: var(--chat-font);
+  font-size: max(16px, var(--chat-font-size));
+}
+:root[data-motion="reduced"] *,
+:root[data-motion="reduced"] *::before,
+:root[data-motion="reduced"] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+:root[data-motion="reduced"]
+  :is(.starter-btn, .tab-new, .composer-btn, .latest-btn):is(:hover, :active),
+:root[data-motion="reduced"]
+  .starter-btn:hover
+  :is(.starter-icon, .starter-arrow) {
+  transform: none;
+}
+@media (max-width: 980px) {
+  :root:not([data-sidebar="expanded"]) .app :is(.sidebar, .titlebar-brand) {
+    width: 76px;
+  }
+  :root[data-sidebar="expanded"] .app .sidebar {
+    padding-inline: 12px;
+  }
+  :root[data-sidebar="expanded"] .app .sidebar-project {
+    margin-inline: 8px;
+  }
+  :root[data-sidebar="expanded"] .app .titlebar-brand {
+    justify-content: flex-start;
+    padding-left: 12px;
+  }
+  :root[data-sidebar="expanded"]
+    .app
+    :is(
+      .titlebar-brand > span,
+      .sidebar-project > div,
+      .tab-new > span,
+      .tab-copy,
+      .sidebar-footer button > span
+    ) {
+    display: initial;
+  }
+  :root[data-sidebar="expanded"] .app .sidebar-project > div,
+  :root[data-sidebar="expanded"] .app .tab-copy {
+    display: flex;
+  }
+  :root[data-sidebar="expanded"] .app .sidebar-label {
+    justify-content: space-between;
+    padding-inline: 10px;
+  }
+  :root[data-sidebar="expanded"] .app .tab {
+    justify-content: flex-start;
+    padding-inline: 9px;
+  }
+  :root[data-sidebar="expanded"] .app .tab .status-dot {
+    position: static;
+  }
+  :root[data-sidebar="expanded"] .app .tab-close {
+    position: static;
+    width: 20px;
+    height: 22px;
+    background: transparent;
+  }
+  :root[data-sidebar="expanded"] .app .sidebar-footer button {
+    justify-content: flex-start;
+  }
+  :root[data-sidebar="expanded"] .app .provider-bar {
+    gap: 5px;
+    padding-inline: 12px;
+  }
+}
+@media (max-height: 640px) {
+  .app .sidebar-footer button {
+    padding-block: 7px;
+  }
+  .app .sidebar-label {
+    padding-top: 12px;
+  }
+  .app .sidebar-project {
+    margin-bottom: 12px;
+  }
+  .app .sidebar-footnote {
+    display: none;
+  }
+  .app .chat-scroll {
+    padding-block: 12px;
+  }
+  .app .chat-starters {
+    margin-top: 12px;
+  }
+  .app .starter-btn {
+    padding-block: 10px;
+  }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .app .sidebar,
+  .app .composer,
+  :root
+    :is(
+      .palette,
+      .choice-menu,
+      .settings-panel,
+      .memory-panel,
+      .kanban-panel,
+      .bots-panel,
+      .remote-dialog,
+      .context-panel
+    ) {
+    background: var(--panel);
+  }
+}
+
+:root
+  :is(
+    .bot-error,
+    .plugin-error,
+    .kanban-error,
+    .memory-error,
+    .auth-error,
+    .remote-error,
+    .context-error,
+    .access-fail,
+    .access-blocked
+  ) {
+  color: var(--danger);
+}
+:root :is(.plugin-error, .memory-error, .remote-error) {
+  background: var(--danger-bg);
+}
+:root .memory-warning {
+  color: var(--warning);
+}
+:root[data-glass="false"]
+  :is(
+    .settings-scrim,
+    .palette-scrim,
+    .memory-overlay,
+    .bots-overlay,
+    .kanban-overlay,
+    .context-overlay,
+    .plugin-overlay
+  ) {
+  backdrop-filter: none;
+}
+:root[data-glass="false"] :is(.auth-dialog, .remote-dialog)::backdrop {
+  backdrop-filter: none;
+}

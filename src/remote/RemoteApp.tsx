@@ -10,7 +10,9 @@ const BotsPanel=lazy(()=>import('../components/BotsPanel'));
 import { providerNames, defaultOptions, type ModelCatalog } from "../providers";
 import Icon, { VelumMark } from "../components/Icon";
 import Markdown from "../components/Markdown";
-import { transcript, type Replay, type Session } from "./transcript";
+import { transcript, type Block, type Replay, type Session } from "./transcript";
+import { usePreferences } from "../preferences";
+const SettingsPanel = lazy(() => import("../components/SettingsPanel"));
 
 import ModelControls from "../components/ModelControls";
 import UsageStrip from "../components/UsageStrip";
@@ -22,6 +24,13 @@ interface Device { id: string; name: string; control: boolean }
 interface Pending { name: string; code: string; expires_at: number }
 interface InstallEvent extends Event { prompt(): Promise<void>; userChoice: Promise<{ outcome: string }> }
 const usb = location.origin === "http://127.0.0.1:43827";
+function PhoneTool({ block }: { block: Block }) {
+  const { settings } = usePreferences();
+  const [override, setOverride] = useState<boolean | null>(null);
+  const open = override ?? settings.toolOutput === "expanded";
+  const text = block.text || "Waiting for output…";
+  return <div className="phone-tool"><button type="button" className="phone-tool-head" aria-expanded={open} onClick={() => setOverride(!open)}><Icon name="code" size={15} /><strong>{block.name}</strong><span>{block.status}</span><Icon name="down" size={14}/></button>{(open || settings.toolOutput !== "collapsed") && <pre>{open ? text : text.split("\n").slice(0, 3).join("\n")}</pre>}</div>;
+}
 class ApiError extends Error { constructor(message: string, public status: number) { super(message); } }
 
 async function api<T>(path: string, body?: unknown): Promise<T> {
@@ -72,6 +81,7 @@ export default function RemoteApp() {
   const [latest, setLatest] = useState(false);
   const [install, setInstall] = useState<InstallEvent | null>(null);
   const [installHelp, setInstallHelp] = useState(false);
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [signout, setSignout] = useState(false);
   const cache = useRef(new Map<string, Replay>());
   const scroll = useRef<HTMLDivElement>(null);
@@ -254,6 +264,7 @@ export default function RemoteApp() {
     </header>
     <nav className="phone-tools" aria-label="Workspace tools"><button disabled={!current||!connected} onClick={()=>setBotsOpen(true)}><Icon name="chat" size={17}/>Bots</button><button aria-label="Kanban" disabled={!current||!connected} onClick={()=>setBoardSession(selected)}><Icon name="board" size={17}/>Kanban</button><button aria-label="Memory" disabled={!current||!connected} onClick={()=>{setMemorySeed(undefined);setMemorySession(selected);}}><Icon name="memory" size={17}/>Memory</button>{current && <button type="button" className="phone-context" aria-label="Project context & diagnostics" title="Project context & diagnostics" disabled={!connected} onClick={e => setContext({id:current.id,snapshot:chatSnapshot(e.currentTarget.closest('.phone-app'),current.provider || 'muse',current.options || defaultOptions,current.running,'phone')})}><Icon name="settings" size={18}/><span>Context</span></button>}</nav>
     {installHelp && <section className="phone-settings" aria-label="Phone settings"><strong>{device.name}</strong><p>{computer || "Your desktop"}</p><p>{device.control ? "View and control · standard agent permissions" : "View-only access"}</p>
+      <button type="button" onClick={() => setAppearanceOpen(true)}>Appearance & preferences</button>
       {install ? <button onClick={() => void install.prompt().then(() => setInstall(null))}>Add to home screen</button> : <p>Use your browser menu → Add to Home screen or Install app.</p>}
       <button onClick={() => setSignout(true)}>Disconnect this phone</button>
       {signout && <div className="phone-signout"><p>You’ll need to scan a new QR code to reconnect.</p><button disabled={busy} onClick={() => void disconnect()}>Disconnect</button><button onClick={() => setSignout(false)}>Keep connected</button></div>}
@@ -275,7 +286,7 @@ export default function RemoteApp() {
     <div className="phone-transcript" ref={scroll} onScroll={() => { const el = scroll.current; if (el) { follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; setLatest(!follow.current); } }}>
       {!sessions.length ? <div className="phone-empty"><Icon name="chat" size={32} /><h2>No conversations yet</h2><p>Open an Agent conversation on your desktop. It will appear here automatically.</p></div> : !view.blocks.length ? <div className="phone-empty"><VelumMark size={64} /><h2>What’s next?</h2><p>Send a message to your desktop agent. Your files and tools stay on your computer.</p></div> : null}
       {replay?.truncated && <p className="phone-history-note">Showing recent activity. Earlier messages remain in the desktop conversation.</p>}
-      {view.blocks.map((block) => block.kind === "tool" ? <details className="phone-tool" key={block.id}><summary><Icon name="code" size={15} /><strong>{block.name}</strong><span>{block.status}</span></summary><pre>{block.text || "Waiting for output…"}</pre></details> : block.kind === "notice" ? <div className="phone-notice" key={block.id}>{block.text}</div> : <article className={`phone-message ${block.kind}`} key={block.id}><div className="phone-message-label">{block.kind === "user" ? "You" : <>{current?.bot?<BotAvatar bot={current.bot} size={24}/>:<VelumMark size={20}/>}<span>{current?.bot?.name||providerNames[current?.provider || "muse"]}</span></>}</div>{block.kind === "user" ? <p>{block.text}</p> : <Markdown text={block.text} />}{device.control&&<button type="button" className="phone-remember" aria-label="Remember this message" disabled={!connected||!!current?.running} onClick={()=>{setMemorySeed(block.text);setMemorySession(selected);}}><Icon name="memory" size={14}/>Remember</button>}</article>)}
+      {view.blocks.map((block) => block.kind === "tool" ? <PhoneTool block={block} key={block.id} /> : block.kind === "notice" ? <div className="phone-notice" key={block.id}>{block.text}</div> : <article className={`phone-message ${block.kind}`} key={block.id}><div className="phone-message-label">{block.kind === "user" ? "You" : <>{current?.bot?<BotAvatar bot={current.bot} size={24}/>:<VelumMark size={20}/>}<span>{current?.bot?.name||providerNames[current?.provider || "muse"]}</span></>}</div>{block.kind === "user" ? <p>{block.text}</p> : <Markdown text={block.text} />}{device.control&&<button type="button" className="phone-remember" aria-label="Remember this message" disabled={!connected||!!current?.running} onClick={()=>{setMemorySeed(block.text);setMemorySession(selected);}}><Icon name="memory" size={14}/>Remember</button>}</article>)}
       {view.todos.length > 0 && <details className="phone-todos"><summary>Task checklist <span>{view.todos.filter((todo) => todo.status === "completed").length}/{view.todos.length}</span></summary>{view.todos.map((todo, index) => <p key={index}><Icon name={todo.status === "completed" ? "check" : "code"} size={14} />{todo.text}</p>)}</details>}
       {current?.running && <div className="phone-working" role="status"><span className="phone-pulse" />{view.providerProgress?.phase === 'retrying' ? <ProviderWait progress={view.providerProgress}/> : view.activity || `${current?.bot?.name||providerNames[current?.provider || "muse"]} is working…`}</div>}
     </div>
@@ -302,5 +313,6 @@ export default function RemoteApp() {
       if ((drafts[context.id] || '').length + extra.length > 16000) throw new Error('Shorten your draft before adding this report, or copy it instead.');
       setDrafts(previous => ({...previous, [context.id]:(previous[context.id] || '') + extra})); setContext(null);
     } : undefined}/></Suspense>}
+    {appearanceOpen && <Suspense fallback={null}><SettingsPanel phone onClose={() => setAppearanceOpen(false)} /></Suspense>}
   </main>;
 }

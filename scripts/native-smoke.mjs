@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, expect } from "@playwright/test";
@@ -95,6 +95,98 @@ try {
   await invoke("desktop_show");
   const composer = page.locator(".chat-wrap:not(.hidden) textarea");
   const status = page.locator(".status-text");
+  // Settings use the real atomic Rust store even when WebView storage is full.
+  const preferencePath = path.join(runDir, 'settings/appearance.json');
+  const readPreferences = () => { try { return JSON.parse(readFileSync(preferencePath, 'utf8')); } catch { return null; } };
+  await page.evaluate(() => {
+    const set = Storage.prototype.setItem;
+    window.__qaRestorePreferenceStorage = () => { Storage.prototype.setItem = set; delete window.__qaRestorePreferenceStorage; };
+    Storage.prototype.setItem = function(key, value) {
+      if (key === 'velum-preferences-v1') throw new DOMException('Storage full', 'QuotaExceededError');
+      return set.call(this, key, value);
+    };
+  });
+  try {
+    await composer.fill('Settings keep my native draft');
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.getByRole('button', { name: 'Aurora theme', exact: true }).click();
+    await page.getByRole('tab', { name: 'Glass & finish', exact: true }).click();
+    await page.getByRole('button', { name: 'Crystal', exact: true }).click();
+    await expect.poll(() => readPreferences()?.settings.theme).toBe('aurora');
+    await expect.poll(() => readPreferences()?.settings.blur).toBe(32);
+    assert.equal(readPreferences().settings.opacity, 68);
+    await expect(page.locator('.settings-footer')).toContainText('All changes saved');
+    await page.screenshot({ path: path.join(runDir, 'settings-glass.png'), animations: 'disabled' });
+    await page.getByRole('button', { name: 'Done', exact: true }).click();
+    assert.equal(await composer.inputValue(), 'Settings keep my native draft');
+    assert.equal((await invoke('preferences_load')).settings.theme, 'aurora');
+  } finally {
+    await page.evaluate(() => window.__qaRestorePreferenceStorage?.());
+  }
+  await page.reload();
+  await expect(page.locator('#startup')).toHaveCount(0);
+  await expect(composer).toBeEnabled();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'aurora');
+  await expect(composer).toHaveValue('Settings keep my native draft');
+  await composer.fill('');
+  console.log('PASS: live themes and glass save atomically despite blocked browser storage and restore after WebView reload');
+  // Validate the actual native atomic writer under Windows sharing locks.
+  // A brief lock must save successfully; a persistent one must preserve the
+  // previous profile and leave no temporary snapshots behind.
+  async function lockPreferences() {
+    const locker = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass',
+      '-File', path.join(root, 'tests/fixtures/windows-file-lock.ps1'), '-Path', preferencePath],
+      { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    let output = '', failure = '';
+    locker.stderr.on('data', (chunk) => { failure += chunk; });
+    const exited = new Promise((resolve) => locker.once('exit', resolve));
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { locker.kill(); reject(new Error('Windows file lock did not initialize')); }, 10000);
+      const fail = (error) => { clearTimeout(timer); reject(error); };
+      locker.once('error', fail);
+      locker.once('exit', (code) => { if (!output.includes('LOCKED')) fail(new Error(`File lock exited ${code}: ${failure}`)); });
+      locker.stdout.on('data', (chunk) => {
+        output += chunk;
+        if (output.includes('LOCKED')) { clearTimeout(timer); resolve(); }
+      });
+    });
+    let release;
+    return () => {
+      if (!release) {
+        locker.stdin.end('\n');
+        release = exited.then((code) => assert.equal(code, 0, failure));
+      }
+      return release;
+    };
+  }
+  const originalProfile = readPreferences();
+  const latestProfile = { ...originalProfile, settings: { ...originalProfile.settings, blur: 31 } };
+  const releaseBriefLock = await lockPreferences();
+  const startedSaving = Date.now();
+  const unlockTimer = setTimeout(() => { releaseBriefLock().catch(() => {}); }, 75);
+  try {
+    await invoke('preferences_save', { profile: latestProfile });
+    assert(Date.now() - startedSaving >= 60, 'Atomic writer did not wait for the reader lock');
+    assert.deepEqual(readPreferences(), latestProfile);
+  } finally {
+    clearTimeout(unlockTimer);
+    // This also releases the lock on early failure.
+    await releaseBriefLock();
+  }
+  const releasePersistentLock = await lockPreferences();
+  try {
+    await assert.rejects(invoke('preferences_save', {
+      profile: { ...latestProfile, settings: { ...latestProfile.settings, blur: 30 } },
+    }).catch((error) => { throw new Error(String(error)); }),
+    /Access is denied|sharing violation|being used by another process/i);
+    assert.deepEqual(readPreferences(), latestProfile);
+    assert(!readdirSync(path.dirname(preferencePath)).some((name) => /^appearance\..*\.tmp$/.test(name)),
+      'Failed atomic write leaked a temporary snapshot');
+  } finally {
+    await releasePersistentLock();
+    await invoke('preferences_save', { profile: originalProfile });
+  }
+  console.log('PASS: atomic preferences recover from a brief Windows reader lock and preserve the saved profile on a persistent lock');
   async function send(text) {
     await composer.fill(text);
     await composer.press("Enter");

@@ -1,6 +1,6 @@
 .bot-presets {
-  border: 1px solid #3b4a60;
-  background: #172030;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-dim);
   border-radius: 10px;
   padding: 12px;
   margin-bottom: 12px;
@@ -23,24 +23,24 @@
   padding: 12px;
 }
 .bot-presets small {
-  color: #bac8dd;
-  font-size: 11px;
+  color: var(--muted);
+  font-size: calc(11px * var(--ui-scale));
   line-height: 1.5;
 }
 .bot-waiting {
   padding: 10px;
-  border: 1px solid #6d5934;
+  border: 1px solid var(--warning-border);
   border-radius: 8px;
-  background: #302a20;
-  color: #f4d9a0;
-  font-size: 12px;
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: calc(12px * var(--ui-scale));
   line-height: 1.6;
 }
 .bots-overlay {
   position: fixed;
   inset: 0;
   z-index: 95;
-  background: #080b10bc;
+  background: var(--scrim);
   display: grid;
   place-items: center;
   padding: 24px;
@@ -51,10 +51,10 @@
   max-height: min(900px, calc(100dvh - 48px));
   display: flex;
   flex-direction: column;
-  background: #1b2028;
-  border: 1px solid #3b4657;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-border);
   border-radius: 16px;
-  color: #e3eaf5;
+  color: var(--text);
   box-shadow: 0 24px 100px #0008;
   outline: none;
   overflow: hidden;
@@ -70,17 +70,17 @@
 .bots-panel button {
   min-height: 34px;
   padding: 7px 12px;
-  border: 1px solid #3c495c;
+  border: 1px solid var(--accent-border);
   border-radius: 8px;
-  background: #252e3b;
+  background: var(--accent-dim);
   cursor: pointer;
   transition:
     background 0.15s,
     border-color 0.15s;
 }
 .bots-panel button:hover:not(:disabled) {
-  background: #303d50;
-  border-color: #748aa7;
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
 }
 .bots-panel button:disabled {
   opacity: 0.5;
@@ -90,17 +90,17 @@
 .bots-panel input:focus-visible,
 .bots-panel textarea:focus-visible,
 .bots-panel select:focus-visible {
-  outline: 2px solid #a7c9ff;
+  outline: 2px solid var(--accent-border);
   outline-offset: 2px;
 }
 .bots-panel .bot-primary {
-  background: #a7c8ff;
-  color: #132641;
+  background: var(--blue);
+  color: var(--on-accent);
   border-color: transparent;
   font-weight: 600;
 }
 .bots-panel .bot-primary:hover:not(:disabled) {
-  background: #bdd7ff;
+  background: var(--blue);
 }
 .bots-header {
   display: flex;
@@ -110,18 +110,18 @@
   padding: 26px 28px 18px;
 }
 .bots-eyebrow {
-  color: #a8bddb;
-  font-size: 10px;
+  color: var(--muted);
+  font-size: calc(10px * var(--ui-scale));
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 .bots-header h2 {
-  font-size: 25px;
+  font-size: calc(25px * var(--ui-scale));
   margin: 7px 0 10px;
 }
 .bots-header p {
-  font-size: 13px;
-  color: #b4c2d7;
+  font-size: calc(13px * var(--ui-scale));
+  color: var(--muted);
   margin: 0;
 }
 .bots-header > button {
@@ -133,7 +133,7 @@
   align-items: center;
   gap: 8px;
   padding: 0 28px 18px;
-  border-bottom: 1px solid #354052;
+  border-bottom: 1px solid var(--accent-border);
 }
 .bots-nav > span {
   flex: 1;
@@ -141,11 +141,11 @@
 .bots-nav button[aria-pressed="false"] {
   background: transparent;
   border-color: transparent;
-  color: #b4c2d7;
+  color: var(--muted);
 }
 .bots-nav button[aria-pressed="true"] {
-  border-color: #7a95ba;
-  background: #2b3748;
+  border-color: var(--accent-border);
+  background: var(--accent-dim);
 }
 .bots-body,
 .bot-editor {
@@ -160,10 +160,10 @@
   gap: 14px;
 }
 .bot-card {
-  border: 1px solid #354258;
+  border: 1px solid var(--accent-border);
   border-radius: 13px;
   padding: 18px;
-  background: #171d26;
+  background: var(--accent-dim);
 }
 .bot-card-title {
   display: flex;
@@ -175,19 +175,19 @@
   flex: 1;
 }
 .bot-card h3 {
-  font-size: 15px;
+  font-size: calc(15px * var(--ui-scale));
   margin: 0 0 5px;
   overflow-wrap: anywhere;
 }
 .bot-card small {
-  font-size: 11px;
-  color: #b7c5da;
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--muted);
   overflow-wrap: anywhere;
 }
 .bot-card p {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale));
   line-height: 1.6;
-  color: #b7c5da;
+  color: var(--muted);
   min-height: 42px;
   overflow-wrap: anywhere;
 }
@@ -200,10 +200,10 @@
   grid-column: 1/-1;
   text-align: center;
   padding: 45px 25px;
-  color: #b8c6da;
+  color: var(--muted);
 }
 .bot-empty h3 {
-  color: #e3eaf5;
+  color: var(--text);
 }
 .bot-empty p {
   max-width: 470px;
@@ -221,7 +221,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   font-weight: 600;
   min-width: 0;
 }
@@ -232,8 +232,8 @@
   width: 100%;
   box-sizing: border-box;
   padding: 10px 12px;
-  background: #131a23;
-  border: 1px solid #45536a;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-border);
   border-radius: 8px;
   outline: none;
   min-height: 38px;
@@ -241,8 +241,8 @@
 .bot-editor textarea {
   resize: vertical;
   line-height: 1.6;
-  font-family: Consolas, monospace;
-  font-size: 12px;
+  font-family:var(--code-font);
+  font-size: calc(12px * var(--ui-scale));
 }
 .bot-fields {
   display: grid;
@@ -250,9 +250,9 @@
   gap: 16px;
 }
 .bot-help {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   line-height: 1.65;
-  color: #b5c4d9;
+  color: var(--muted);
   font-weight: 400;
   margin: 0;
 }
@@ -271,18 +271,18 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 11px;
-  color: #b5c4d9;
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--muted);
 }
 .bot-file-button {
   position: relative;
   display: inline-flex;
   align-items: center;
-  border: 1px solid #53647d;
-  background: #263244;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-dim);
   padding: 9px 12px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   cursor: pointer;
   overflow: hidden;
 }
@@ -294,7 +294,7 @@
   width: 100%;
 }
 .bot-file-button:focus-within {
-  outline: 2px solid #a7c9ff;
+  outline: 2px solid var(--accent-border);
   outline-offset: 2px;
 }
 .bot-picture input[type="color"] {
@@ -310,11 +310,11 @@
   flex-direction: row;
   align-items: center;
   gap: 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   font-weight: 400;
 }
 .bot-check input {
-  accent-color: #a7c8ff;
+  accent-color: var(--accent);
   width: 16px;
   height: 16px;
   flex-shrink: 0;
@@ -329,32 +329,32 @@
   align-items: center;
   gap: 10px;
   padding-top: 18px;
-  border-top: 1px solid #39465a;
+  border-top: 1px solid var(--accent-border);
 }
 .bot-editor-footer > span {
   flex: 1;
 }
 .bots-panel .bot-danger {
-  color: #ffb5b5;
-  border-color: #79545a;
+  color: var(--text);
+  border-color: var(--danger-border);
   background: transparent;
 }
 .bot-error {
-  color: #ffbaba;
+  color: var(--text);
   line-height: 1.55;
   overflow-wrap: anywhere;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
 }
 .bots-panel > .bot-error {
   margin: 0 28px 14px;
 }
 .bot-confirm {
-  background: #342833;
-  border: 1px solid #8b6476;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-border);
   border-radius: 9px;
   padding: 14px;
   margin: 0 28px 16px;
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale));
 }
 .bot-confirm button {
   margin-left: 9px;
@@ -368,8 +368,8 @@
   gap: 14px;
 }
 .schedule-fields small {
-  color: #b7c5da;
-  font-size: 11px;
+  color: var(--muted);
+  font-size: calc(11px * var(--ui-scale));
   font-weight: 400;
 }
 .bot-schedule-heading {
@@ -381,14 +381,14 @@
 }
 .bot-schedule-heading h3 {
   margin: 0 0 10px;
-  font-size: 16px;
+  font-size: calc(16px * var(--ui-scale));
 }
 .bot-schedule-heading button {
   white-space: nowrap;
 }
 .bot-job {
-  border: 1px solid #39475d;
-  background: #161d27;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-dim);
   border-radius: 10px;
   padding: 16px;
   margin: 12px 0;
@@ -399,20 +399,20 @@
 }
 .bot-job h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale));
 }
 .bot-job p {
-  font-size: 12px;
-  color: #b5c4d9;
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--muted);
   margin: 8px 0;
 }
 .bot-job small {
-  font-size: 11px;
-  color: #b8c9e0;
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--text);
   overflow-wrap: anywhere;
 }
 .bot-job .bot-error {
-  color: #ffbaba;
+  color: var(--text);
 }
 .bot-job .bot-card-actions {
   flex-shrink: 0;
@@ -432,98 +432,98 @@
 }
 .bot-run-row strong {
   display: block;
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale));
   overflow-wrap: anywhere;
 }
 .bot-run-row small {
   display: block;
   margin-top: 5px;
-  font-size: 11px;
-  color: #b7c5da;
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--muted);
 }
 .bot-run-status {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   text-transform: capitalize;
 }
 .bot-run-status.completed {
-  color: #a8e0c7;
+  color: var(--text);
 }
 .bot-run-status.failed,
 .bot-run-status.cancelled {
-  color: #ffbaba;
+  color: var(--text);
 }
 .bot-run-detail > p {
-  font-size: 12px;
-  color: #b8c6dc;
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--muted);
 }
 .bot-run-detail {
   overflow-wrap: anywhere;
 }
 @media (max-width: 650px) {
   .bots-overlay {
-    padding: 0;
+  padding: 0;
   }
   .bots-panel {
-    width: 100%;
-    height: 100dvh;
-    max-height: 100dvh;
-    border-radius: 0;
-    border: 0;
+  width: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
+  border-radius: 0;
+  border: 0;
   }
   .bots-header {
-    padding: 20px 18px;
+  padding: 20px 18px;
   }
   .bots-header p {
-    font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   }
   .bots-nav {
-    padding: 0 16px 16px;
-    gap: 4px;
-    flex-wrap: wrap;
+  padding: 0 16px 16px;
+  gap: 4px;
+  flex-wrap: wrap;
   }
   .bots-nav button {
-    padding: 8px 10px;
-    font-size: 12px;
-    min-height: 40px;
+  padding: 8px 10px;
+  font-size: calc(12px * var(--ui-scale));
+  min-height: 40px;
   }
   .bots-body,
   .bot-editor {
-    padding: 18px;
+  padding: 18px;
   }
   .bot-grid {
-    grid-template-columns: 1fr;
+  grid-template-columns: 1fr;
   }
   .bot-fields {
-    grid-template-columns: 1fr;
+  grid-template-columns: 1fr;
   }
   .bot-card-actions button {
-    min-height: 40px;
+  min-height: 40px;
   }
   .bot-job {
-    flex-direction: column;
-    gap: 14px;
+  flex-direction: column;
+  gap: 14px;
   }
   .bot-schedule-heading {
-    gap: 10px;
+  gap: 10px;
   }
   .bot-picture {
-    gap: 12px;
+  gap: 12px;
   }
   .bot-editor-footer {
-    flex-wrap: wrap;
+  flex-wrap: wrap;
   }
   .bot-run-row {
-    gap: 8px;
+  gap: 8px;
   }
   .bot-run-status {
-    max-width: 75px;
+  max-width: 75px;
   }
   .bot-confirm {
-    margin: 0 18px 14px;
+  margin: 0 18px 14px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
   .bots-panel button {
-    transition: none;
+  transition: none;
   }
 }

@@ -34,7 +34,14 @@ export async function checkStartup(page, artifactDir) {
     if (mode !== "reduced") {
       await expect(page.locator("#startup")).toBeVisible();
       if (mode === "normal") {
-        await expect(page.locator(".startup-wordmark")).toHaveCSS("opacity", "1");
+        // Wait inside the page for the actual animation completion. Polling can
+        // skip the brief fully revealed state before the startup fade removes it.
+        const opacity = await page.locator(".startup-wordmark").evaluate(async element => {
+          await Promise.all(element.getAnimations().map(animation => animation.finished));
+          if (!element.isConnected) throw new Error('Startup title was removed before its reveal finished');
+          return getComputedStyle(element).opacity;
+        });
+        assert.equal(opacity, "1", "Startup title did not fully reveal");
         await page.screenshot({ path: path.join(artifactDir, "startup.png") });
       } else {
         // The desktop mount subscribes the skip handlers; the intro stays inert

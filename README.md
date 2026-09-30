@@ -128,6 +128,10 @@ complete message at once, while Antigravity and Muse also emit text deltas.
 Upgrading from MuseCode keeps settings and phone pairings. The installer migrates the
 previous default Windows installation, and the Android APK updates the existing app.
 
+## Your space, your style
+
+Open **Settings** in the sidebar or press **Ctrl+,**. Choose from twelve dark and light themes, customize colors, and tune glass opacity, blur, glow, grain, shadows, and corners. Layout, typography, terminal appearance, and conversation preferences update live and save on this device. [Explore the settings](docs/appearance.md).
+
 ## At home in the tray
 
 | Action | What happens |
@@ -240,6 +244,7 @@ directory; this is recovery for open conversations, not a permanent chat archive
 | Shortcut | Action |
 | :-- | :-- |
 | `Ctrl+K` | Open the command palette |
+| `Ctrl+,` | Open settings |
 | `Ctrl+T` | Start a new conversation |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Switch conversations |
 | `Ctrl+1` … `Ctrl+9` | Jump to a conversation |

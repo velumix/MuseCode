@@ -75,6 +75,14 @@ export async function boot(page: Page, delay = 0) {
         },
         async invoke(cmd: string, args: any = {}) {
           api.calls.push({ cmd, args });
+          if (cmd === "preferences_load") return w.qaPreferences ?? JSON.parse(localStorage.getItem("qa-native-preferences") || "null");
+          if (cmd === "preferences_save") {
+            if (api.holdPreferences) await new Promise<void>(resolve => { api.releasePreferences = resolve; });
+            if (api.failPreferences) throw "Settings disk unavailable";
+            api.preferences = structuredClone(args.profile);
+            localStorage.setItem("qa-native-preferences", JSON.stringify(args.profile));
+            return;
+          }
           if (cmd === "history_desktop_load") return w.qaRecovery || null;
           if (cmd === "history_desktop_save") {
             if (api.holdHistorySave) await new Promise<void>(resolve => { api.releaseHistorySave = resolve; });

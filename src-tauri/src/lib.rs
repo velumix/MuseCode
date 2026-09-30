@@ -10,6 +10,7 @@ mod memory;
 mod plugin_catalog;
 mod plugin_github;
 mod plugins;
+mod preferences;
 mod provider_auth;
 mod provider_events;
 mod provider_models;
@@ -50,10 +51,13 @@ pub fn run() {
             history::setup(app.handle());
             automation::setup(app.handle());
             desktop::setup(app)?;
+            preferences::setup(app)?;
             remote::setup(app)
         })
         .on_window_event(desktop::close_to_tray)
         .invoke_handler(tauri::generate_handler![
+            preferences::preferences_load,
+            preferences::preferences_save,
             app_context::workspace_pick,
             app_context::workspace_check,
             app_context::app_diagnostics,

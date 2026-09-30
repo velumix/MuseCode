@@ -47,10 +47,13 @@ Windows desktop and are run locally using the commands below.
 - `Enter` send chat message, `Shift+Enter` newline, `Stop` interrupts the turn
 - Agent/Terminal toggle in the conversation header
 - `Ctrl+K` command palette, `Ctrl+L` focus message input, `Ctrl+1`–`Ctrl+9` jump to a tab
+- `Ctrl+,` settings: themes, glass, layout, typography, terminal, and conversation preferences
 - Arrow keys / Home / End move between focused session tabs; Delete closes the focused tab
 - `Ctrl+F` find in terminal, `Enter` / `Shift+Enter` next/previous match
 - `Ctrl+=` / `Ctrl+-` / `Ctrl+0` terminal zoom in/out/reset
 - Standard / YOLO toggle inside the composer controls YOLO (`--yolo`: no approvals/sandbox) for that tab's turns
+
+See [appearance and customization](appearance.md) for the settings controls and profile format. The default Enter shortcut can be changed in Settings; Ctrl+0 restores the configured terminal font size.
 
 ## Tests
 

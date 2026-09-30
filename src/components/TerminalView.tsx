@@ -8,6 +8,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import "@xterm/xterm/css/xterm.css";
+import { usePreferences } from "../preferences";
+import { codeFonts, terminalTheme } from "../appearance";
 
 export type PtyStatus =
   | { kind: "starting" }
@@ -35,6 +37,9 @@ interface TerminalViewProps {
 }
 
 export default function TerminalView({ provider, options, sessionId, active, sessionKey, workspace, onStatus, onHandles }: TerminalViewProps) {
+  const { settings, systemDark } = usePreferences();
+  const appearanceRef = useRef({ settings, systemDark });
+  appearanceRef.current = { settings, systemDark };
   const optionsRef = useRef(options); optionsRef.current = options;
   const containerRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef<{ id: string; term: Terminal; fit: FitAddon } | null>(null);
@@ -54,35 +59,15 @@ export default function TerminalView({ provider, options, sessionId, active, ses
     let spawned = false;
     let exited = false;
     const nativeId = `${sessionId}-terminal-${crypto.randomUUID()}`;
+    const { settings: initial, systemDark: initialDark } = appearanceRef.current;
     const term = new Terminal({
-      cursorBlink: true,
-      cursorStyle: "bar",
-      fontFamily: '"Cascadia Code", Consolas, "JetBrains Mono", monospace',
-      fontSize: 14,
-      lineHeight: 1.2,
-      scrollback: 5000,
-      theme: {
-        background: "#18191b",
-        foreground: "#e8eaed",
-        cursor: "#84baff",
-        selectionBackground: "#344962",
-        black: "#18191b",
-        red: "#e06c5b",
-        green: "#8fc87a",
-        yellow: "#d9a648",
-        blue: "#6aa8d8",
-        magenta: "#c07ab8",
-        cyan: "#6fc2c5",
-        white: "#d6dde6",
-        brightBlack: "#5a6572",
-        brightRed: "#e88a7a",
-        brightGreen: "#a5d893",
-        brightYellow: "#e5bb6b",
-        brightBlue: "#8abfe8",
-        brightMagenta: "#d194c9",
-        brightCyan: "#8ad4d6",
-        brightWhite: "#eef2f6",
-      },
+      cursorBlink: initial.terminalBlink && initial.motion !== "reduced" && !matchMedia("(prefers-reduced-motion: reduce)").matches,
+      cursorStyle: initial.terminalCursor,
+      fontFamily: codeFonts[initial.codeFont],
+      fontSize: initial.terminalFontSize,
+      lineHeight: initial.terminalLineHeight,
+      scrollback: initial.terminalScrollback,
+      theme: terminalTheme(initial, initialDark),
     });
 
     const fit = new FitAddon();
@@ -175,6 +160,29 @@ export default function TerminalView({ provider, options, sessionId, active, ses
       }).catch(() => {});
     };
   }, [sessionId, sessionKey, workspace, provider]);
+
+  // Change the renderer in place. Appearance never restarts the native PTY or
+  // discards its buffer. Unrelated settings also preserve per-tab zoom.
+  const previousSize = useRef(settings.terminalFontSize);
+  useEffect(() => {
+    const live = liveRef.current;
+    if (!live) return;
+    live.term.options.theme = terminalTheme(settings, systemDark);
+    live.term.options.fontFamily = codeFonts[settings.codeFont];
+    if (previousSize.current !== settings.terminalFontSize) live.term.options.fontSize = settings.terminalFontSize;
+    previousSize.current = settings.terminalFontSize;
+    live.term.options.lineHeight = settings.terminalLineHeight;
+    live.term.options.scrollback = settings.terminalScrollback;
+    live.term.options.cursorStyle = settings.terminalCursor;
+    const motion = matchMedia("(prefers-reduced-motion: reduce)");
+    const blink = () => { if (liveRef.current === live) live.term.options.cursorBlink = settings.terminalBlink && settings.motion !== "reduced" && !motion.matches; };
+    blink(); motion.addEventListener("change", blink);
+    const frame = requestAnimationFrame(() => {
+      if (!active || liveRef.current !== live) return;
+      try { live.fit.fit(); void invoke("pty_resize", { id: live.id, cols: Math.max(1, live.term.cols), rows: Math.max(1, live.term.rows) }).catch(() => {}); } catch { /* Teardown. */ }
+    });
+    return () => { cancelAnimationFrame(frame); motion.removeEventListener("change", blink); };
+  }, [settings, systemDark, active, sessionKey, workspace, provider]);
 
   // Hidden tabs have no layout box; refit once this tab becomes visible.
   useEffect(() => {

@@ -1,6 +1,37 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+test('phone appearance is local, responsive, and preserves the draft', async ({ page }) => {
+  const remote = await boot(page);
+  const input = page.getByRole('textbox', {name:'Message your desktop agent'});
+  await input.fill('Keep my phone draft');
+  await page.getByRole('button', {name:'Phone settings', exact:true}).click();
+  await page.getByRole('button', {name:'Appearance & preferences', exact:true}).click();
+  await expect(page.getByLabel('Search settings')).toBeFocused();
+  await page.getByRole('button', {name:'Mint theme', exact:true}).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme','mint');
+  await expect(page.getByRole('tab',{name:'Terminal',exact:true})).toHaveCount(0);
+  for (const [width,height] of [[390,844],[844,390],[320,568]]) {
+    await page.setViewportSize({width,height});
+    for (const title of ['Appearance','Glass & finish','Layout & text','Preferences']) {
+      await page.getByRole('tab',{name:title,exact:true}).click();
+      expect(await page.locator('.settings-content').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
+      await expect(page.getByRole('button',{name:'Done',exact:true})).toBeInViewport();
+    }
+  }
+  await page.setViewportSize({width:390,height:844});
+  await page.getByRole('tab',{name:'Layout & text',exact:true}).click();
+  await page.getByLabel('Interface text scale',{exact:true}).press('End');
+  await page.getByLabel('Message font',{exact:true}).selectOption('serif');
+  expect((await new AxeBuilder({page}).include('.settings-panel').withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations).toEqual([]);
+  await page.screenshot({path:'.qa/settings-phone.png',animations:'disabled'});
+  await page.getByRole('button',{name:'Done',exact:true}).click();
+  await expect(input).toHaveValue('Keep my phone draft'); expect(remote.sends).toEqual([]);
+  await page.reload(); await expect(page.locator('html')).toHaveAttribute('data-theme','mint');
+  await expect(input).toHaveValue('Keep my phone draft');
+  expect(await input.evaluate(el=>getComputedStyle(el).fontFamily)).toContain('Georgia');
+});
+
 test('phone replays the original Muse retry deadline and clears it after recovery', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-09-29T20:00:00Z') });
   const remote = await boot(page);

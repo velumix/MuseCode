@@ -7,6 +7,7 @@ import { copyText } from "./clip";
 import Icon, { VelumMark, type IconName } from "./Icon";
 import type { PluginChatHandle } from "../plugins";
 import { readDraft, saveDraft } from "../desktopHistory";
+import { usePreferences } from "../preferences";
 import type { BotIdentity } from '../bots';
 import BotAvatar from './BotAvatar';
 import UsageStrip from './UsageStrip';
@@ -221,13 +222,15 @@ function CopyButton({ text }: { text: string }) {
 }
 
 function ToolBlock({ block }: { block: Extract<Block, { kind: "tool" }> }) {
-  const [open, setOpen] = useState(false);
+  const { settings } = usePreferences();
+  const [override, setOverride] = useState<boolean | null>(null);
+  const open = override ?? settings.toolOutput === "expanded";
   const tone = statusTone(block.status);
   const body = [block.output, block.result].filter((s) => s && s.length > 0).join("\n");
   const { head, rest } = preview(body || (block.status === "running" ? "…" : ""));
   return (
     <div className={`tool-card ${tone}`}>
-      <button type="button" className="tool-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+      <button type="button" className="tool-head" onClick={() => setOverride(!open)} aria-expanded={open}>
         <span className={`tool-dot ${tone}`} aria-hidden="true" />
         <span className="tool-name" title={block.name}>
           {friendlyTool(block.name)}
@@ -239,7 +242,7 @@ function ToolBlock({ block }: { block: Extract<Block, { kind: "tool" }> }) {
       </button>
       {block.policy && !isPlainAllow(block.policy) && <div className="tool-policy">policy: {block.policy}</div>}
       {block.reason && <div className="tool-reason">{block.reason}</div>}
-      {body ? (
+      {body && (open || settings.toolOutput !== "collapsed") ? (
         open ? (
           <pre className="tool-output full">{capped(body)}</pre>
         ) : (
@@ -254,6 +257,7 @@ function ToolBlock({ block }: { block: Extract<Block, { kind: "tool" }> }) {
 }
 
 export default function ChatView({ provider, options, initialWorkspace, sessionId, active, sessionKey, onStatus, onWorkspace, onTitle, onRemember, onPluginHandle, botId, taskId }: ChatViewProps) {
+  const { settings } = usePreferences();
   const [bot,setBot]=useState<BotIdentity|null>(null);
   const [contextSnapshot, setContextSnapshot] = useState<string | null>(null);
   const optionsRef = useRef(options); optionsRef.current = options;
@@ -657,7 +661,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
     resize();
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
-  }, [input, active]);
+  }, [input, active, settings.chatFontSize, settings.chatFont, settings.uiFont, settings.codeFont, settings.chatWidth, settings.gutter, settings.sidebarWidth, settings.sidebarMode]);
 
   // Follow new output only when the reader is already at the bottom.
   useLayoutEffect(() => {
@@ -872,7 +876,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
           }}
           onKeyDown={(e) => {
             if (e.nativeEvent.isComposing) return;
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (e.key === "Enter" && !e.shiftKey && !e.altKey && (settings.sendShortcut === "enter" || e.ctrlKey || e.metaKey)) {
               e.preventDefault();
               send();
             } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
@@ -910,7 +914,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
         }} aria-pressed={yolo} aria-label="YOLO mode" title={yolo ? "YOLO is on: turns skip approvals and sandboxing" : "Turn on YOLO: skip approvals and sandboxing"}>
           {yolo ? <YoloIcon /> : <Icon name="shield" size={16} />}<span>{yolo ? "YOLO on" : "Standard"}</span>
         </button>
-        <span className="composer-hint">Shift + Enter for a new line</span>
+        <span className="composer-hint">{settings.sendShortcut === "ctrl-enter" ? "Ctrl / ⌘ + Enter to send" : "Shift + Enter for a new line"}</span>
         <button type="button" className="yolo-btn" aria-label="Project context and diagnostics" title="Project context and diagnostics" disabled={!effective} onClick={e => setContextSnapshot(chatSnapshot(e.currentTarget.closest('.chat-wrap'), provider, options, running, 'desktop'))}><Icon name="settings" size={16}/></button>
         {running ? (
           <button type="button" className="composer-btn stop" onClick={stop} aria-label="Stop" title="Stop">

@@ -6,7 +6,7 @@
   overflow: hidden;
   border: 1px solid;
   border-radius: 30%;
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale));
   font-weight: 700;
   line-height: 1;
   vertical-align: middle;

@@ -14,6 +14,9 @@ import CommandPalette from "./components/CommandPalette";
 const RemotePanel = lazy(() => import("./components/RemotePanel"));
 import type { PaletteAction } from "./components/CommandPalette";
 import "./App.css";
+import "./appearance.css";
+import { getPreferences } from "./preferences";
+const SettingsPanel = lazy(() => import("./components/SettingsPanel"));
 import ProviderPicker from "./components/ProviderPicker";
 import ChoiceMenu from './components/ChoiceMenu';
 import type {BotProfile,BotView} from './bots';
@@ -55,7 +58,11 @@ function newId(): string {
   return `tab-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
 }
 
-function createTab(n: number, provider = preferredProvider()): Tab {
+function newProvider(): Provider {
+  const provider = getPreferences().defaultProvider;
+  return provider === "last" ? preferredProvider() : provider;
+}
+function createTab(n: number, provider = newProvider()): Tab {
   return { provider, options: preferredOptions(provider), id: newId(), title: `New conversation ${n}`, mode: "agent", agentStatus: { kind: "starting" }, terminalStatus: { kind: "starting" }, agentKey: 0, terminalKey: 0, terminalStarted: false };
 }
 
@@ -89,6 +96,7 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [remoteOpen, setRemoteOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [bots,setBots]=useState<BotProfile[]>([]);
   const [botPanel,setBotPanel]=useState<'manage'|'handoff'|'activity'|null>(null);
   const refreshBots=useCallback(async()=>{const view=await invoke<BotView>('bots_request',{request:{action:'list'}});setBots(view?.profiles||[]);},[]);
@@ -230,7 +238,9 @@ export default function App() {
     setActiveId(t.id);
   }, []);
 
-  const newTab = useCallback(() => openProvider(preferredProvider()), [openProvider]);
+  const newTab = useCallback(() => {
+    openProvider(newProvider());
+  }, [openProvider]);
   const openBot=(bot:BotProfile)=>{
     if(stateRef.current.tabs.length>=32){setDesktopMessage({text:'Close a conversation before opening another bot.',error:false});return;}
     const active=stateRef.current.tabs.find(t=>t.id===stateRef.current.activeId);
@@ -331,7 +341,8 @@ export default function App() {
   const zoomActive = useCallback((delta: number | null) => {
     const h = handlesRef.current.get(stateRef.current.activeId);
     if (!h) return;
-    const next = delta === null ? 14 : Math.min(32, Math.max(8, (h.term.options.fontSize ?? 14) + delta));
+    const baseSize = getPreferences().terminalFontSize;
+    const next = delta === null ? baseSize : Math.min(32, Math.max(8, (h.term.options.fontSize ?? baseSize) + delta));
     h.term.options.fontSize = next;
     try {
       h.fit.fit();
@@ -354,7 +365,11 @@ export default function App() {
       if (document.querySelector('[aria-modal="true"]')) return;
       if (!e.ctrlKey || e.altKey || e.metaKey) return;
       const actions = actionsRef.current;
-      if (e.key === "=" || e.key === "+") {
+      if (e.key === ",") {
+        e.preventDefault();
+        e.stopPropagation();
+        setSettingsOpen(true);
+      } else if (e.key === "=" || e.key === "+") {
         e.preventDefault();
         e.stopPropagation();
         actions.zoomActive(1);
@@ -426,6 +441,7 @@ export default function App() {
   const failed = activeTab && (tabStatus(activeTab).kind === "error" || tabStatus(activeTab).kind === "exited");
 
   const paletteActions: PaletteAction[] = [
+    { id: "cmd-settings", title: "Open settings: themes, glass, layout, and preferences", hint: "Ctrl+,", run: () => setSettingsOpen(true) },
     {id:'cmd-bots',title:'Open bots and schedules',run:()=>setBotPanel('manage')},
     { id: "cmd-kanban", title: "Open workspace Kanban board", run: () => { if(activeTab?.workspace)setBoardWorkspace(activeTab.workspace); } },
     { id: "cmd-plugins", title: "Manage plugins", run: () => setPluginPanel({}) },
@@ -479,7 +495,7 @@ export default function App() {
         <button type="button" aria-label="Dismiss notification message" onClick={() => { setDesktopMessage(null); setDesktop((s) => ({ ...s, last_error: null })); }}><Icon name="close" size={15} /></button>
       </div>}
       <div className="app-body">
-      <TabBar tabs={tabs.map((t) => ({ ...t, bot:bots.find(b=>b.id===t.bot_id),status: tabStatus(t) }))} activeId={activeTab?.id ?? ""} onSelect={selectTab} onClose={closeTab} onNew={newTab} onCommands={togglePalette} onBots={()=>setBotPanel('manage')} onPlugins={() => setPluginPanel({})} onKanban={()=>{if(activeTab?.workspace)setBoardWorkspace(activeTab.workspace);}} workspace={activeTab?.workspace} />
+      <TabBar tabs={tabs.map((t) => ({ ...t, bot:bots.find(b=>b.id===t.bot_id),status: tabStatus(t) }))} activeId={activeTab?.id ?? ""} onSelect={selectTab} onClose={closeTab} onNew={newTab} onCommands={togglePalette} onSettings={() => setSettingsOpen(true)} onBots={()=>setBotPanel('manage')} onPlugins={() => setPluginPanel({})} onKanban={()=>{if(activeTab?.workspace)setBoardWorkspace(activeTab.workspace);}} workspace={activeTab?.workspace} />
       <main className="conversation-pane" aria-label="Current conversation">
       <div className="conversation-toolbar">
         <div className="conversation-heading">
@@ -563,6 +579,7 @@ export default function App() {
       </main>
       </div>
       {paletteOpen && <CommandPalette actions={paletteActions} onClose={() => setPaletteOpen(false)} />}
+      {settingsOpen && <Suspense fallback={null}><SettingsPanel onClose={() => setSettingsOpen(false)} notifications={{ enabled: desktop.notifications_enabled, toggle: toggleNotifications, test: testNotification }} /></Suspense>}
       {remoteOpen && <Suspense fallback={null}><RemotePanel onClose={() => setRemoteOpen(false)} /></Suspense>}
       {boardWorkspace && <Suspense fallback={null}><KanbanPanel workspace={boardWorkspace} bots={bots} previewSchedule={(cron,timezone)=>invoke('automation_request',{request:{action:'preview',cron,timezone}})} request={request=>invoke<Board>("kanban_request",{workspace:boardWorkspace,request})} onClose={()=>setBoardWorkspace(null)} onWork={workOnCard}/></Suspense>}
       {pluginPanel && <Suspense fallback={null}><PluginPanel plugins={plugins} selection={pluginPanel.selection} onClose={() => setPluginPanel(null)} onRefresh={refreshPlugins} workspace={activeTab?.workspace || ""} messages={() => pluginHandles.current.get(activeTab?.id)?.messages() || []} onInsert={text => { pluginHandles.current.get(activeTab?.id)?.insert(text); focusComposer(); }} /></Suspense>}
