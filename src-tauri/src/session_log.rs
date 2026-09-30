@@ -15,6 +15,7 @@ pub struct Entry {
 
 #[derive(Clone, Serialize)]
 pub struct Summary {
+    pub queue: crate::message_queue::Snapshot,
     pub provider_progress: Option<crate::provider_progress::Progress>,
     pub last_provider_retry: Option<crate::provider_progress::Progress>,
     pub bot: Option<crate::bots::Identity>,
@@ -61,6 +62,7 @@ impl SessionLog {
             id.into(),
             Log {
                 summary: Summary {
+                    queue: crate::message_queue::Snapshot::default(),
                     provider_progress: None,
                     last_provider_retry: None,
                     bot: None,
@@ -100,6 +102,10 @@ impl SessionLog {
             return;
         };
         match event {
+            AgentEvent::QueueState { queue, running } => {
+                log.summary.queue = queue.clone();
+                log.summary.running = *running;
+            }
             AgentEvent::BotIdentity { bot } => {
                 log.summary.bot = Some(bot.clone());
             }
@@ -129,7 +135,12 @@ impl SessionLog {
                 log.summary.provider_progress = None;
                 log.summary.last_provider_retry = None;
             }
+            AgentEvent::AssistantDelta { text } if !text.is_empty() => {
+                log.summary.provider_progress = None;
+            }
+            AgentEvent::ToolStart { .. } => log.summary.provider_progress = None,
             AgentEvent::TurnEnd { status, .. } => {
+                log.summary.provider_progress = None;
                 log.summary.running = false;
                 log.summary.status.clone_from(status);
             }
@@ -226,13 +237,14 @@ mod tests {
             },
         );
         let summary = log.summaries().remove(0);
-        assert_eq!(summary.provider_progress, Some(connected));
+        assert_eq!(summary.provider_progress, None);
         assert_eq!(summary.last_provider_retry, Some(retry.clone()));
         assert!(!summary.running);
         for reset in [
             AgentEvent::TurnStart {
                 prompt: "new".into(),
                 remote: false,
+                queued: false,
             },
             AgentEvent::UsageReset,
         ] {
@@ -270,6 +282,7 @@ mod tests {
             &AgentEvent::TurnStart {
                 prompt: "Review this change".into(),
                 remote: false,
+                queued: false,
             },
         );
         log.record(
@@ -277,6 +290,7 @@ mod tests {
             &AgentEvent::TurnStart {
                 prompt: "A follow-up".into(),
                 remote: true,
+                queued: false,
             },
         );
         assert_eq!(log.summaries()[0].title, "Review this change");
@@ -291,6 +305,7 @@ mod tests {
             &AgentEvent::TurnStart {
                 prompt: "Review code".into(),
                 remote: true,
+                queued: false,
             },
         );
         log.record(

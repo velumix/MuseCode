@@ -1,8 +1,10 @@
 // Protocol fixtures for the real native runner; no network or account required.
 const fs = require("node:fs");
+const path = require('node:path');
 const { spawn } = require("node:child_process");
 const provider = process.argv[2];
-const args = process.argv.slice(3);
+const qaTag = process.argv.find(arg => arg.startsWith('--velum-qa-run='));
+const args = process.argv.slice(3).filter(arg => arg !== qaTag);
 const log = (entry) => fs.appendFileSync(process.env.MUSE_QA_LOG, JSON.stringify({ provider, pid: process.pid, ...entry }) + "\n");
 if (provider === "codex" && args[0] === "app-server") {
   require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {
@@ -45,18 +47,32 @@ if (provider === "codex" && args[0] === "app-server") {
   const prompt = raw.includes("Current request:\n") ? raw.split("Current request:\n").at(-1) : raw;
   const id = provider === "codex" ? "62c2d305-9dd5-4c94-b4c0-667eb612f401" : "ae283c22-1851-4d5c-a5c5-d14d53c23b72";
   log({ kind: "provider-turn", prompt, input: raw, args, cwd: process.cwd() });
+  process.on('exit',()=>log({kind:'exit',prompt,at:Date.now()}));
   const emit = (value) => console.log(JSON.stringify(value));
   emit(provider === "codex" ? { type: "thread.started", thread_id: id } : { event: "init", conversation_id: id });
   if (prompt === "HOLD") {
-    spawn(process.execPath, [__filename, provider, "--descendant"], { stdio: "inherit", windowsHide: true });
+    spawn(process.execPath, [__filename, provider, "--descendant", ...(qaTag ? [qaTag] : [])], { stdio: "inherit", windowsHide: true });
     setInterval(() => {}, 1000);
   } else if (prompt === "FAIL") {
     emit(provider === "codex" ? { type: "turn.failed", error: { message: "Provider fixture failure" } } : { event: "result", result: { status: "ERROR", error: "Provider fixture failure" } });
     process.exitCode = 1;
-  } else if (provider === "codex") {
-    emit({ type: "item.completed", item: { id: "msg", type: "agent_message", text: `Reply: ${prompt}` } });
-    emit({ type: "turn.completed" });
   } else {
+    function complete(){
+    const output=prompt==='METRICS_RESUME'?80:120;
+    if(provider==='codex'){
+      const usage={input_tokens:501,cached_input_tokens:200,output_tokens:output,reasoning_output_tokens:20};
+      let total;
+      if(process.env.CODEX_HOME){
+        const dir=path.join(process.env.CODEX_HOME,'sessions/2026/09/30');fs.mkdirSync(dir,{recursive:true});
+        const file=path.join(dir,`rollout-fixture-${id}.jsonl`);
+        const previous=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8').trim().split('\n').at(-1)).payload.info.total_token_usage:{input_tokens:100000,cached_input_tokens:50000,output_tokens:50000,reasoning_output_tokens:10000};
+        total=Object.fromEntries(Object.entries(usage).map(([key,value])=>[key,previous[key]+value]));
+        fs.appendFileSync(file,JSON.stringify({timestamp:new Date().toISOString(),type:'event_msg',payload:{type:'token_count',info:{model_context_window:100000,last_token_usage:{...usage,total_tokens:501+output},total_token_usage:total}}})+'\n');
+      }
+      emit({type:'item.completed',item:{id:'msg',type:'agent_message',text:`Reply: ${prompt}`}});
+      emit({type:'turn.completed',usage:prompt==='METRICS_CUMULATIVE'?total:usage});
+      setTimeout(()=>{},350);return;
+    }
     if (prompt === 'DENIED') {
       // Agy sometimes supplies an empty DONE snapshot and reports the denial
       // only on stderr. The UI must correct the unconfirmed tool's status.
@@ -64,7 +80,13 @@ if (provider === "codex" && args[0] === "app-server") {
       console.error('jetski: a tool required the command permission that headless mode cannot prompt for, so it was auto-denied.');
       for (let i=0;i<40;i++) console.error('Following stderr diagnostic '+i);
     }
-    emit({ event: "step_update", step_update: { step_type: "agent_response", text_delta: `Reply: ${prompt}` } });
-    emit({ event: "result", result: { status: "SUCCESS", response: `Reply: ${prompt}`, conversation_id: id } });
+    const step={event:'step_update',step_update:{step_index:8,step_type:'agent_response',state:'DONE',text_delta:`Reply: ${prompt}`,usage:{input_tokens:501,cache_read_tokens:200,output_tokens:output,thinking_tokens:20}}};
+    emit(step);
+    emit({...step,step_update:{...step.step_update,text_delta:''}}); // Repeated usage snapshot.
+    emit({event:'step_update',step_update:{step_index:9,step_type:'checkpoint',state:'DONE',usage:{input_tokens:10,cache_read_tokens:0,output_tokens:5,thinking_tokens:0}}});
+    emit({ event: "result", result: { status: "SUCCESS", response: `Reply: ${prompt}`, conversation_id: id, num_turns:3,usage:{input_tokens:100000,cache_read_tokens:80000,output_tokens:50000,thinking_tokens:10000} } });
+    setTimeout(()=>{},350);
+    }
+    if(prompt==='QUEUE_HOLD')setTimeout(complete,1600);else complete();
   }
 }

@@ -1,0 +1,38 @@
+.message-queue {
+  margin-block: 6px;
+  padding: 10px 12px;
+  background: var(--glass-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: calc(12px * var(--ui-scale));
+  min-width: 0;
+}
+.message-queue > header { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.message-queue header > span, .queue-reason { color: var(--muted); }
+.queue-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.message-queue button { border: 1px solid var(--border); border-radius: calc(var(--radius) * .5); background: var(--panel); color: var(--text); font: inherit; padding: 4px 7px; cursor: pointer; }
+.message-queue button:hover { background: var(--hover); }
+.message-queue button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.message-queue button:disabled { opacity: .55; cursor: default; }
+.message-queue ol { list-style: none; margin: 8px 0 0; padding: 0; max-height: min(180px, 22vh); overflow-y: auto; overscroll-behavior: contain; }
+.message-queue li { display: flex; align-items: flex-start; gap: 8px; padding-block: 6px; border-top: 1px solid var(--border); }
+.queue-position { color: var(--muted); flex: 0 0 15px; padding-top: 2px; }
+.queue-copy { flex: 1; min-width: 0; }
+.queue-copy p { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.queue-copy small { color: var(--muted); display: inline-block; margin-top: 3px; margin-right: 8px; }
+.queue-item-actions { display: flex; gap: 4px; }
+.queue-item-actions button { display: flex; padding: 5px; }
+.message-queue form { flex: 1; min-width: 0; }
+.message-queue form textarea { display: block; box-sizing: border-box; width: 100%; min-height: 64px; max-height: 160px; resize: vertical; background: var(--panel); border: 1px solid var(--strong-border); border-radius: 5px; padding: 8px; color: var(--text); font: inherit; }
+.message-queue form > div { display: flex; gap: 6px; margin-top: 6px; }
+.queue-reason, .queue-error { margin: 7px 0 0; overflow-wrap: anywhere; }
+.queue-error { color: var(--danger); }
+.phone-app .phone-composer { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; }
+.phone-app .phone-composer > form, .phone-app .phone-composer > .usage-strip { flex-shrink: 0; }
+.phone-app .message-queue { min-height: 0; overflow-y: auto; flex: 0 1 auto; overscroll-behavior: contain; }
+.phone-app .message-queue button { min-width: 44px; min-height: 44px; }
+.phone-app .message-queue ol { max-height: none; overflow: visible; }
+@media (max-height: 560px) { .phone-app .message-queue { max-height: 22dvh; } }
+@media (max-height: 220px) { .phone-app .message-queue { display: none; } }
+@media (max-width: 560px) { .queue-actions { margin-left: 0; } .message-queue { padding: 8px 10px; } }

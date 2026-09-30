@@ -59,13 +59,15 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
     memory: {root:"C:\\Vault",settings:{enabled:true,capture:"review",budget_bytes:3000},notes:[] as any[],warning:null},
     board: {revision:0,cards:[] as any[],trash:[] as any[]},
     bots:{profiles:[] as any[],root:'C:\\Bots',warnings:[]},jobs:{enabled:true,jobs:[] as any[],runs:[] as any[],warning:null},
-    sessions: [{ provider, options: { model: "", reasoning: "" }, id: "session-one", title: "Review the project", workspace: "C:\\Projects\\VelumCode", running: false, status: "completed", revision: 3 }],
+    sessions: [{ queue:{items:[] as any[],paused:false,reason:null as string|null}, provider, options: { model: "", reasoning: "" }, id: "session-one", title: "Review the project", workspace: "C:\\Projects\\VelumCode", running: false, status: "completed", revision: 3 }],
     entries: [
       { seq: 1, event: { kind: "turn_start", prompt: "Review the project", remote: false } },
       { seq: 2, event: { kind: "assistant_delta", text: "**Review complete.**\n\n```ts\nconst connected = true;\n```\n\n[Documentation](https://example.com)" } },
       { seq: 3, event: { kind: "turn_end", status: "completed" } },
     ] as { seq: number; event: Record<string, unknown> }[],
   };
+  const publishQueue=()=>{remote.entries.push({seq:remote.entries.length+1,event:{kind:'queue_state',queue:structuredClone(remote.sessions[0].queue),running:remote.sessions[0].running}});remote.sessions[0].revision=remote.entries.length;};
+  const nextQueued=()=>{const session=remote.sessions[0];if(session.running||session.queue.paused||!session.queue.items.length)return;const message=session.queue.items.shift();session.running=true;session.status='running';publishQueue();remote.entries.push({seq:remote.entries.length+1,event:{kind:'turn_start',prompt:message.prompt,queued:true,remote:true}});session.revision=remote.entries.length;};
   await page.setViewportSize({ width: 390, height: 844 });
   await page.addInitScript(() => {
     const streams: EventTarget[] = [];
@@ -121,14 +123,32 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
       expect(request.headers()["x-muse-request"]).toBe("1");
       if (remote.failSend) return answer({ error: "Desktop could not start the task." }, 409);
       remote.sends.push(body.prompt);
+      const session=remote.sessions[0];
+      if(session.running||session.queue.items.length||session.queue.paused){
+        session.queue.items.push({id:`queue-${remote.sends.length}`,prompt:body.prompt,yolo:false,remote:true});publishQueue();
+        return answer({queued:true,turn_id:''});
+      }
       remote.entries.push({ seq: remote.entries.length + 1, event: { kind: "turn_start", prompt: body.prompt, remote: true } });
       remote.sessions[0] = { ...remote.sessions[0], running: true, status: "running", revision: remote.entries.length };
       return answer({ turn_id: "turn" });
     }
     if (url.pathname.endsWith("/stop")) {
+      if(remote.sessions[0].queue.items.length){remote.sessions[0].queue.paused=true;remote.sessions[0].queue.reason='Stopped. Pending messages wait for Resume.';publishQueue();}
       remote.entries.push({ seq: remote.entries.length + 1, event: { kind: "turn_end", status: "cancelled" } });
       remote.sessions[0] = { ...remote.sessions[0], running: false, status: "cancelled", revision: remote.entries.length };
       return answer({ ok: true });
+    }
+    if(url.pathname.endsWith('/queue')){
+      expect(request.headers()['x-muse-request']).toBe('1');
+      if(body.action!=='load'&&!remote.control)return answer({error:'View only'},403);
+      const q=remote.sessions[0].queue;
+      if(body.action==='load')return answer(q);
+      if(body.action==='pause'){q.paused=true;q.reason='Queue paused.';}
+      if(body.action==='resume'){q.paused=false;q.reason=null;}
+      if(body.action==='clear'){q.items=[];q.paused=false;q.reason=null;}
+      if(body.action==='remove')q.items=q.items.filter(m=>m.id!==body.message_id);
+      if(body.action==='edit')q.items.find(m=>m.id===body.message_id).prompt=body.prompt.trim();
+      publishQueue();nextQueued();return answer(q);
     }
     if (url.pathname === "/api/logout") { remote.revoked = true; return answer({ ok: true }); }
     if (url.pathname === "/api/sessions/session-one") return answer({ session: remote.sessions[0], events: remote.entries.filter((e) => e.seq > Number(url.searchParams.get("after") || 0)), truncated: false });
@@ -138,6 +158,58 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
   await page.goto(`/remote.html${paired ? "" : "#pair=one-use-test-invitation"}`);
   return remote;
 }
+
+for(const provider of ['muse','codex','antigravity']) {
+  test(`${provider}: phone queues active follow-ups and edits, removes and resumes pending messages`,async({page})=>{
+    const remote=await boot(page,true,true,provider);
+    await expect(page.locator('.phone-online')).toBeVisible();
+    const composer=page.getByRole('textbox',{name:'Message your desktop agent'});
+    await composer.fill('Active request');await page.getByRole('button',{name:'Send message',exact:true}).click();
+    for(const prompt of ['Edit from phone','Remove from phone']){
+      await composer.fill(prompt);await page.getByRole('button',{name:'Queue message',exact:true}).click();
+      await expect(composer).toHaveValue('');
+    }
+    const queue=page.getByRole('region',{name:'Message queue'});
+    await expect(queue).toContainText('2 queued');
+    await expect(page.locator('.phone-message.user')).toHaveCount(2);
+    await page.getByRole('button',{name:'Pause queue',exact:true}).click();
+    await page.getByRole('button',{name:'Edit queued message 1',exact:true}).click();
+    await page.getByRole('textbox',{name:'Edit queued message 1',exact:true}).fill('Edited from phone');
+    await page.getByRole('button',{name:'Save queued message',exact:true}).click();
+    await page.getByRole('button',{name:'Remove queued message 2',exact:true}).click();
+    await expect(queue).toContainText('1 queued');
+    for(const [width,height] of [[320,568],[844,390],[390,844]]){
+      await page.setViewportSize({width,height});
+      expect(await queue.evaluate(e=>e.scrollWidth<=e.clientWidth)).toBe(true);
+      await expect(composer).toBeInViewport();
+    }
+    expect((await new AxeBuilder({page}).include('.message-queue').withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations).toEqual([]);
+    if(provider==='muse')await page.screenshot({path:'.qa/message-queue-phone.png',animations:'disabled'});
+    await page.getByRole('button',{name:'Stop task',exact:true}).click();
+    await expect(queue).toContainText('Paused');
+    await page.getByRole('button',{name:'Resume queue',exact:true}).click();
+    await expect(queue).toHaveCount(0);
+    await expect(page.locator('.phone-message.user').last()).toContainText('Edited from phone');
+    expect(remote.sessions[0].running).toBe(true);
+  });
+}
+
+test('view-only phone shows queue without mutation controls and activity clears stale retry',async({page})=>{
+  const remote=await boot(page,true,false,'codex');
+  remote.sessions[0].queue={items:[{id:'one',prompt:'Desktop pending request',yolo:false,remote:false}],paused:true,reason:'Review queued work'};
+  remote.sessions[0].running=true;remote.sessions[0].revision++;
+  remote.entries.push({seq:4,event:{kind:'provider_progress',progress:{phase:'retrying',checked_at_ms:Date.now(),retry_at_ms:Date.now()+60000,attempt:2,max_attempts:10,http_status:503}}});
+  await page.evaluate(()=>(window as any).remoteEvent());
+  await expect(page.getByRole('region',{name:'Message queue'})).toContainText('Desktop pending request');
+  await expect(page.getByRole('button',{name:'Resume queue'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Clear queue'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Edit queued message 1'})).toHaveCount(0);
+  await expect(page.locator('.provider-wait')).toContainText('Codex service is temporarily unavailable');
+  remote.entries.push({seq:5,event:{kind:'assistant_delta',text:'Recovered stream'}});remote.sessions[0].revision++;
+  await page.evaluate(()=>(window as any).remoteEvent());
+  await expect(page.locator('.provider-wait')).toHaveCount(0);
+  await expect(page.locator('.phone-working')).toContainText('Responding');
+});
 
 test('phone usage replays provider counters, resets per turn, and never invents unknown capacity', async ({ page }) => {
   const remote = await boot(page, true, true, 'codex');

@@ -12,6 +12,7 @@ import Icon, { VelumMark } from "../components/Icon";
 import Markdown from "../components/Markdown";
 import { transcript, type Block, type Replay, type Session } from "./transcript";
 import { usePreferences } from "../preferences";
+import MessageQueue from '../components/MessageQueue';
 const SettingsPanel = lazy(() => import("../components/SettingsPanel"));
 
 import ModelControls from "../components/ModelControls";
@@ -216,7 +217,7 @@ export default function RemoteApp() {
 
   const send = async () => {
     const prompt = input.trim();
-    if (busy || !prompt || !current || current.running || !connected || !device?.control) return;
+    if (busy || !prompt || !current || !connected || !device?.control) return;
     const id = selected;
     setBusy(true); setError(""); follow.current = true;
     try {
@@ -273,7 +274,7 @@ export default function RemoteApp() {
     <button className="phone-session-select" aria-expanded={listOpen} aria-controls="phone-sessions" onClick={() => setListOpen((value) => !value)}>{current?.bot&&<BotAvatar bot={current.bot} size={30}/>}<span><span className="phone-eyebrow">{current?.bot?.name||'Conversation'}</span><strong>{current?.title || "Your conversations"}</strong></span><Icon name="down" size={18} /></button>
     {listOpen && <nav className="phone-sessions" id="phone-sessions" aria-label="Conversations">{sessions.map((session) => <button key={session.id} aria-current={session.id === selected ? "true" : undefined} onClick={() => { setSelected(session.id); setReplay(cache.current.get(session.id) || null); setListOpen(false); follow.current = true; setError(""); }}>{session.bot?<BotAvatar bot={session.bot} size={28}/>:<Icon name="chat" size={18}/>}<span><strong>{session.title}</strong><small>{session.bot?.name||providerNames[session.provider || "muse"]} · {session.workspace.split(/[\\/]/).filter(Boolean).pop()}</small></span><i className={session.running ? "working" : ""}>{session.running ? "Working" : session.status === "completed" ? "Done" : "Ready"}</i></button>)}</nav>}
     </div>
-    {current && <div className="phone-models"><ModelControls key={current.id} provider={current.provider || "muse"} options={current.options || defaultOptions} disabled={busy || !connected || current.running || !device.control} load={(provider, refresh) => api<ModelCatalog>(`/providers/${provider}/models?refresh=${refresh}`)} onChange={async (options) => {
+    {current && <div className="phone-models"><ModelControls key={current.id} provider={current.provider || "muse"} options={current.options || defaultOptions} disabled={busy || !connected || current.running || !!current.queue?.items.length || !device.control} load={(provider, refresh) => api<ModelCatalog>(`/providers/${provider}/models?refresh=${refresh}`)} onChange={async (options) => {
       const id = current.id;
       setBusy(true);
       try {
@@ -288,14 +289,19 @@ export default function RemoteApp() {
       {replay?.truncated && <p className="phone-history-note">Showing recent activity. Earlier messages remain in the desktop conversation.</p>}
       {view.blocks.map((block) => block.kind === "tool" ? <PhoneTool block={block} key={block.id} /> : block.kind === "notice" ? <div className="phone-notice" key={block.id}>{block.text}</div> : <article className={`phone-message ${block.kind}`} key={block.id}><div className="phone-message-label">{block.kind === "user" ? "You" : <>{current?.bot?<BotAvatar bot={current.bot} size={24}/>:<VelumMark size={20}/>}<span>{current?.bot?.name||providerNames[current?.provider || "muse"]}</span></>}</div>{block.kind === "user" ? <p>{block.text}</p> : <Markdown text={block.text} />}{device.control&&<button type="button" className="phone-remember" aria-label="Remember this message" disabled={!connected||!!current?.running} onClick={()=>{setMemorySeed(block.text);setMemorySession(selected);}}><Icon name="memory" size={14}/>Remember</button>}</article>)}
       {view.todos.length > 0 && <details className="phone-todos"><summary>Task checklist <span>{view.todos.filter((todo) => todo.status === "completed").length}/{view.todos.length}</span></summary>{view.todos.map((todo, index) => <p key={index}><Icon name={todo.status === "completed" ? "check" : "code"} size={14} />{todo.text}</p>)}</details>}
-      {current?.running && <div className="phone-working" role="status"><span className="phone-pulse" />{view.providerProgress?.phase === 'retrying' ? <ProviderWait progress={view.providerProgress}/> : view.activity || `${current?.bot?.name||providerNames[current?.provider || "muse"]} is working…`}</div>}
+      {current?.running && <div className="phone-working" role="status"><span className="phone-pulse" />{view.providerProgress?.phase === 'retrying' ? <ProviderWait progress={view.providerProgress} provider={current.provider || 'muse'}/> : view.activity || `${current?.bot?.name||providerNames[current?.provider || "muse"]} is working…`}</div>}
     </div>
     {latest && <button className="phone-latest" onClick={() => { follow.current = true; if (scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight; setLatest(false); }}>Latest activity <Icon name="down" size={15} /></button>}
     <footer className="phone-composer">
       <UsageStrip key={selected} usage={view.usage} memory={view.memory} provider={current?.provider || "muse"} running={!!current?.running} elapsed={view.usage.turn?.elapsed_ms ?? null} active={!!current} />
+      <MessageQueue key={`queue-${selected}`} queue={current?.queue ?? view.queue} running={!!current?.running} readOnly={!device.control} maxLength={16000} onAction={async request => {
+        if (!current || !device.control || !connected) throw new Error('Reconnect to your desktop to change the queue.');
+        await api(`/sessions/${encodeURIComponent(selected)}/queue`, request);
+        await refreshRef.current();
+      }} />
       {error && <div className="phone-error" role="alert">{error}<button aria-label="Dismiss error" onClick={() => setError("")}><Icon name="close" size={15} /></button></div>}
       {device.control ? <form onSubmit={(e) => { e.preventDefault(); void send(); }}><textarea aria-label="Message your desktop agent" placeholder={current?.running ? "Write your next thought…" : "Message your desktop agent…"} value={input} maxLength={16_000} rows={2} disabled={!selected || !draftsReady} onChange={(e) => setDrafts((drafts) => ({ ...drafts, [selected]: e.target.value }))} onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} />
-        {current?.running ? <button type="button" className="phone-stop" disabled={busy || !connected} onClick={() => void stop()} aria-label="Stop task"><span />Stop</button> : <button className="phone-send" aria-label="Send message" disabled={busy || !connected || !input.trim() || !selected}><Icon name="arrow" size={21} /></button>}
+        {current?.running && <button type="button" className="phone-stop" disabled={busy || !connected} onClick={() => void stop()} aria-label="Stop task"><span />Stop</button>}<button className="phone-send" aria-label={current?.running || (current?.queue ?? view.queue).items.length ? 'Queue message' : 'Send message'} disabled={busy || !connected || !input.trim() || !selected}><Icon name="arrow" size={21} /></button>
       </form> : <p className="phone-view-only"><Icon name="shield" size={15} />View-only access</p>}
       <span className="phone-composer-note">{current?.workspace.split(/[\\/]/).filter(Boolean).pop() || "Velum Code"} · runs on your desktop</span>
     </footer>

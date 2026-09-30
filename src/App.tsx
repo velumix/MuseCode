@@ -72,6 +72,7 @@ function tabStatus(tab: Tab): PtyStatus | AgentStatus {
 
 function statusText(tab: Tab): string {
   const status = tabStatus(tab);
+  if (tab.mode === 'agent' && tab.agentStatus.kind !== 'running' && tab.agentStatus.queuePaused && tab.agentStatus.queued) return `Queue paused · ${tab.agentStatus.queued} pending`;
   switch (status.kind) {
     case "starting":
       return `Starting ${providerNames[tab.provider]}…`;
@@ -518,7 +519,7 @@ export default function App() {
           <Icon name="reset" size={17} />
         </button>
       </div>
-      {activeTab && <ProviderPicker key={activeTab.id} value={activeTab.provider} options={activeTab.options} onOptionsChange={(options) => configure(activeTab, options)} disabled={activeTab.agentStatus.kind === "starting" || activeTab.agentStatus.kind === "running"} terminal={activeTab.mode === "terminal"} failure={activeTab.agentStatus.kind === "error" ? activeTab.agentStatus.message : undefined} onChange={(provider) => { if (provider !== activeTab.provider) openProvider(provider); }}
+      {activeTab && <ProviderPicker key={activeTab.id} value={activeTab.provider} options={activeTab.options} onOptionsChange={(options) => configure(activeTab, options)} disabled={activeTab.agentStatus.kind === "starting" || activeTab.agentStatus.kind === "running" || (activeTab.agentStatus.queued ?? 0) > 0} terminal={activeTab.mode === "terminal"} failure={activeTab.agentStatus.kind === "error" ? activeTab.agentStatus.message : undefined} onChange={(provider) => { if (provider !== activeTab.provider) openProvider(provider); }}
         botPicker={activeTab.mode === 'agent' && <ChoiceMenu label="Bot" value={activeTab.bot_id||'provider'} choices={[{id:'provider',label:'Provider assistant',description:'Use the CLI without a custom personality'},...bots.filter(b=>b.enabled).map(b=>({id:b.id,label:b.name,description:b.role||providerNames[b.provider]})),{id:'manage',label:'Create or edit bots…'}]} onChange={id=>{
             if(id==='manage')setBotPanel('manage');
             else if(id==='provider')openProvider(activeTab.provider,false);

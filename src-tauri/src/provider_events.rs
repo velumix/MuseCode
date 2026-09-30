@@ -12,7 +12,9 @@ pub struct Stream {
     text: HashMap<String, String>,
     tools: HashSet<String>,
     agy_last_tool: Option<(u64, Option<String>)>,
+    agy_usage: HashMap<u64, crate::provider_usage::TurnUsage>,
     pub session_id: Option<String>,
+    pub run_id: Option<String>,
 }
 fn text(value: &Value, key: &str) -> String {
     bounded(value[key].as_str().unwrap_or_default())
@@ -43,7 +45,9 @@ impl Stream {
             text: HashMap::new(),
             tools: HashSet::new(),
             agy_last_tool: None,
+            agy_usage: HashMap::new(),
             session_id: None,
+            run_id: None,
         }
     }
     fn remember(&mut self, value: &Value) {
@@ -65,6 +69,22 @@ impl Stream {
     }
     pub fn fold_line(&mut self, line: &str) -> Vec<Event> {
         if self.provider == Provider::Muse {
+            if let Ok(value) = serde_json::from_str::<Value>(line) {
+                let payload = &value["payload"];
+                if self.run_id.is_none()
+                    && value["payload_type"] == "run.lifecycle.started"
+                    && value["stream"]["kind"] == "session"
+                    && payload["run_stream"]["kind"] == "run"
+                    && payload["command_id"] == payload["run_stream"]["id"]
+                {
+                    if let Some(id) = payload["command_id"]
+                        .as_str()
+                        .filter(|id| uuid::Uuid::parse_str(id).is_ok())
+                    {
+                        self.run_id = Some(id.into());
+                    }
+                }
+            }
             return self.muse.fold_line(line);
         }
         let Ok(value) = serde_json::from_str::<Value>(line) else {
@@ -273,6 +293,19 @@ impl Stream {
                 } else {
                     vec![]
                 };
+                // Per-step counts belong to this invocation. Result usage may
+                // be cumulative when a conversation is resumed.
+                let usage = self.agy_total().or_else(|| {
+                    (result["num_turns"] == 1)
+                        .then(|| crate::provider_usage::antigravity_step(&result["usage"]))
+                        .flatten()
+                });
+                if let Some(turn) = usage {
+                    events.push(Event::Usage {
+                        context: None,
+                        turn: Some(turn),
+                    });
+                }
                 events.push(end(
                     status,
                     Some(text(result, "response")),
@@ -287,22 +320,34 @@ impl Stream {
             "step_update" => {
                 let step = &value["step_update"];
                 self.remember(&step["conversation_id"]);
+                let mut events = vec![];
+                if let Some((index, usage)) = step["step_index"]
+                    .as_u64()
+                    .zip(crate::provider_usage::antigravity_step(&step["usage"]))
+                {
+                    if self.agy_usage.len() < 100_000 && self.agy_usage.get(&index) != Some(&usage)
+                    {
+                        self.agy_usage.insert(index, usage);
+                        events.push(Event::Usage {
+                            context: None,
+                            turn: self.agy_total(),
+                        });
+                    }
+                }
                 if step["step_type"] == "agent_response" {
                     let delta = text(step, "text_delta");
-                    return if delta.is_empty() {
-                        vec![]
-                    } else {
-                        vec![Event::AssistantDelta { text: delta }]
-                    };
+                    if !delta.is_empty() {
+                        events.push(Event::AssistantDelta { text: delta });
+                    }
+                    return events;
                 }
                 if step["step_type"] != "tool" {
-                    return vec![];
+                    return events;
                 }
                 let Some(index) = step["step_index"].as_u64() else {
-                    return vec![];
+                    return events;
                 };
                 let id = format!("agy-{index}");
-                let mut events = vec![];
                 if self.tools.insert(id.clone()) {
                     events.push(Event::ToolStart {
                         task_id: id.clone(),
@@ -356,11 +401,51 @@ impl Stream {
             _ => vec![],
         }
     }
+    fn agy_total(&self) -> Option<crate::provider_usage::TurnUsage> {
+        self.agy_usage
+            .values()
+            .cloned()
+            .reduce(|total, usage| total.add(&usage))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn antigravity_usage_sums_step_snapshots_once_instead_of_lifetime_result() {
+        let mut stream = Stream::new(Provider::Antigravity);
+        let first = r#"{"event":"step_update","step_update":{"step_index":8,"step_type":"agent_response","state":"DONE","usage":{"input_tokens":100,"output_tokens":30,"thinking_tokens":4,"cache_read_tokens":70}}}"#;
+        assert!(
+            matches!(&stream.fold_line(first)[0], Event::Usage { turn:Some(turn),.. } if turn.output_tokens == Some(30))
+        );
+        assert!(stream.fold_line(first).is_empty());
+        stream.fold_line(r#"{"event":"step_update","step_update":{"step_index":9,"step_type":"checkpoint","state":"DONE","usage":{"input_tokens":20,"output_tokens":5,"thinking_tokens":0,"cache_read_tokens":0}}}"#);
+        let events = stream.fold_line(r#"{"event":"result","result":{"status":"SUCCESS","num_turns":3,"usage":{"input_tokens":9000,"output_tokens":1000,"thinking_tokens":300,"cache_read_tokens":6000}}}"#);
+        assert!(
+            matches!(&events[0], Event::Usage {turn:Some(turn),..} if turn.output_tokens == Some(35) && turn.input_tokens == Some(120) && turn.reasoning_output_tokens == Some(4))
+        );
+        let mut unknown = Stream::new(Provider::Antigravity);
+        assert_eq!(unknown.fold_line(r#"{"event":"result","result":{"status":"SUCCESS","num_turns":2,"usage":{"output_tokens":1000}}}"#).len(), 1);
+        let mut fresh = Stream::new(Provider::Antigravity);
+        assert!(
+            matches!(&fresh.fold_line(r#"{"event":"result","result":{"status":"SUCCESS","num_turns":1,"usage":{"output_tokens":30}}}"#)[0], Event::Usage {turn:Some(turn),..} if turn.output_tokens == Some(30))
+        );
+    }
+    #[test]
+    fn muse_usage_root_id_is_captured_only_from_valid_root_lifecycle() {
+        let mut stream = Stream::new(Provider::Muse);
+        stream.fold_line(r#"{"payload_type":"run.lifecycle.started","stream":{"kind":"session"},"payload":{"command_id":"12855d17-053b-443b-b0f7-d6c1779762b9","run_stream":{"kind":"run","id":"12855d17-053b-443b-b0f7-d6c1779762b9"}}}"#);
+        assert_eq!(
+            stream.run_id.as_deref(),
+            Some("12855d17-053b-443b-b0f7-d6c1779762b9")
+        );
+        stream.fold_line(r#"{"payload_type":"run.lifecycle.started","stream":{"kind":"session"},"payload":{"command_id":"11111111-1111-4111-8111-111111111111","run_stream":{"kind":"run","id":"11111111-1111-4111-8111-111111111111"}}}"#);
+        assert_eq!(
+            stream.run_id.as_deref(),
+            Some("12855d17-053b-443b-b0f7-d6c1779762b9")
+        );
+    }
     #[test]
     fn stderr_denial_corrects_only_the_latest_command_without_output_evidence() {
         let done = r#"{"event":"step_update","step_update":{"step_index":8,"step_type":"tool","tool_name":"run_command","state":"DONE","tool_info":{"parameters":{"CommandLine":"probe"}}}}"#;

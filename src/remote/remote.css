@@ -56,10 +56,10 @@ body { background: var(--phone-bg); }
 .phone-todos summary span { float: right; }
 .phone-todos p { display: flex; gap: 8px; padding: 0 14px; line-height: 1.5; }
 .phone-composer { flex: 0 0 auto; padding: 0 15px max(8px, env(safe-area-inset-bottom)); border-top: 1px solid var(--accent-border); background: var(--accent-dim); }
-.phone-composer form { display: flex; align-items: flex-end; gap: 8px; background: var(--accent-dim); border: 1px solid var(--accent-border); border-radius: 15px; padding: 9px; }
-.phone-composer textarea { flex: 1; min-width: 0; background: transparent; color: var(--text); border: 0; resize: none; padding: 7px; font-size: calc(16px * var(--ui-scale)); line-height: 1.5; outline: none; max-height: 140px; }
-.phone-composer textarea::placeholder { color: var(--muted); font-size: calc(13px * var(--ui-scale)); }
-.phone-composer form:focus-within { border-color: var(--accent-border); box-shadow: 0 0 0 2px var(--selection); }
+.phone-composer > form { display: flex; align-items: flex-end; gap: 8px; background: var(--accent-dim); border: 1px solid var(--accent-border); border-radius: 15px; padding: 9px; }
+.phone-composer > form textarea { flex: 1; min-width: 0; background: transparent; color: var(--text); border: 0; resize: none; padding: 7px; font-size: calc(16px * var(--ui-scale)); line-height: 1.5; outline: none; max-height: 140px; }
+.phone-composer > form textarea::placeholder { color: var(--muted); font-size: calc(13px * var(--ui-scale)); }
+.phone-composer > form:focus-within { border-color: var(--accent-border); box-shadow: 0 0 0 2px var(--selection); }
 .phone-send { display: grid; place-items: center; height: 44px; width: 44px; flex: 0 0 44px; background: var(--blue); color: var(--text); border: 0; border-radius: 11px; }
 .phone-send svg { transform: rotate(-90deg); }
 .phone-send:disabled { background: var(--accent-dim); color: var(--muted); }
@@ -110,7 +110,7 @@ body { background: var(--phone-bg); }
   .phone-header > svg { width: 24px; height: 24px; }
   .phone-session-select { padding: 4px 15px; }
   .phone-transcript { padding-top: 12px; padding-bottom: 12px; }
-  .phone-composer textarea { height: 44px; }
+  .phone-composer > form textarea { height: 44px; }
   .phone-app .phone-composer-note { display: none; }
   .phone-app .usage-summary { font-size: calc(10px * var(--ui-scale)); }
   .phone-latest { bottom: 130px; }
@@ -134,7 +134,7 @@ body { background: var(--phone-bg); }
   .phone-app .phone-models, .phone-app .usage-strip, .phone-app .phone-latest { display: none; }
   .phone-transcript { padding: 0 15px; }
   .phone-composer { padding: 3px 12px; overflow: auto; }
-  .phone-composer form { padding: 4px; }
-  .phone-composer textarea { height: 44px; }
+  .phone-composer > form { padding: 4px; }
+  .phone-composer > form textarea { height: 44px; }
   .phone-error { max-height: 50px; overflow: auto; margin-bottom: 4px; padding: 4px 8px; }
 }

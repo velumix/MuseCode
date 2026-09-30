@@ -3,6 +3,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 import { chromium, expect } from "@playwright/test";
 import { checkStartup } from "./startup-smoke.mjs";
 
@@ -32,18 +33,20 @@ if (!release) {
   }
 }
 const runDir = path.join(root, ".qa", `native ${Date.now()} & workspace`);
+const fixtureTag = `--velum-qa-run=${randomUUID()}`;
 mkdirSync(runDir, { recursive: true });
 const logPath = path.join(runDir, "children.jsonl");
 writeFileSync(logPath, "");
-writeFileSync(path.join(runDir, "muse.cmd"), `@echo off\r\n"${process.execPath}" "${path.join(root, "tests/fixtures/muse-cli.cjs")}" %*\r\n`);
+writeFileSync(path.join(runDir, "muse.cmd"), `@echo off\r\n"${process.execPath}" "${path.join(root, "tests/fixtures/muse-cli.cjs")}" ${fixtureTag} %*\r\n`);
 for (const [provider, command] of [["codex", "codex"], ["antigravity", "agy"]]) {
-  writeFileSync(path.join(runDir, `${command}.cmd`), `@echo off\r\n"${process.execPath}" "${path.join(root, "tests/fixtures/provider-cli.cjs")}" ${provider} %*\r\n`);
+  writeFileSync(path.join(runDir, `${command}.cmd`), `@echo off\r\n"${process.execPath}" "${path.join(root, "tests/fixtures/provider-cli.cjs")}" ${provider} ${fixtureTag} %*\r\n`);
 }
 const port = 19422;
 const appPath = installed ? path.join(process.env.LOCALAPPDATA, "Velum Code/velum-code.exe")
   : path.join(root, `src-tauri/target/${release ? "release" : "debug"}/velum-code.exe`);
 const appEnv = { ...process.env, PATH: `${runDir};${process.env.PATH}`, MUSE_QA_LOG: logPath,
   MUSE_CODE_CONFIG_DIR: path.join(runDir, "settings"),
+  XDG_DATA_HOME: path.join(runDir, 'provider-data'), CODEX_HOME: path.join(runDir, 'codex-data'),
   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
   WEBVIEW2_USER_DATA_FOLDER: path.join(runDir, "webview") };
 const app = spawn(appPath, [], {
@@ -53,6 +56,12 @@ const app = spawn(appPath, [], {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const records = () => readFileSync(logPath, "utf8").trim().split("\n").filter(Boolean).map(JSON.parse);
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const appAlive = () => app.exitCode === null && app.signalCode === null;
+// Windows can reuse a historical PID for an unrelated process. Identify all
+// fixture processes (including unlogged catalog helpers) by this run's marker.
+const ownedFixturePids = () => execFileSync("powershell.exe", ["-NoProfile", "-Command",
+  `Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" | Where-Object { $_.CommandLine -like '*${fixtureTag}*' } | Select-Object -ExpandProperty ProcessId`],
+  {encoding:"utf8",windowsHide:true}).trim().split(/\s+/).filter(Boolean).map(Number);
 let browser;
 let page;
 const errors = [];
@@ -93,7 +102,7 @@ try {
   // WebView2 can defer controlled-input updates while minimized. Exercise
   // input with the window shown; background behavior is checked explicitly below.
   await invoke("desktop_show");
-  const composer = page.locator(".chat-wrap:not(.hidden) textarea");
+  const composer = page.locator(".chat-wrap:not(.hidden) .composer textarea");
   const status = page.locator(".status-text");
   // Settings use the real atomic Rust store even when WebView storage is full.
   const preferencePath = path.join(runDir, 'settings/appearance.json');
@@ -192,6 +201,74 @@ try {
     await composer.press("Enter");
   }
   async function done() { await status.filter({ hasText: "Done" }).waitFor(); }
+  async function watchTurns() {
+    await page.evaluate(async()=>{
+      window.__qaTurns=[];
+      const handler=window.__TAURI_INTERNALS__.transformCallback(event=>window.__qaTurns.push(event.payload));
+      await window.__TAURI_INTERNALS__.invoke('plugin:event|listen',{event:'agent-event',target:{kind:'Any'},handler});
+    });
+  }
+  await watchTurns();
+  const turnEvents=()=>page.evaluate(()=>window.__qaTurns);
+  async function usageFor(prompt) {
+    const entries=await turnEvents();
+    const start=entries.findLastIndex(e=>e.event.kind==='turn_start'&&e.event.prompt===prompt);
+    assert(start>=0,`No native turn start: ${prompt}`);
+    const id=entries[start].id;
+    const events=entries.slice(start).filter(e=>e.id===id).map(e=>e.event);
+    const stop=events.findIndex(e=>e.kind==='turn_end');
+    assert(stop>=0,`No native completion: ${prompt}`);
+    return events.slice(0,stop).findLast(e=>e.kind==='usage'&&e.turn)?.turn;
+  }
+  async function checkUsage(provider, prompt, output) {
+    const usage=await usageFor(prompt);
+    assert.equal(usage.output_tokens,output,`${provider} current-turn output counters`);
+    assert.equal(usage.cached_input_tokens,200);
+    assert.equal(usage.reasoning_output_tokens,20);
+    assert.equal(usage.input_tokens,provider==='antigravity'?511:501);
+    assert(usage.elapsed_ms>=350,'Duration omitted the child process exit delay');
+    const rate=(output*1000/usage.elapsed_ms).toLocaleString(undefined,{maximumFractionDigits:1});
+    await expect(page.locator('.chat-wrap:not(.hidden) .usage-speed strong')).toHaveText(rate);
+  }
+  async function checkQueue(provider) {
+    await send('QUEUE_HOLD');
+    await expect(page.getByRole('button',{name:'Stop',exact:true})).toBeVisible();
+    await expect.poll(async()=> (await turnEvents()).some(e=>e.event.kind==='turn_start'&&e.event.prompt==='QUEUE_HOLD')).toBe(true);
+    const id=(await turnEvents()).findLast(e=>e.event.kind==='turn_start'&&e.event.prompt==='QUEUE_HOLD').id;
+    const completedBefore=(await turnEvents()).filter(e=>e.id===id&&e.event.kind==='turn_end').length;
+    const request=request=>invoke('agent_queue',{id,request});
+    await send('QUEUE_ONE');await send('QUEUE_REMOVE');await send('QUEUE_LAST');
+    const original=await request({action:'load'});
+    assert.deepEqual(original.items.map(m=>m.prompt),['QUEUE_ONE','QUEUE_REMOVE','QUEUE_LAST']);
+    await request({action:'pause'});
+    await request({action:'edit',message_id:original.items[0].id,prompt:'QUEUE_EDITED'});
+    await request({action:'remove',message_id:original.items[1].id});
+    await expect(status).toContainText('Queue paused');
+    assert.equal((await request({action:'load'})).paused,true);
+    await request({action:'resume'});
+    await expect.poll(async()=> (await turnEvents()).filter(e=>e.id===id&&e.event.kind==='turn_end').length).toBe(completedBefore+3);
+    await done();
+    const starts=(await turnEvents()).filter(e=>e.id===id&&e.event.kind==='turn_start').map(e=>e.event.prompt);
+    assert.deepEqual(starts.slice(-3),['QUEUE_HOLD','QUEUE_EDITED','QUEUE_LAST']);
+    assert.equal((await request({action:'load'})).items.length,0);
+    const trace=records().filter(r=>provider==='muse'?!r.provider:r.provider===provider);
+    for(const [previous,next] of [['QUEUE_HOLD','QUEUE_EDITED'],['QUEUE_EDITED','QUEUE_LAST']]){
+      const exit=trace.findLastIndex(r=>r.kind==='exit'&&r.prompt===previous);
+      const launch=trace.findLastIndex(r=>['turn','provider-turn'].includes(r.kind)&&r.prompt===next);
+      assert(exit>=0&&launch>exit,'Queue launched before the previous process exited');
+    }
+    await checkUsage(provider,'QUEUE_LAST',provider==='antigravity'?125:120);
+    await send('QUEUE_HOLD');await send('QUEUE_AFTER_STOP');
+    await page.getByRole('button',{name:'Stop',exact:true}).click();
+    await expect(page.getByRole('button',{name:'Stop',exact:true})).toHaveCount(0);
+    const stopped=await request({action:'load'});assert(stopped.paused);assert.equal(stopped.items[0].prompt,'QUEUE_AFTER_STOP');
+    await request({action:'resume'});await done();
+    await send('QUEUE_HOLD');await send('FAIL');await send('QUEUE_AFTER_FAIL');
+    await expect.poll(async()=> (await request({action:'load'})).paused,{timeout:10000}).toBe(true);
+    const failed=await request({action:'load'});assert.equal(failed.items[0].prompt,'QUEUE_AFTER_FAIL');
+    await request({action:'resume'});await done();
+    console.log(`PASS: ${provider} native queue FIFO, edit/remove, pause/resume, process exit ordering, Stop/failure retention and numeric tok/s`);
+  }
   // Exercise recovery against the real Rust checkpoint while WebView storage fails.
   await page.evaluate(() => {
     const set = Storage.prototype.setItem, remove = Storage.prototype.removeItem;
@@ -262,6 +339,8 @@ try {
   }
   assert.equal(new Set(museTurns.map((r) => r.args[r.args.indexOf("--session-id") + 1])).size, 1);
   console.log("PASS: native model catalog, reasoning argv, workspace validation, consecutive turns, final-only answers");
+  await checkUsage('muse','FINAL_ONLY',120);
+  await send('METRICS_RESUME');await done();await checkUsage('muse','METRICS_RESUME',80);
 
   await send('NO_COMPLETION');
   await page.locator('.notice.error').filter({hasText:'Muse ended without a completion event'}).waitFor();
@@ -323,6 +402,7 @@ try {
   await send("After stop");
   await done();
   console.log("PASS: Stop kills descendants and accepts the next turn");
+  await checkQueue('muse');
 
   await composer.fill("draft preserved");
   await page.getByRole("button", { name: "Terminal", exact: true }).click();
@@ -446,6 +526,12 @@ try {
     assert(!turns[0].args.includes("resume") && !turns[0].args.includes("--conversation"));
     assert(turns[1].args.includes(provider === "codex" ? "62c2d305-9dd5-4c94-b4c0-667eb612f401" : "ae283c22-1851-4d5c-a5c5-d14d53c23b72"));
     assert(!turns[1].args.some((arg) => arg.includes("dangerously")));
+    await checkUsage(provider,'Second provider turn',provider==='antigravity'?125:120);
+    await send('METRICS_RESUME');await done();await checkUsage(provider,'METRICS_RESUME',provider==='antigravity'?85:80);
+    if(provider==='codex'){
+      await send('METRICS_CUMULATIVE');await done();await checkUsage(provider,'METRICS_CUMULATIVE',120);
+      console.log('PASS: Codex per-turn and cumulative completion schemas both exclude earlier turns');
+    }
     await send("FAIL");
     await page.locator(".chat-wrap:not(.hidden) .notice.error").filter({ hasText: "Provider fixture failure" }).waitFor();
     if(provider==='antigravity') {
@@ -465,6 +551,7 @@ try {
     await page.getByRole("button", { name: "YOLO mode" }).click();
     await send("YOLO provider"); await done();
     assert(records().find((r) => r.provider === provider && r.prompt === "YOLO provider").args.includes(provider === "codex" ? "--dangerously-bypass-approvals-and-sandbox" : "--dangerously-skip-permissions"));
+    await checkQueue(provider);
     await page.getByRole("button", { name: "Terminal", exact: true }).click();
     for (let i = 0; i < 100 && !records().some((r) => r.provider === provider && r.kind === "terminal"); i++) await sleep(50);
     const providerTerminal = records().find((r) => r.provider === provider && r.kind === "terminal");
@@ -481,10 +568,11 @@ try {
   assert(alive(app.pid), "Closing a busy window terminated background work");
   assert.equal(await invoke("plugin:window|is_visible", { label: "main" }), false);
   await invoke("desktop_quit").catch(() => {});
-  for (let i = 0; i < 100 && alive(app.pid); i++) await sleep(50);
-  assert(!alive(app.pid), "Application did not exit");
-  for (let i = 0; i < 60 && records().some((r) => alive(r.pid)); i++) await sleep(50);
-  assert(records().every((r) => !alive(r.pid)), "App exit left children running");
+  for (let i = 0; i < 100 && appAlive(); i++) await sleep(50);
+  assert(!appAlive(), "Application did not exit");
+  let remaining = ownedFixturePids();
+  for (let i = 0; i < 20 && remaining.length; i++) { await sleep(50); remaining = ownedFixturePids(); }
+  assert.deepEqual(remaining, [], "App exit left this run's fixture children running");
   if (notifications) assert.deepEqual(JSON.parse(notificationProbe("History")), [], "Quit left stale conversation notifications");
   for (const r of records().filter((r) => r.kind === "turn")) assert(!existsSync(r.file), "app exit leaked a staged prompt");
   assert.deepEqual(errors, []);
@@ -498,10 +586,10 @@ try {
   throw error;
 } finally {
   await browser?.close().catch(() => {});
-  if (alive(app.pid)) execFileSync("taskkill", ["/PID", String(app.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
-  // Only children recorded by this test are eligible for emergency cleanup.
-  for (const r of records()) if (alive(r.pid)) {
-    try { execFileSync("taskkill", ["/PID", String(r.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }); } catch {}
+  if (appAlive()) execFileSync("taskkill", ["/PID", String(app.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+  // A PID in the historical log alone never authorizes killing a process.
+  for (const pid of ownedFixturePids()) {
+    try { execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }); } catch {}
   }
   if (vite && alive(vite.pid)) vite.kill();
 }

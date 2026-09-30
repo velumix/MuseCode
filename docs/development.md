@@ -87,6 +87,15 @@ may block the shell probe, which must be reported as blocked rather than passed.
 It does not edit permission rules or run a YOLO turn. See the
 [Muse and Agy validation report](provider-validation-2026-09-29.md).
 
+For current-turn token metrics across Muse, Codex, and Antigravity, use
+`node scripts/providers-live-smoke.mjs --live --metrics-only --installed`.
+This requests two short replies per provider (fresh and resumed), using existing CLI
+accounts and a disposable project. It requires positive output counters and a measured
+duration. Codex counts must also match the change in its retained session totals, so a
+resumed thread cannot pass with cumulative counters. It runs no access probes or permission
+changes. Service outages or
+expired sign-in can fail it. Use `--provider muse`, `codex`, or `antigravity` to check one.
+
 `scripts/bots-smoke.mjs` substitutes all three CLI protocols, checks identity and private
 recall across providers, runs a Muse → Codex → Antigravity task handoff, and verifies stale
 board rejection, cancellation, non-overlap, bounded history, and restart behavior. Use

@@ -7,6 +7,7 @@ mod events;
 mod history;
 mod kanban;
 mod memory;
+mod message_queue;
 mod plugin_catalog;
 mod plugin_github;
 mod plugins;
@@ -96,6 +97,7 @@ pub fn run() {
             runner::agent_new,
             runner::agent_validate_workspace,
             runner::agent_send,
+            runner::agent_queue,
             runner::agent_stop,
             runner::agent_destroy,
             remote::remote_status,

@@ -37,6 +37,7 @@ try {
   const executable = installed ? path.join(process.env.LOCALAPPDATA, "Velum Code/velum-code.exe") : path.join(root, `src-tauri/target/${release ? "release" : "debug"}/velum-code.exe`);
   app = spawn(executable, [], { cwd: root, windowsHide: true, stdio: "ignore", env: { ...process.env,
     PATH: `${run};${process.env.PATH}`, MUSE_QA_LOG: log, MUSE_CODE_CONFIG_DIR: path.join(run, "settings"),
+    XDG_DATA_HOME:path.join(run,'provider-data'),CODEX_HOME:path.join(run,'codex-data'),
     ...(usb ? { ANDROID_HOME: sdk, MUSE_QA_ADB_DIR: run } : {}),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--remote-debugging-port=19423", WEBVIEW2_USER_DATA_FOLDER: path.join(run, "webview"),
   } });
@@ -47,6 +48,8 @@ try {
   assert(native, "Native WebView was unavailable.");
   desktop = native.contexts()[0].pages()[0];
   desktop.on("pageerror", (e) => errors.push(e.message));
+  await expect(desktop.locator('#startup')).toHaveCount(0);
+  await expect(desktop.locator('#root')).not.toHaveAttribute('inert','');
   await expect(desktop.locator("textarea")).toBeEnabled();
   await invoke("desktop_set_notifications", { enabled: false });
   // WebView2 needs a shown window for simulated input. Background activity is tested below.
@@ -86,7 +89,9 @@ try {
   await phone.goto(invitation.url);
   if (release) {
     await phone.evaluate(() => navigator.serviceWorker.ready.then(() => true));
-    await expect.poll(() => phone.evaluate(() => caches.keys())).toEqual(["velum-phone-v7"]);
+    const workerCache=readFileSync(path.join(root,'public/sw.js'),'utf8').match(/const CACHE\s*=\s*["']([^"']+)["']/)?.[1];
+    assert(workerCache,'Service worker cache name missing');
+    await expect.poll(() => phone.evaluate(() => caches.keys())).toEqual([workerCache]);
     await context.setOffline(true);
     const offline = await context.newPage();
     await offline.goto(new URL("/", invitation.url).href);
@@ -216,6 +221,35 @@ try {
   await phone.getByRole("button", { name: "Stop task" }).click();
   await expect(phone.getByText("Task stopped.", { exact: true })).toBeVisible();
   await expect(desktop.locator(".tool-status")).toHaveText("cancelled");
+  const primary=(await phone.evaluate(async()=>(await (await fetch('/api/sessions')).json()).sessions)).find(s=>s.title==='Desktop fixture');
+  assert(primary,'Primary desktop conversation missing');
+  await invoke('agent_send',{id:primary.id,prompt:'HOLD',yolo:false});
+  await expect(phone.getByRole('button',{name:'Stop task',exact:true})).toBeVisible();
+  await phone.getByLabel('Message your desktop agent').fill('Phone queued work');
+  await phone.getByRole('button',{name:'Queue message',exact:true}).click();
+  await invoke('agent_send',{id:primary.id,prompt:'Desktop queued work',yolo:false});
+  await expect(phone.getByRole('region',{name:'Message queue'})).toContainText('2 queued');
+  await expect(desktop.getByRole('region',{name:'Message queue'})).toContainText('Phone queued work');
+  const pending=await invoke('agent_queue',{id:primary.id,request:{action:'load'}});
+  assert.equal(pending.items[0].remote,true);assert.equal(pending.items[0].yolo,false);
+  assert.deepEqual(pending.items.map(m=>m.prompt),['Phone queued work','Desktop queued work']);
+  await phone.getByRole('button',{name:'Pause queue',exact:true}).click();
+  await phone.getByRole('button',{name:'Edit queued message 1',exact:true}).click();
+  await phone.getByRole('textbox',{name:'Edit queued message 1',exact:true}).fill('Phone edited pending work');
+  await phone.getByRole('button',{name:'Save queued message',exact:true}).click();
+  await phone.getByRole('button',{name:'Remove queued message 2',exact:true}).click();
+  await phone.getByRole('button',{name:'Stop task',exact:true}).click();
+  await expect(phone.getByRole('button',{name:'Stop task',exact:true})).toHaveCount(0);
+  await expect(phone.getByRole('region',{name:'Message queue'})).toContainText('Paused');
+  await phone.getByRole('button',{name:'Resume queue',exact:true}).click();
+  await expect(phone.getByText('Reply: Phone edited pending work',{exact:true})).toBeVisible();
+  await expect(phone.getByRole('button',{name:'Stop task',exact:true})).toHaveCount(0);
+  await expect(phone.locator('.usage-speed')).not.toContainText('—');
+  const replay=await phone.evaluate(async id=> (await (await fetch('/api/sessions/'+encodeURIComponent(id))).json()),primary.id);
+  assert.equal(replay.events.findLast(e=>e.event.kind==='usage').event.turn.output_tokens,120);
+  assert.equal((await invoke('agent_queue',{id:primary.id,request:{action:'load'}})).items.length,0);
+  assert.equal(await invoke('plugin:window|is_visible',{label:'main'}),false);
+  console.log('PASS: authenticated phone and desktop share queue order, edit/remove, Pause/Stop/Resume, standard permissions and measured tok/s while the desktop stays in tray');
   const records = readFileSync(log, "utf8").trim().split("\n").map(JSON.parse);
   assert(records.filter((r) => r.kind === "turn").every((r) => !r.args.includes("--yolo")));
   await phone.screenshot({ path: path.join(run, "phone.png") });

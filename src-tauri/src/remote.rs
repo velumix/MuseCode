@@ -521,6 +521,7 @@ fn router(state: WebState) -> Router {
         .route("/api/sessions", get(sessions))
         .route("/api/sessions/{id}", get(replay))
         .route("/api/sessions/{id}/send", post(send))
+        .route("/api/sessions/{id}/queue", post(queue))
         .route("/api/sessions/{id}/stop", post(stop))
         .route("/api/sessions/{id}/options", post(configure))
         .route("/api/sessions/{id}/memory", post(memory_request))
@@ -777,6 +778,32 @@ async fn send(
     .await
     .map_err(|e| bad(e.to_string()))?
     .map_err(|e| ApiError(StatusCode::CONFLICT, e))?;
+    Ok(Json(json!(result)))
+}
+
+async fn queue(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<crate::message_queue::Request>,
+) -> ApiResult {
+    authenticate(
+        &state,
+        &headers,
+        !matches!(request, crate::message_queue::Request::Load {}),
+    )?;
+    if let crate::message_queue::Request::Edit { prompt, .. } = &request {
+        if prompt.trim().is_empty() || prompt.chars().count() > 16_000 {
+            return Err(bad("Enter a message of up to 16,000 characters."));
+        }
+    }
+    let app = state.app.ok_or_else(|| bad("Desktop unavailable."))?;
+    session_workspace(&app, &id)?;
+    let result =
+        tauri::async_runtime::spawn_blocking(move || runner::queue_request(&app, &id, request))
+            .await
+            .map_err(|e| bad(e.to_string()))?
+            .map_err(|e| ApiError(StatusCode::CONFLICT, e))?;
     Ok(Json(json!(result)))
 }
 
@@ -1046,7 +1073,7 @@ async fn stop(
     authenticate(&state, &headers, true)?;
     let app = state.app.ok_or_else(|| bad("Desktop unavailable."))?;
     tauri::async_runtime::spawn_blocking(move || {
-        runner::agent_stop(app.state::<runner::AgentState>(), id)
+        runner::agent_stop(app.clone(), app.state::<runner::AgentState>(), id)
     })
     .await
     .map_err(|e| bad(e.to_string()))?
@@ -1305,6 +1332,57 @@ mod tests {
                 .status(),
             StatusCode::UNPROCESSABLE_ENTITY
         );
+    }
+    #[tokio::test]
+    async fn queue_api_requires_pairing_control_and_rejects_permission_overrides() {
+        let (state, token) = fixture(false);
+        for (payload, auth, expected) in [
+            (json!({"action":"load"}), None, StatusCode::UNAUTHORIZED),
+            (
+                json!({"action":"resume"}),
+                Some(token.as_str()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                json!({"action":"pause"}),
+                Some(token.as_str()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                json!({"action":"clear"}),
+                Some(token.as_str()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                json!({"action":"remove","message_id":"one"}),
+                Some(token.as_str()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                json!({"action":"edit","message_id":"one","prompt":"Changed"}),
+                Some(token.as_str()),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                json!({"action":"resume","yolo":true}),
+                Some(token.as_str()),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                json!({"action":"load","workspace":"C:\\elsewhere"}),
+                Some(token.as_str()),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+        ] {
+            assert_eq!(
+                router(state.clone())
+                    .oneshot(request("/api/sessions/one/queue", auth, Some(payload)))
+                    .await
+                    .unwrap()
+                    .status(),
+                expected
+            );
+        }
     }
     #[tokio::test]
     async fn kanban_api_requires_pairing_control_and_fixed_workspace() {

@@ -42,8 +42,12 @@ export function mergeUsage(previous: UsageSnapshot, event: Record<string, unknow
   return next;
 }
 
-export function tokenRate(turn?: TurnUsage | null): number | null {
-  return turn?.output_tokens != null && turn.elapsed_ms != null && turn.elapsed_ms > 0 ? turn.output_tokens * 1000 / turn.elapsed_ms : null;
+export function tokenRate(turn?: TurnUsage | null, elapsedMs = turn?.elapsed_ms): number | null {
+  const output = count(turn?.output_tokens);
+  const elapsed = count(elapsedMs);
+  if (output === null || elapsed === null || elapsed === 0) return null;
+  const rate = output * 1000 / elapsed;
+  return Number.isFinite(rate) ? rate : null;
 }
 
 export function compactCount(value: number): string {

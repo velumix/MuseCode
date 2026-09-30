@@ -34,9 +34,9 @@ export default function UsageStrip({ usage, memory, provider, running, elapsed, 
   const filled = percent == null ? 0 : Math.min(100, Math.max(0, percent));
   const contextLabel = percent == null ? context ? `${compactCount(context.used_tokens)} tokens` : "—"
     : percent > 100 ? ">100%" : percent > 99 && percent < 100 ? ">99%" : percent > 0 && percent < 1 ? "<1%" : `${Math.round(percent)}%`;
-  const rate = tokenRate(turn);
+  const elapsedMs = running ? elapsed ?? turn?.elapsed_ms : turn?.elapsed_ms;
+  const rate = tokenRate(turn, elapsedMs);
   const speed = rate == null ? "—" : rate.toLocaleString(undefined, { maximumFractionDigits: 1 });
-  const elapsedMs = running ? elapsed : turn?.elapsed_ms;
   const memoryTokens = memory && memory.bytes > 0 ? Math.ceil(memory.bytes / 4) : null;
   const close = () => { setOpen(false); trigger.current?.focus(); };
 
@@ -92,7 +92,7 @@ export default function UsageStrip({ usage, memory, provider, running, elapsed, 
           <div><dt>Reasoning tokens</dt><dd>{tokens(turn?.reasoning_output_tokens)}</dd></div>
           <div><dt>Turn duration</dt><dd>{elapsedMs == null ? running ? "Not reported" : "Not started" : duration(elapsedMs)}</dd></div>
         </dl>
-        <p>{rate == null ? "Speed appears when the provider reports output-token counts. " : ""}Average speed includes thinking and tool time. Cached input is part of input; reasoning is part of output.</p>
+        <p>{rate == null ? "Speed appears when the provider reports output-token counts. " : ""}Average speed includes thinking and tool time. Counts follow the provider’s accounting; cached and reasoning tokens are shown separately without adding them again.</p>
       </section>
       {memory && memory.bytes > 0 && <section>
         <div className="usage-section-title">Memory added<span>~{tokens(memoryTokens)} tokens</span></div>

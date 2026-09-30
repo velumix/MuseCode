@@ -17,6 +17,8 @@ use tauri::{Emitter, Manager, State};
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Saved {
     #[serde(default)]
+    pub queue: crate::message_queue::Snapshot,
+    #[serde(default)]
     pub permission_mode: Option<bool>,
     #[serde(default)]
     pub bot_id: Option<String>,
@@ -116,6 +118,16 @@ impl HistoryState {
         if running {
             saved.events.push(AgentEvent::TurnEnd { status:"cancelled".into(),text:None,reason:Some("Velum Code closed during this response. It was not restarted automatically; check any partial changes before continuing.".into()) });
         }
+        saved.queue = saved.queue.restore()?;
+        saved
+            .events
+            .retain(|e| !matches!(e, AgentEvent::QueueState { .. }));
+        if !saved.queue.items.is_empty() {
+            saved.events.push(AgentEvent::QueueState {
+                queue: saved.queue.clone(),
+                running: false,
+            });
+        }
         Ok(Some(saved))
     }
     pub fn bind(
@@ -192,6 +204,7 @@ impl HistoryState {
                     id.clone(),
                     b.tab.clone(),
                     Saved {
+                        queue: replay.session.queue.clone(),
                         permission_mode: b.permission_mode,
                         bot_id: b.bot_id.clone(),
                         version: 1,
@@ -379,6 +392,51 @@ pub fn history_forget(state: State<HistoryState>, tab_id: String) -> Result<(), 
 mod tests {
     use super::*;
     #[test]
+    fn queue_survives_trimmed_replay_and_restores_paused_without_execution() {
+        let root =
+            std::env::temp_dir().join(format!("velum-queue-history-{}", uuid::Uuid::new_v4()));
+        let store = HistoryState::new(root.clone());
+        let logs = SessionLog::default();
+        logs.register("native", "project".into());
+        store.bind(
+            "native",
+            "tab-queue".into(),
+            "project".into(),
+            Provider::Muse,
+            uuid::Uuid::new_v4().to_string(),
+        );
+        let mut queue = crate::message_queue::Snapshot::default();
+        queue.push("Pending work".into(), false, true).unwrap();
+        logs.record(
+            "native",
+            &AgentEvent::QueueState {
+                queue: queue.clone(),
+                running: false,
+            },
+        );
+        for _ in 0..8100 {
+            logs.record(
+                "native",
+                &AgentEvent::Activity {
+                    text: "Work detail".into(),
+                },
+            );
+        }
+        assert!(logs.replay("native", 0).unwrap().truncated);
+        store.flush(&logs).unwrap();
+        let saved = store
+            .load("tab-queue", "project", Provider::Muse)
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.queue.items, queue.items);
+        assert!(saved.queue.paused);
+        assert!(
+            matches!(saved.events.last(),Some(AgentEvent::QueueState{queue,running:false}) if queue.paused)
+        );
+        fs::remove_file(root.join("tab-queue.json")).unwrap();
+        fs::remove_dir(root).unwrap();
+    }
+    #[test]
     fn restores_resume_id_and_marks_interrupted_turns_without_rerunning() {
         let root =
             std::env::temp_dir().join(format!("velum-history-test-{}", uuid::Uuid::new_v4()));
@@ -397,6 +455,7 @@ mod tests {
             &AgentEvent::TurnStart {
                 prompt: "keep this".into(),
                 remote: false,
+                queued: false,
             },
         );
         logs.record(

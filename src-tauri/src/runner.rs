@@ -35,6 +35,7 @@ pub struct AgentSession {
     workspace: std::path::PathBuf,
     child: Mutex<Option<Child>>,
     running: Mutex<bool>,
+    queue: Mutex<crate::message_queue::Snapshot>,
     prompt: Mutex<Option<std::path::PathBuf>>,
 }
 
@@ -218,6 +219,7 @@ pub struct NewInfo {
 pub struct TurnInfo {
     pub id: String,
     pub turn_id: String,
+    pub queued: bool,
 }
 
 fn emit(app: &AppHandle, id: &str, event: AgentEvent) {
@@ -406,6 +408,7 @@ struct TurnContext {
     started_at: i64,
     usage_session: String,
     usage_baseline: Option<crate::provider_usage::TurnUsage>,
+    muse_offset: u64,
 }
 fn spawn_reader(
     app: AppHandle,
@@ -424,6 +427,7 @@ fn spawn_reader(
         started_at,
         usage_session,
         usage_baseline,
+        muse_offset,
     } = context;
     // Drain stderr on a side thread so verbose children can never block on
     // a full pipe; the tail is only surfaced when the turn dies silently.
@@ -461,72 +465,96 @@ fn spawn_reader(
         let state = app.state::<AgentState>();
         let mut fold = Stream::new(session.provider);
         let mut turn_usage = None;
-        let fresh_provider_session = usage_session.is_empty();
+        let stdout_usage = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let muse_run = Arc::new(Mutex::new(None::<String>));
         // Exec does not stream context counters on stdout. Watch only this
         // thread's numeric metadata, and join before publishing completion.
         let (usage_stop, usage_receiver) = std::sync::mpsc::channel::<u64>();
-        let usage_handle = (session.provider == Provider::Codex).then(|| {
-            let app = app.clone();
-            let session = Arc::clone(&session);
-            let id = id.clone();
-            std::thread::spawn(move || {
-                let mut last = None;
-                let mut last_turn = None;
-                let mut known_session = usage_session;
-                let mut baseline = usage_baseline;
-                let mut path = None;
-                loop {
-                    let completed_ms =
-                        match usage_receiver.recv_timeout(std::time::Duration::from_secs(1)) {
-                            Ok(elapsed) => Some(elapsed),
-                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
-                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                                Some(started.elapsed().as_millis().min(u64::MAX as u128) as u64)
+        let usage_handle =
+            matches!(session.provider, Provider::Codex | Provider::Muse).then(|| {
+                let app = app.clone();
+                let session = Arc::clone(&session);
+                let id = id.clone();
+                let stdout_usage = Arc::clone(&stdout_usage);
+                let muse_run = Arc::clone(&muse_run);
+                std::thread::spawn(move || {
+                    let mut last = None;
+                    let mut last_turn = None;
+                    let mut last_total = None;
+                    let mut known_session = usage_session.clone();
+                    let mut baseline = usage_baseline;
+                    let mut path = None;
+                    let mut muse_usage = crate::provider_usage::MuseUsage::new(muse_offset);
+                    loop {
+                        let completed_ms =
+                            match usage_receiver.recv_timeout(std::time::Duration::from_secs(1)) {
+                                Ok(elapsed) => Some(elapsed),
+                                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                                    Some(started.elapsed().as_millis().min(u64::MAX as u128) as u64)
+                                }
+                            };
+                        if session.provider == Provider::Muse {
+                            if path.is_none() {
+                                path = crate::provider_usage::muse_session_file(&usage_session);
                             }
-                        };
-                    let resume = session.session_id.lock().unwrap().clone();
-                    if known_session != resume {
-                        known_session = resume;
-                        path = None;
-                        last = None;
-                        last_turn = None;
-                        baseline = Some(crate::provider_usage::TurnUsage::zero());
-                    }
-                    if path.is_none() && !known_session.is_empty() {
-                        path = crate::provider_usage::codex_session_file(&known_session);
-                    }
-                    let snapshot = path
-                        .as_deref()
-                        .and_then(|p| crate::provider_usage::codex_usage(p, started_at));
-                    if let Some(snapshot) = snapshot.filter(|s| last.as_ref() != Some(&s.context)) {
-                        let elapsed_ms = completed_ms.unwrap_or_else(|| {
-                            started.elapsed().as_millis().min(u64::MAX as u128) as u64
-                        });
-                        let turn = snapshot
-                            .total
-                            .as_ref()
-                            .zip(baseline.as_ref())
-                            .map(|(total, baseline)| total.since(baseline, elapsed_ms));
-                        let state = app.state::<AgentState>();
-                        let sessions = state.sessions.lock().unwrap();
-                        if sessions.get(&id).is_some_and(|s| Arc::ptr_eq(s, &session)) {
-                            emit(
-                                &app,
-                                &id,
-                                AgentEvent::Usage {
-                                    context: Some(snapshot.context.clone()),
-                                    turn: turn.clone(),
-                                },
-                            );
+                            let run = muse_run.lock().unwrap().clone();
+                            if let Some((path, run)) = path.as_deref().zip(run.as_deref()) {
+                                let usage = if completed_ms.is_some() {
+                                    muse_usage.finish(path, &usage_session, run)
+                                } else {
+                                    muse_usage.poll(path, &usage_session, run)
+                                };
+                                if let Some(mut usage) = usage {
+                                    usage.elapsed_ms = Some(completed_ms.unwrap_or_else(|| {
+                                        started.elapsed().as_millis().min(u64::MAX as u128) as u64
+                                    }));
+                                    let sessions = app.state::<AgentState>();
+                                    let sessions = sessions.sessions.lock().unwrap();
+                                    if sessions.get(&id).is_some_and(|s| Arc::ptr_eq(s, &session)) {
+                                        emit(
+                                            &app,
+                                            &id,
+                                            AgentEvent::Usage {
+                                                context: None,
+                                                turn: Some(usage.clone()),
+                                            },
+                                        );
+                                    }
+                                    last_turn = Some(usage);
+                                }
+                            }
+                            if completed_ms.is_some() {
+                                return (last_turn, last_total, baseline);
+                            }
+                            continue;
                         }
-                        last = Some(snapshot.context);
-                        if turn.is_some() {
-                            last_turn = turn;
+                        let resume = session.session_id.lock().unwrap().clone();
+                        if known_session != resume {
+                            known_session = resume;
+                            path = None;
+                            last = None;
+                            last_turn = None;
+                            last_total = None;
+                            baseline = Some(crate::provider_usage::TurnUsage::zero());
                         }
-                    }
-                    if let Some(elapsed_ms) = completed_ms {
-                        if let Some(turn) = last_turn.as_mut() {
-                            turn.elapsed_ms = Some(elapsed_ms);
+                        if path.is_none() && !known_session.is_empty() {
+                            path = crate::provider_usage::codex_session_file(&known_session);
+                        }
+                        let snapshot = path
+                            .as_deref()
+                            .and_then(|p| crate::provider_usage::codex_usage(p, started_at));
+                        if let Some(snapshot) =
+                            snapshot.filter(|s| last.as_ref() != Some(&s.context))
+                        {
+                            let elapsed_ms = completed_ms.unwrap_or_else(|| {
+                                started.elapsed().as_millis().min(u64::MAX as u128) as u64
+                            });
+                            let turn = snapshot
+                                .total
+                                .as_ref()
+                                .zip(baseline.as_ref())
+                                .map(|(total, baseline)| total.since(baseline, elapsed_ms));
                             let state = app.state::<AgentState>();
                             let sessions = state.sessions.lock().unwrap();
                             if sessions.get(&id).is_some_and(|s| Arc::ptr_eq(s, &session)) {
@@ -534,17 +562,42 @@ fn spawn_reader(
                                     &app,
                                     &id,
                                     AgentEvent::Usage {
-                                        context: None,
-                                        turn: Some(turn.clone()),
+                                        context: Some(snapshot.context.clone()),
+                                        turn: (!stdout_usage.load(Ordering::Relaxed))
+                                            .then(|| turn.clone())
+                                            .flatten(),
                                     },
                                 );
                             }
+                            last = Some(snapshot.context);
+                            last_total = snapshot.total;
+                            if turn.is_some() {
+                                last_turn = turn;
+                            }
                         }
-                        return last_turn;
+                        if let Some(elapsed_ms) = completed_ms {
+                            if let Some(turn) = last_turn.as_mut() {
+                                turn.elapsed_ms = Some(elapsed_ms);
+                                let state = app.state::<AgentState>();
+                                let sessions = state.sessions.lock().unwrap();
+                                if !stdout_usage.load(Ordering::Relaxed)
+                                    && sessions.get(&id).is_some_and(|s| Arc::ptr_eq(s, &session))
+                                {
+                                    emit(
+                                        &app,
+                                        &id,
+                                        AgentEvent::Usage {
+                                            context: None,
+                                            turn: Some(turn.clone()),
+                                        },
+                                    );
+                                }
+                            }
+                            return (last_turn, last_total, baseline);
+                        }
                     }
-                }
-            })
-        });
+                })
+            });
         let mut terminal = None;
         let mut memory_filter = crate::memory::Filter::default();
         let mut final_proposal = None;
@@ -560,6 +613,9 @@ fn spawn_reader(
                 probe.observe_line(session.provider, &line);
             }
             let events = fold.fold_line(&line);
+            if fold.run_id.is_some() {
+                *muse_run.lock().unwrap() = fold.run_id.clone();
+            }
             if let Some(resume_id) = &fold.session_id {
                 let mut previous = session.session_id.lock().unwrap();
                 let mut access = session.access.lock().unwrap();
@@ -580,12 +636,9 @@ fn spawn_reader(
                     turn: Some(usage), ..
                 } = &mut event
                 {
-                    // For resumed Codex threads, normalize against the saved
-                    // session counters. This also works with CLI versions
-                    // whose completion event contains cumulative totals.
-                    if session.provider == Provider::Codex && !fresh_provider_session {
-                        continue;
-                    }
+                    // Exec completion describes this turn, including resume.
+                    // Session-log totals are only a fallback/live estimate.
+                    stdout_usage.store(true, Ordering::Relaxed);
                     usage.elapsed_ms =
                         Some(started.elapsed().as_millis().min(u64::MAX as u128) as u64);
                     turn_usage = Some(usage.clone());
@@ -652,13 +705,6 @@ fn spawn_reader(
                 }
             }
         }
-        let turn_elapsed = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-        let _ = usage_stop.send(turn_elapsed);
-        if let Some(handle) = usage_handle {
-            if let Ok(Some(usage)) = handle.join() {
-                turn_usage = Some(usage);
-            }
-        }
         if let Some(handle) = stderr_handle {
             let _ = handle.join();
         }
@@ -689,6 +735,29 @@ fn spawn_reader(
             None
         };
         let exit = reap_child(&session);
+        let turn_elapsed = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        let _ = usage_stop.send(turn_elapsed);
+        if let Some(handle) = usage_handle {
+            if let Ok((usage, total, baseline)) = handle.join() {
+                if session.provider == Provider::Codex {
+                    if let Some(reported) = turn_usage.as_ref() {
+                        turn_usage = Some(crate::provider_usage::codex_completion(
+                            reported,
+                            total.as_ref(),
+                            baseline.as_ref(),
+                            turn_elapsed,
+                        ));
+                    } else {
+                        turn_usage = usage;
+                    }
+                } else if turn_usage.is_none() {
+                    turn_usage = usage;
+                }
+            }
+        }
+        if let Some(usage) = turn_usage.as_mut() {
+            usage.elapsed_ms = Some(turn_elapsed);
+        }
         if terminal.is_none() || exit.is_none() || exit.is_some_and(|code| code != Some(0)) {
             // Reaped by us: exit code decides the status. Already reaped by
             // `kill_session`: the user stopped the turn.
@@ -753,19 +822,17 @@ fn spawn_reader(
         }
         let mut outcome = None;
         if current {
-            if turn_usage.is_none() {
-                emit(
-                    &app,
-                    &id,
-                    AgentEvent::Usage {
-                        context: None,
-                        turn: Some(crate::provider_usage::TurnUsage {
-                            elapsed_ms: Some(turn_elapsed),
-                            ..Default::default()
-                        }),
-                    },
-                );
-            }
+            emit(
+                &app,
+                &id,
+                AgentEvent::Usage {
+                    context: None,
+                    turn: Some(turn_usage.unwrap_or(crate::provider_usage::TurnUsage {
+                        elapsed_ms: Some(turn_elapsed),
+                        ..Default::default()
+                    })),
+                },
+            );
             let tail = if action_context.is_some() {
                 bot_output.finish()
             } else {
@@ -861,6 +928,22 @@ fn spawn_reader(
                 emit(&app, &id, event);
             }
             if let Some(event) = terminal {
+                if matches!(&event, AgentEvent::TurnEnd { status, .. } if status != "completed") {
+                    let mut queue = session.queue.lock().unwrap();
+                    if !queue.items.is_empty() {
+                        queue.pause(
+                            "The previous response stopped or failed. Review it before resuming.",
+                        );
+                        emit(
+                            &app,
+                            &id,
+                            AgentEvent::QueueState {
+                                queue: queue.clone(),
+                                running: false,
+                            },
+                        );
+                    }
+                }
                 emit(&app, &id, event.clone());
                 if let AgentEvent::TurnEnd { status, reason, .. } = event {
                     outcome = Some((status, reason));
@@ -888,6 +971,9 @@ fn spawn_reader(
                         text: format!("Could not finish the scheduled run: {error}"),
                     },
                 );
+            }
+            if status == "completed" {
+                start_next(&app, &id);
             }
         }
     });
@@ -961,6 +1047,7 @@ pub fn agent_new(
                 workspace: workspace.clone(),
                 child: Mutex::new(None),
                 running: Mutex::new(false),
+                queue: Mutex::new(saved.as_ref().map(|s| s.queue.clone()).unwrap_or_default()),
                 prompt: Mutex::new(None),
             }),
         );
@@ -1052,6 +1139,9 @@ pub fn configure_session(
     if *session.running.lock().unwrap() {
         return Err("Wait for the current response or stop it before changing models.".into());
     }
+    if !session.queue.lock().unwrap().items.is_empty() {
+        return Err("Finish or clear queued messages before changing models.".into());
+    }
     options.validate(session.provider)?;
     let model_changed = {
         let mut previous = session.options.lock().unwrap();
@@ -1083,7 +1173,7 @@ pub fn agent_configure(
 
 /// Run one prompt against the tab's provider and conversation.
 /// When `yolo` is set, `--yolo` disables approval and sandboxing for the turn.
-/// Fails while a previous turn is still running; stop it first.
+/// Pending messages are shared by desktop and phone and run in submission order.
 #[tauri::command]
 pub fn agent_send(
     app: AppHandle,
@@ -1093,7 +1183,7 @@ pub fn agent_send(
     yolo: bool,
     remote: Option<bool>,
 ) -> Result<TurnInfo, String> {
-    send_inner(app, state, id, prompt, yolo, remote, false)
+    send_inner(app, state, id, prompt, yolo, remote, false, None)
 }
 
 #[tauri::command]
@@ -1111,6 +1201,7 @@ pub fn agent_check_access(
         yolo,
         None,
         true,
+        None,
     )
 }
 
@@ -1153,6 +1244,9 @@ pub fn agent_set_permissions(
     if *session.running.lock().unwrap() {
         return Err("Wait for the current turn or stop it before changing permissions.".into());
     }
+    if !session.queue.lock().unwrap().items.is_empty() {
+        return Err("Finish or clear queued messages before changing permissions.".into());
+    }
     let changed = change_permissions(&app, &id, session, yolo);
     Ok(serde_json::json!({"yolo":yolo,"new_session":changed,"checks_invalidated":changed}))
 }
@@ -1166,10 +1260,9 @@ fn send_inner(
     yolo: bool,
     remote: Option<bool>,
     check_access: bool,
+    queued_id: Option<String>,
 ) -> Result<TurnInfo, String> {
-    if prompt.trim().is_empty() {
-        return Err("prompt is empty".to_string());
-    }
+    crate::message_queue::validate_prompt(&prompt)?;
     // Serialize registration with stop/destroy and competing sends until
     // the new child is owned by this session.
     let sessions = state
@@ -1179,9 +1272,49 @@ fn send_inner(
     let session = sessions
         .get(&id)
         .ok_or_else(|| "agent session not found; reopen the tab".to_string())?;
-    if session.running.lock().map(|r| *r).unwrap_or(false) {
-        return Err("a turn is already running — stop it first".to_string());
-    }
+    let running = *session
+        .running
+        .lock()
+        .map_err(|_| "Agent state unavailable.")?;
+    let (prompt, yolo, remote) = {
+        let mut queue = session
+            .queue
+            .lock()
+            .map_err(|_| "Message queue unavailable.")?;
+        if let Some(message_id) = &queued_id {
+            if running
+                || queue.paused
+                || queue
+                    .items
+                    .first()
+                    .is_none_or(|item| &item.id != message_id)
+            {
+                return Err("The queued message is no longer ready to start.".into());
+            }
+            let item = &queue.items[0];
+            (item.prompt.clone(), item.yolo, Some(item.remote))
+        } else if running || queue.paused || !queue.items.is_empty() {
+            if check_access || app.state::<crate::automation::Store>().managed(&id) {
+                return Err("Wait for the current response and pending messages before starting this operation.".into());
+            }
+            let turn_id = queue.push(prompt, yolo, remote.unwrap_or(false))?;
+            emit(
+                &app,
+                &id,
+                AgentEvent::QueueState {
+                    queue: queue.clone(),
+                    running,
+                },
+            );
+            return Ok(TurnInfo {
+                id,
+                turn_id,
+                queued: true,
+            });
+        } else {
+            (prompt, yolo, remote)
+        }
+    };
     let session = Arc::clone(session);
     let managed = app.state::<crate::automation::Store>().managed(&id);
     if sessions.iter().any(|(other_id, other)| {
@@ -1353,17 +1486,27 @@ fn send_inner(
         yolo,
         &options,
     )?;
-    let usage_session = if provider == Provider::Codex {
+    let usage_session = if matches!(provider, Provider::Codex | Provider::Muse) {
         session_id.clone()
     } else {
         String::new()
     };
     let usage_baseline = if usage_session.is_empty() {
         Some(crate::provider_usage::TurnUsage::zero())
-    } else {
+    } else if provider == Provider::Codex {
         crate::provider_usage::codex_session_file(&usage_session)
             .and_then(|path| crate::provider_usage::codex_usage(&path, i64::MIN))
             .and_then(|usage| usage.total)
+    } else {
+        None
+    };
+    let muse_offset = if provider == Provider::Muse {
+        crate::provider_usage::muse_session_file(&usage_session)
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|m| m.len())
+            .unwrap_or(0)
+    } else {
+        0
     };
     let started = std::time::Instant::now();
     let started_at = chrono::Utc::now().timestamp_millis();
@@ -1405,7 +1548,18 @@ fn send_inner(
             .lock()
             .map_err(|_| "agent state is unavailable".to_string())? = Some(child);
     }
-    drop(sessions);
+    if queued_id.is_some() {
+        let mut queue = session.queue.lock().unwrap();
+        queue.items.remove(0);
+        emit(
+            &app,
+            &id,
+            AgentEvent::QueueState {
+                queue: queue.clone(),
+                running: true,
+            },
+        );
+    }
     if let Some(bot) = bot {
         let identity = bot.identity();
         let mut previous = session.bot_identity.lock().unwrap();
@@ -1420,8 +1574,11 @@ fn send_inner(
         AgentEvent::TurnStart {
             prompt,
             remote: remote.unwrap_or(false),
+            queued: queued_id.is_some(),
         },
     );
+    // Publish admission before allowing another sender or Stop to interleave.
+    drop(sessions);
     emit(
         &app,
         &id,
@@ -1446,14 +1603,129 @@ fn send_inner(
             started_at,
             usage_session,
             usage_baseline,
+            muse_offset,
         },
     );
-    Ok(TurnInfo { id, turn_id })
+    Ok(TurnInfo {
+        id,
+        turn_id,
+        queued: false,
+    })
+}
+
+fn start_next(app: &AppHandle, id: &str) {
+    let state = app.state::<AgentState>();
+    let next = {
+        let sessions = state.sessions.lock().unwrap();
+        sessions.get(id).and_then(|session| {
+            if *session.running.lock().unwrap() {
+                return None;
+            }
+            let queue = session.queue.lock().unwrap();
+            (!queue.paused)
+                .then(|| queue.items.first().cloned())
+                .flatten()
+        })
+    };
+    let Some(next) = next else {
+        return;
+    };
+    if let Err(error) = send_inner(
+        app.clone(),
+        state,
+        id.into(),
+        next.prompt,
+        next.yolo,
+        Some(next.remote),
+        false,
+        Some(next.id.clone()),
+    ) {
+        let sessions = app.state::<AgentState>();
+        let sessions = sessions.sessions.lock().unwrap();
+        if let Some(session) = sessions.get(id) {
+            let mut queue = session.queue.lock().unwrap();
+            if !queue.paused && queue.items.first().is_some_and(|item| item.id == next.id) {
+                queue.pause(&format!("Could not start the queued message: {error}"));
+                emit(
+                    app,
+                    id,
+                    AgentEvent::QueueState {
+                        queue: queue.clone(),
+                        running: false,
+                    },
+                );
+            }
+        }
+    }
+}
+
+pub fn queue_request(
+    app: &AppHandle,
+    id: &str,
+    request: crate::message_queue::Request,
+) -> Result<crate::message_queue::Snapshot, String> {
+    let state = app.state::<AgentState>();
+    let snapshot = {
+        let sessions = state
+            .sessions
+            .lock()
+            .map_err(|_| "Agent state unavailable.")?;
+        let session = sessions.get(id).ok_or("Conversation is unavailable.")?;
+        let mut queue = session
+            .queue
+            .lock()
+            .map_err(|_| "Message queue unavailable.")?;
+        if matches!(request, crate::message_queue::Request::Load {}) {
+            return Ok(queue.clone());
+        }
+        queue.apply(request)?;
+        let snapshot = queue.clone();
+        emit(
+            app,
+            id,
+            AgentEvent::QueueState {
+                queue: snapshot.clone(),
+                running: *session.running.lock().unwrap(),
+            },
+        );
+        snapshot
+    };
+    start_next(app, id);
+    Ok(snapshot)
+}
+
+#[tauri::command]
+pub fn agent_queue(
+    app: AppHandle,
+    id: String,
+    request: crate::message_queue::Request,
+) -> Result<crate::message_queue::Snapshot, String> {
+    queue_request(&app, &id, request)
 }
 
 /// Stop the tab's running turn, if any. Always succeeds.
 #[tauri::command]
-pub fn agent_stop(state: State<AgentState>, id: String) -> Result<(), String> {
+pub fn agent_stop(app: AppHandle, state: State<AgentState>, id: String) -> Result<(), String> {
+    {
+        let sessions = state
+            .sessions
+            .lock()
+            .map_err(|_| "Agent state unavailable.")?;
+        if let Some(session) = sessions.get(&id) {
+            let mut queue = session.queue.lock().unwrap();
+            if !queue.items.is_empty() {
+                queue.pause("Stopped. Pending messages will wait until you resume the queue.");
+                emit(
+                    &app,
+                    &id,
+                    AgentEvent::QueueState {
+                        queue: queue.clone(),
+                        running: *session.running.lock().unwrap(),
+                    },
+                );
+            }
+        }
+    }
     kill_session(&state, &id);
     Ok(())
 }
@@ -1504,6 +1776,7 @@ mod tests {
                 workspace,
                 child: Mutex::new(None),
                 running: Mutex::new(false),
+                queue: Mutex::new(crate::message_queue::Snapshot::default()),
                 prompt: Mutex::new(None),
             })
         };
@@ -1551,6 +1824,7 @@ mod tests {
                 workspace: workspace.clone(),
                 child: Mutex::new(None),
                 running: Mutex::new(false),
+                queue: Mutex::new(crate::message_queue::Snapshot::default()),
                 prompt: Mutex::new(None),
             }),
         );

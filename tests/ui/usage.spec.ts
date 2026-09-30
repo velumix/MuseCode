@@ -11,6 +11,9 @@ test('usage accepts numeric provider data and rejects invalid counters', () => {
   expect(tokenRate(usage.turn)).toBe(60);
   expect(tokenRate({ ...usage.turn!, elapsed_ms: 0 })).toBeNull();
   expect(tokenRate({ ...usage.turn!, output_tokens: null })).toBeNull();
+  expect(tokenRate(usage.turn, 4000)).toBe(30);
+  expect(tokenRate({...usage.turn!,output_tokens:NaN})).toBeNull();
+  expect(tokenRate(usage.turn,Infinity)).toBeNull();
 });
 
 test('phone event fold preserves context between turns and discards stale memory and reset counters', () => {

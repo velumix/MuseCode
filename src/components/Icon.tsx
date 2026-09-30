@@ -1,9 +1,10 @@
 import type { CSSProperties } from "react";
 import velumMark from "../assets/velum-mark.png";
 
-export type IconName = "board" | "search" | "plus" | "chat" | "folder" | "code" | "terminal" | "arrow" | "down" | "reset" | "command" | "check" | "copy" | "close" | "shield" | "bell" | "phone" | "memory" | "settings";
+export type IconName = "board" | "search" | "plus" | "chat" | "folder" | "code" | "terminal" | "arrow" | "down" | "reset" | "command" | "check" | "copy" | "close" | "shield" | "bell" | "phone" | "memory" | "settings" | "edit";
 
 const paths: Record<IconName, string> = {
+  edit: "m16 3 5 5L9 20l-6 1 1-6L16 3Zm-2 2 5 5",
   board: "M3 4h18v16H3V4Zm6 0v16m6-16v16M5 8h2m4 0h2m4 0h2M5 12h2m6 0h-2",
   memory: "M4 4h6a3 3 0 0 1 3 3v14a4 4 0 0 0-4-2H4V4Zm16 0h-4a3 3 0 0 0-3 3v14a4 4 0 0 1 4-2h3V4Z",
   settings: "M4 7h16M4 17h16M8 4v6m8 4v6",

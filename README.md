@@ -45,6 +45,8 @@ So I made it. **Velum Code is the app I built around that idea.** It started as 
 | **Work that keeps moving.** | Kanban assignments create cron jobs. Bots update cards and hand off to teammates, with pause/stop controls and a clear activity history. |
 | **A quieter workspace.** | Charcoal surfaces, blue accents, readable conversations, and motion that respects reduced-motion preferences. |
 | **See what the agent is doing.** | Streaming responses, Markdown and code blocks, tool activity, task lists, and visible errors. |
+| **Keep the next thought ready.** | Messages submitted during active work queue in order. Edit, remove, pause, or resume the same queue on desktop and phone. Stop and failures preserve pending messages for review. |
+| **Measure each response.** | Provider token counts and average tok/s for Muse, Codex, and Antigravity. [Usage details](docs/usage.md). |
 | **Chat and terminal, together.** | Every tab has an Agent view and an embedded terminal. Switching views preserves both. |
 | **Pick up where you left off.** | Tabs, drafts, model choices and recent transcripts restore after quitting or restarting. Continue the same provider conversation. |
 | **Keep your hands on the keyboard.** | A command palette, session shortcuts, terminal search, and zoom controls. |

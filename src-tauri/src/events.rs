@@ -32,6 +32,11 @@ pub struct TodoItem {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AgentEvent {
+    QueueState {
+        queue: crate::message_queue::Snapshot,
+        #[serde(default)]
+        running: bool,
+    },
     ProviderProgress {
         progress: crate::provider_progress::Progress,
     },
@@ -53,6 +58,8 @@ pub enum AgentEvent {
     TurnStart {
         prompt: String,
         remote: bool,
+        #[serde(default)]
+        queued: bool,
     },
     UserMessage {
         text: String,
@@ -588,11 +595,12 @@ mod tests {
         // Shape captured live from CLI 1.4.0 (`task.lifecycle.status`).
         let mut fold = Fold::default();
         let line = r#"{"schema_version":1,"stream":{"kind":"session","id":"s"},"sequence":18,"recorded_at":1,"record_type":"event","durability":"durable","causation_id":"c","payload_type":"task.lifecycle.status","payload_schema_version":1,"payload":{"kind":"task_lifecycle","command_id":"c","run_stream":{"kind":"run","id":"c"},"task_stream":{"kind":"task","id":"m1"},"task_id":"m1","event":{"kind":"status","task_id":"m1","message":"opening meta model stream attempt 1/10","details":{"phase":"opening_stream"}}}}"#;
-        assert_eq!(
-            fold.fold_line(line),
-            vec![AgentEvent::Activity {
-                text: "opening meta model stream attempt 1/10".to_owned()
-            }]
+        let events = fold.fold_line(line);
+        assert!(
+            matches!(&events[0], AgentEvent::Activity { text } if text == "Connecting to Muse…")
+        );
+        assert!(
+            matches!(&events[1], AgentEvent::ProviderProgress { progress } if progress.phase == crate::provider_progress::Phase::Connecting)
         );
         // A status without a message carries no displayable detail.
         assert!(fold

@@ -347,7 +347,7 @@ textarea:focus-visible {
   backdrop-filter: var(--glass-filter);
   border-color: var(--border);
 }
-.phone-app .phone-composer form,
+.phone-app .phone-composer > form,
 .phone-app .phone-message.user {
   background:
     linear-gradient(135deg, var(--glass-highlight), transparent 55%),
@@ -360,7 +360,7 @@ textarea:focus-visible {
 .phone-app .phone-composer {
   backdrop-filter: none;
 }
-.phone-app .phone-composer form {
+.phone-app .phone-composer > form {
   backdrop-filter: var(--glass-filter);
 }
 .phone-app .phone-sessions {
@@ -400,7 +400,7 @@ textarea:focus-visible {
   color: var(--muted);
   font-size: calc(10px * var(--ui-scale));
 }
-.phone-app .phone-composer textarea {
+.phone-app .phone-composer > form textarea {
   font-family: var(--chat-font);
   font-size: max(16px, var(--chat-font-size));
 }

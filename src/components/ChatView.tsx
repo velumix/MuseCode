@@ -11,18 +11,20 @@ import { usePreferences } from "../preferences";
 import type { BotIdentity } from '../bots';
 import BotAvatar from './BotAvatar';
 import UsageStrip from './UsageStrip';
+import MessageQueue from './MessageQueue';
+import { emptyQueue, type MessageQueue as Queue } from '../messageQueue';
 import ProviderWait from './ProviderWait';
 import { progressMessage, type ProviderProgress } from '../providerProgress';
 import { mergeUsage, type UsageSnapshot } from '../usage';
 import { attachment, chatSnapshot, type AccessCheck, type Diagnostics } from '../context';
 const ContextPanel = lazy(() => import('./ContextPanel'));
 
-export type AgentStatus =
+export type AgentStatus = (
   | { kind: "starting" }
   | { kind: "idle" }
   | { kind: "running"; detail?: string }
   | { kind: "done" }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string }) & { queued?: number; queuePaused?: boolean };
 
 type Block =
   | { id: number; kind: "user"; text: string; notSent?: boolean }
@@ -265,6 +267,10 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
   const [todos, setTodos] = useState<TodoEntry[]>([]);
   const [input, setInput] = useState("");
   const [running, setRunning] = useState(false);
+  const [queue, setQueue] = useState<Queue>(emptyQueue);
+  const queueRef = useRef(queue); queueRef.current = queue;
+  const lastStatusRef = useRef<AgentStatus>({ kind: 'starting' });
+  const [turnEpoch, setTurnEpoch] = useState(0);
   const [ready, setReady] = useState(false);
   const [initializing, setInitializing] = useState(true);
   const [activity, setActivity] = useState("");
@@ -314,6 +320,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
   const turnStartRef = useRef(0);
   const nativeIdRef = useRef<string | null>(null);
   const assistantSeenRef = useRef(false);
+  const optimisticPromptRef = useRef<{ prompt: string; blockId: number } | null>(null);
   const applyingRef = useRef(false);
   const titleAssignedRef = useRef(false);
   const blocksRef = useRef(blocks); blocksRef.current = blocks;
@@ -332,7 +339,8 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
 
   const setStatus = useCallback(
     (s: AgentStatus) => {
-      statusRef.current(sessionId, s);
+      lastStatusRef.current = s;
+      statusRef.current(sessionId, { ...s, queued: queueRef.current.items.length, queuePaused: queueRef.current.paused } as AgentStatus);
     },
     [sessionId],
   );
@@ -367,8 +375,11 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
     // Choosing a usable project is a recovery step; keep the unsent prompt.
     setInput(explicitRestart ? "" : readDraft(sessionId));
     setRunning(false);
+    queueRef.current = emptyQueue();
+    setQueue(queueRef.current);
     runningRef.current = false;
     assistantSeenRef.current = false;
+    optimisticPromptRef.current = null;
     historyRef.current = [];
     setHistIdx(null);
     stickRef.current = true;
@@ -385,6 +396,17 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
       if (disposed || envelope.id !== nativeId) return;
       const e = envelope.event;
       switch (e.kind) {
+        case 'queue_state': {
+          const next = e.queue as unknown as Queue;
+          queueRef.current = next; setQueue(next);
+          if (typeof e.running === 'boolean') {
+            runningRef.current = e.running; setRunning(e.running);
+          }
+          const previous = lastStatusRef.current;
+          setStatus(e.running ? { kind: 'running', detail: previous.kind === 'running' ? previous.detail : undefined }
+            : previous.kind === 'error' || previous.kind === 'done' ? previous : { kind: 'idle' });
+          break;
+        }
         case "usage": setUsage(previous => mergeUsage(previous, e)); break;
         case "usage_reset": setUsage({}); setMemoryUsage(null); setProviderProgress(null); break;
         case "memory_context": setMemoryUsage({titles:Array.isArray(e.titles)?e.titles as string[]:[],bytes:typeof e.bytes==="number"?e.bytes:0}); break;
@@ -392,14 +414,19 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
           setProviderProgress(null);
           setUsage(previous => ({ ...previous, turn: null }));
           setMemoryUsage(null);
-          if (!e.remote && !replaying) break;
           const prompt = asString(e.prompt) ?? "";
+          if (!e.remote && !e.queued && !replaying && optimisticPromptRef.current?.prompt === prompt) {
+            optimisticPromptRef.current = null;
+            break;
+          }
           assistantSeenRef.current = false;
           runningRef.current = true;
           turnStartRef.current = Date.now();
+          setTurnEpoch(previous => previous + 1);
           setRunning(true);
-          setActivity("Sent from your phone");
-          setStatus({ kind: "running", detail: "Sent from your phone" });
+          const detail = e.queued ? 'Starting queued message' : e.remote ? 'Sent from your phone' : 'Starting response';
+          setActivity(detail);
+          setStatus({ kind: "running", detail });
           if (!titleAssignedRef.current) {
             titleAssignedRef.current = true;
             onTitle(sessionId, prompt.replace(/\s+/g, " ").slice(0, 48));
@@ -414,6 +441,11 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
         case "assistant_delta": {
           const text = asString(e.text) ?? "";
           if (!text) break;
+          if (runningRef.current) {
+            setProviderProgress(null);
+            setActivity('Responding…');
+            setStatus({ kind: 'running', detail: 'Responding…' });
+          }
           assistantSeenRef.current = true;
           setBlocks((prev) => {
             const last = prev[prev.length - 1];
@@ -458,6 +490,11 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
           const taskId = asString(e.task_id);
           const name = asString(e.name) ?? "tool";
           if (!taskId) break;
+          if (runningRef.current) {
+            setProviderProgress(null);
+            setActivity(`Running ${name}…`);
+            setStatus({ kind: 'running', detail: `Running ${name}…` });
+          }
           setBlocks((prev) => {
             if (prev.some((b) => b.kind === "tool" && b.taskId === taskId)) return prev;
             return [
@@ -549,8 +586,8 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
           if (!runningRef.current) break;
           const progress = e.progress as unknown as ProviderProgress;
           setProviderProgress(progress);
-          setActivity(progressMessage(progress));
-          setStatus({ kind: "running", detail: progressMessage(progress) });
+          setActivity(progressMessage(progress, provider));
+          setStatus({ kind: "running", detail: progressMessage(progress, provider) });
           break;
         }
         case "activity": {
@@ -643,7 +680,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
     const t0 = turnStartRef.current || Date.now();
     const t = window.setInterval(() => setElapsed(Date.now() - t0), 500);
     return () => window.clearInterval(t);
-  }, [running]);
+  }, [running, turnEpoch]);
 
   // Let a multiline draft grow without crowding out the transcript. CSS caps
   // its height for the available window; hidden tabs are sized when activated.
@@ -690,7 +727,17 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
     (text: string) => {
       const prompt = text.trim();
       const nativeId = nativeIdRef.current;
-      if (!prompt || !ready || !nativeId || runningRef.current || applyingRef.current) return;
+      if (!prompt || !ready || !nativeId || applyingRef.current) return;
+      if (runningRef.current || queueRef.current.items.length || queueRef.current.paused) {
+        inputRef.current = ''; setInput(''); setHistIdx(null);
+        invoke('agent_send', { id: nativeId, prompt, yolo }).catch((error: unknown) => {
+          if (nativeIdRef.current !== nativeId) return;
+          setInput(draft => draft || prompt);
+          setBlocks(previous => [...previous, { id: ++idRef.current, kind: 'user', text: prompt, notSent: true },
+            { id: ++idRef.current, kind: 'notice', text: `Could not queue: ${String(error)}`, tone: 'error' }]);
+        });
+        return;
+      }
       stickRef.current = true;
       setShowLatest(false);
       runningRef.current = true;
@@ -700,18 +747,27 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
         titleAssignedRef.current = true;
       }
       setInput("");
+      inputRef.current = '';
       setUsage(previous => ({ ...previous, turn: null }));
       setMemoryUsage(null);
       setHistIdx(null);
       historyRef.current = [...historyRef.current.slice(-49), prompt];
       turnStartRef.current = Date.now();
+      setTurnEpoch(previous => previous + 1);
       const userId = ++idRef.current;
+      optimisticPromptRef.current = { prompt, blockId: userId };
       setBlocks((prev) => [...prev, { id: userId, kind: "user", text: prompt }]);
       setRunning(true);
       setActivity("");
       setStatus({ kind: "running" });
-      invoke("agent_send", { id: nativeId, prompt, yolo }).catch((err: unknown) => {
+      invoke<{ queued?: boolean }>("agent_send", { id: nativeId, prompt, yolo }).then(info => {
+        if (nativeIdRef.current === nativeId && info?.queued) {
+          if (optimisticPromptRef.current?.blockId === userId) optimisticPromptRef.current = null;
+          setBlocks(previous => previous.filter(block => block.id !== userId));
+        }
+      }).catch((err: unknown) => {
         if (nativeIdRef.current !== nativeId) return;
+        if (optimisticPromptRef.current?.blockId === userId) optimisticPromptRef.current = null;
         const message = err instanceof Error ? err.message : String(err);
         setBlocks((prev) => [...prev.map((b) => b.id === userId && b.kind === "user" ? { ...b, notSent: true } : b), { id: ++idRef.current, kind: "notice", text: message, tone: "error" }]);
         setInput((draft) => draft || prompt);
@@ -723,7 +779,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
     [ready, sessionId, setStatus, yolo, onTitle],
   );
 
-  const send = useCallback(() => sendText(input), [sendText, input]);
+  const send = useCallback(() => sendText(inputRef.current), [sendText]);
 
   const stop = useCallback(() => {
     const nativeId = nativeIdRef.current;
@@ -735,7 +791,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
   }, [sessionId]);
 
   const applyWorkspace = useCallback(async () => {
-    if (runningRef.current || applyingRef.current || initializing) return;
+    if (runningRef.current || queueRef.current.items.length || applyingRef.current || initializing) return;
     applyingRef.current = true;
     setApplying(true);
     setWorkspaceError("");
@@ -837,7 +893,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
         {running && (
           <div className="chat-running" role="status">
             <span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span>
-            {providerProgress?.phase === 'retrying' ? <ProviderWait progress={providerProgress}/> : <>
+            {providerProgress?.phase === 'retrying' ? <ProviderWait progress={providerProgress} provider={provider}/> : <>
               Working…{elapsed >= 1000 ? ` ${fmtElapsed(elapsed)}` : ""}
               {activity ? ` · ${activity}` : ""}
             </>}
@@ -846,6 +902,11 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
       </div>
       <div className="composer-dock">
       <UsageStrip usage={usage} memory={memoryUsage} provider={provider} running={running} elapsed={elapsed} active={active} />
+      <MessageQueue queue={queue} running={running} onAction={async request => {
+        const nativeId = nativeIdRef.current;
+        if (!nativeId) throw new Error('Conversation is still starting.');
+        await invoke('agent_queue', { id: nativeId, request });
+      }} />
       {showLatest && <div className="latest-wrap"><button type="button" className="latest-btn" onClick={jumpToLatest}><Icon name="down" size={14} />Back to latest</button></div>}
       {todos.length > 0 && (
         <div className="todos">
@@ -867,15 +928,16 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
           ref={composerRef}
           value={input}
           rows={2}
-          placeholder={ready ? `What’s on your mind? Ask ${bot?.name||providerNames[provider]}…` : "Getting ready…"}
+          placeholder={ready ? running ? 'Add a message to the queue…' : `What’s on your mind? Ask ${bot?.name||providerNames[provider]}…` : "Getting ready…"}
           aria-label={`Message ${bot?.name||providerNames[provider]}`}
           disabled={!ready || applying}
           onChange={(e) => {
             setHistIdx(null);
+            inputRef.current = e.target.value;
             setInput(e.target.value);
           }}
           onKeyDown={(e) => {
-            if (e.nativeEvent.isComposing) return;
+            if (e.nativeEvent.isComposing || e.repeat) return;
             if (e.key === "Enter" && !e.shiftKey && !e.altKey && (settings.sendShortcut === "enter" || e.ctrlKey || e.metaKey)) {
               e.preventDefault();
               send();
@@ -905,7 +967,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
           }}
         />
         <div className="composer-actions">
-        <button type="button" className={yolo ? "yolo-btn on" : "yolo-btn"} disabled={!ready || running || permissionBusy} onClick={async () => {
+        <button type="button" className={yolo ? "yolo-btn on" : "yolo-btn"} disabled={!ready || running || queue.items.length > 0 || permissionBusy} onClick={async () => {
           if (!nativeIdRef.current) return;
           setPermissionBusy(true);
           try { await invoke('agent_set_permissions', {id:nativeIdRef.current,yolo:!yolo}); setYolo(!yolo); }
@@ -916,27 +978,26 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
         </button>
         <span className="composer-hint">{settings.sendShortcut === "ctrl-enter" ? "Ctrl / ⌘ + Enter to send" : "Shift + Enter for a new line"}</span>
         <button type="button" className="yolo-btn" aria-label="Project context and diagnostics" title="Project context and diagnostics" disabled={!effective} onClick={e => setContextSnapshot(chatSnapshot(e.currentTarget.closest('.chat-wrap'), provider, options, running, 'desktop'))}><Icon name="settings" size={16}/></button>
-        {running ? (
+        {running && (
           <button type="button" className="composer-btn stop" onClick={stop} aria-label="Stop" title="Stop">
             <StopIcon />
           </button>
-        ) : (
+        )}
           <button
             type="button"
             className="composer-btn"
             onClick={send}
             disabled={!ready || !input.trim()}
-            aria-label="Send"
-            title="Send"
+            aria-label={running || queue.items.length > 0 ? 'Queue message' : 'Send'}
+            title={running || queue.items.length > 0 ? 'Queue message' : 'Send'}
           >
             <SendIcon />
           </button>
-        )}
         </div>
       </div>
       <div className="workspace-bar">
-        <button type="button" className="workspace-btn" aria-label="Choose project folder" title="Choose project folder, then Apply" disabled={running || applying} onClick={async () => {
-          if (runningRef.current || applyingRef.current) return;
+        <button type="button" className="workspace-btn" aria-label="Choose project folder" title="Choose project folder, then Apply" disabled={running || queue.items.length > 0 || applying} onClick={async () => {
+          if (runningRef.current || queueRef.current.items.length || applyingRef.current) return;
           applyingRef.current = true; setApplying(true); setWorkspaceError('');
           try { const path = await invoke<string | null>('workspace_pick'); if (path) { workspaceDraftRevision.current++; setDraft(path); } }
           catch (e) { setWorkspaceError(String(e)); }
@@ -945,12 +1006,12 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
         <input value={draft} disabled={applying} onChange={(e) => { workspaceDraftRevision.current++; setDraft(e.target.value); }} onKeyDown={(e) => {
           if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); void applyWorkspace(); }
         }} placeholder={effective || "Choose a workspace"} aria-label="Workspace directory" title={effective || "default (home)"} spellCheck={false} />
-        {(draft !== effective || !ready || workspaceError) && <button type="button" className="workspace-btn" onClick={applyWorkspace} disabled={running || applying || initializing} title="Apply workspace (restarts this tab's session)">Apply</button>}
+        {(draft !== effective || !ready || workspaceError) && <button type="button" className="workspace-btn" onClick={applyWorkspace} disabled={running || queue.items.length > 0 || applying || initializing} title="Apply workspace (restarts this tab's session)">Apply</button>}
         <span className="workspace-label">Workspace</span>
       </div>
       </div>
-      {contextSnapshot !== null && active && <Suspense fallback={null}><ContextPanel key={`${nativeIdRef.current}:${yolo}`} snapshot={contextSnapshot} load={() => invoke<Diagnostics>('app_diagnostics', { workspace: effective, id: nativeIdRef.current })} check={() => invoke<AccessCheck>('workspace_check', { workspace: effective, write: true, id: nativeIdRef.current })} agentBusy={running || !ready} checkAgent={async () => {
-        if (!nativeIdRef.current || runningRef.current) throw new Error('Wait for the active turn to finish.');
+      {contextSnapshot !== null && active && <Suspense fallback={null}><ContextPanel key={`${nativeIdRef.current}:${yolo}`} snapshot={contextSnapshot} load={() => invoke<Diagnostics>('app_diagnostics', { workspace: effective, id: nativeIdRef.current })} check={() => invoke<AccessCheck>('workspace_check', { workspace: effective, write: true, id: nativeIdRef.current })} agentBusy={running || queue.items.length > 0 || !ready} checkAgent={async () => {
+        if (!nativeIdRef.current || runningRef.current || queueRef.current.items.length) throw new Error('Finish or clear queued messages before testing agent access.');
         runningRef.current = true; setRunning(true); setActivity('Checking workspace access'); setStatus({kind:'running',detail:'Checking workspace access'});
         turnStartRef.current = Date.now(); assistantSeenRef.current = false;
         try { await invoke('agent_check_access', {id:nativeIdRef.current,yolo}); }

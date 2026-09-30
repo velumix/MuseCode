@@ -20,6 +20,7 @@ export async function boot(page: Page, delay = 0) {
       const api = (w.qa = {
         calls: [] as any[],
         sessions: new Map(),
+        agentQueues: new Map<string, any>(),
         failSend: false,
         antigravityInstalled: false,
         auth: {
@@ -50,16 +51,40 @@ export async function boot(page: Page, delay = 0) {
               callbacks.get(entry.handler)?.({ event, id, payload });
           }
         },
-        agent(event: unknown) {
+        agent(event: any, target?: string) {
           const last = api.calls
             .filter((c: any) => c.cmd === "agent_send")
             .at(-1);
-          api.emit("agent-event", { id: last.args.id, event });
+          const id = target || last.args.id;
+          const state = api.agentQueues.get(id);
+          if (state && event.kind === 'turn_end') {
+            state.running = false;
+            if (event.status !== 'completed' && state.queue.items.length) {
+              state.queue.paused = true; state.queue.reason = 'Response stopped or failed. Review the queue, then resume.';
+              publishQueue(id);
+            }
+          }
+          api.emit("agent-event", { id, event });
+          if (state && event.kind === 'turn_end' && event.status === 'completed') nextQueued(id);
         },
         listenerCount() {
           return listeners.size;
         },
       });
+      function publishQueue(id: string) {
+        const state = api.agentQueues.get(id);
+        api.emit('agent-event', { id, event: {kind:'queue_state',queue:structuredClone(state.queue),running:state.running} });
+      }
+      function startTurn(id: string, message: any, queued: boolean) {
+        api.agentQueues.get(id).running = true;
+        api.emit('agent-event', {id,event:{kind:'turn_start',prompt:message.prompt,remote:!!message.remote,queued}});
+      }
+      function nextQueued(id: string) {
+        const state = api.agentQueues.get(id);
+        if (state.running || state.queue.paused || !state.queue.items.length) return;
+        const message = state.queue.items.shift(); state.running = true;
+        publishQueue(id); startTurn(id, message, true);
+      }
       w.__TAURI_INTERNALS__ = {
         metadata: {
           currentWindow: { label: "main" },
@@ -323,6 +348,9 @@ export async function boot(page: Page, delay = 0) {
             if (args.workspace?.includes("missing"))
               throw "workspace is not a directory";
             api.sessions.set(args.id, "agent");
+            const restored = w.qaAgentRestore || [];
+            const savedQueue = [...restored].reverse().find((e:any)=>e.kind==='queue_state')?.queue;
+            api.agentQueues.set(args.id, {running:false,queue:structuredClone(savedQueue || {items:[],paused:false,reason:null})});
             const bot=JSON.parse(localStorage.getItem('qa-bots')||'[]').find((b:any)=>b.id===args.botId);
             if(bot)api.emit('agent-event',{id:args.id,event:{kind:'bot_identity',bot}});
             return {
@@ -330,22 +358,39 @@ export async function boot(page: Page, delay = 0) {
               session_id: `native-${args.id}`,
               workspace: args.workspace || "C:\\QA",
               workspace_notice: args.workspace==='C:\\profile-home'?'Choose a project folder and Apply it before coding in Codex Standard mode.':null,
+              restored,
             };
           }
           if (cmd === "agent_send") {
             if (api.holdSend) await new Promise<void>(resolve => { api.releaseSend = resolve; });
             if (api.failSend) throw "Could not launch muse";
-            return { id: args.id, turn_id: "turn" };
+            const state = api.agentQueues.get(args.id);
+            if (state.running || state.queue.items.length || state.queue.paused) {
+              if(state.queue.items.length>=20)throw 'Queue is full. Remove a queued message before adding another.';
+              state.queue.items.push({id:crypto.randomUUID(),prompt:args.prompt,yolo:args.yolo,remote:!!args.remote});
+              publishQueue(args.id);
+              return {id:args.id,turn_id:'',queued:true};
+            }
+            startTurn(args.id,args,false);
+            return { id: args.id, turn_id: "turn", queued:false };
+          }
+          if (cmd === 'agent_queue') {
+            if(api.failQueue)throw 'Queue unavailable';
+            const state = api.agentQueues.get(args.id), q=state.queue, request=args.request;
+            if(request.action==='pause'){q.paused=true;q.reason='Queue paused by you.';}
+            if(request.action==='resume'){q.paused=false;q.reason=null;}
+            if(request.action==='clear'){q.items=[];q.paused=false;q.reason=null;}
+            if(request.action==='remove'){q.items=q.items.filter((m:any)=>m.id!==request.message_id);if(!q.items.length){q.paused=false;q.reason=null;}}
+            if(request.action==='edit'){const message=q.items.find((m:any)=>m.id===request.message_id);if(!message)throw 'Queued message already started.';message.prompt=request.prompt.trim();}
+            publishQueue(args.id);nextQueued(args.id);return structuredClone(q);
           }
           if (cmd === "agent_stop") {
-            api.emit("agent-event", {
-              id: args.id,
-              event: { kind: "turn_end", status: "cancelled" },
-            });
+            api.agent({kind:'turn_end',status:'cancelled'},args.id);
             return;
           }
           if (cmd === "agent_destroy" || cmd === "pty_kill") {
             api.sessions.delete(args.id);
+            api.agentQueues.delete(args.id);
             return;
           }
           if (cmd === "pty_spawn") {

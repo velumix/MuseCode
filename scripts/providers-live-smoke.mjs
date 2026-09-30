@@ -2,13 +2,13 @@
 // CLI accounts are used; app preferences/history and all files are isolated.
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, openSync, fstatSync, readSync, closeSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { chromium, expect } from '@playwright/test';
 
-assert(process.argv.includes('--live'), 'Pass --live to run signed-in Muse and Agy turns.');
+assert(process.argv.includes('--live'), 'Pass --live to run signed-in provider turns.');
 assert.equal(process.platform, 'win32');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runDir = path.join(root, '.qa', `providers-verified-${Date.now()}`);
@@ -18,8 +18,9 @@ const known = 'Velum provider verification fixture.\n';
 writeFileSync(path.join(workspace, 'hello.txt'), known);
 const installed = process.argv.includes('--installed');
 const providerIndex=process.argv.indexOf('--provider');
-const providers=providerIndex<0 ? ['muse','antigravity'] : [process.argv[providerIndex+1]];
-assert(providers.every(p=>['muse','antigravity'].includes(p)), 'Expected --provider muse or antigravity');
+const metricsOnly=process.argv.includes('--metrics-only');
+const providers=providerIndex<0 ? (metricsOnly ? ['muse','codex','antigravity'] : ['muse','antigravity']) : [process.argv[providerIndex+1]];
+assert(providers.every(p=>['muse','codex','antigravity'].includes(p)), 'Expected --provider muse, codex or antigravity');
 const release = installed || process.argv.includes('--release');
 const appPath = installed ? path.join(process.env.LOCALAPPDATA, 'Velum Code/velum-code.exe') : path.join(root, `src-tauri/target/${release ? 'release' : 'debug'}/velum-code.exe`);
 assert.equal(execFileSync('powershell.exe', ['-NoProfile', '-Command', '@(Get-Process velum-code -ErrorAction SilentlyContinue).Count'], {encoding:'utf8',windowsHide:true}).trim(), '0', 'Close Velum before this isolated test; never attach to user conversations.');
@@ -29,6 +30,40 @@ let app, browser, vite, invoke;
 const ids=[];
 const report = { installed, catalog: {}, turns: [], diagnostics: [], ui: [], errors: [] };
 const save = () => writeFileSync(path.join(runDir, 'result.json'), JSON.stringify(report, null, 2));
+const tokenKeys=['input_tokens','cached_input_tokens','output_tokens','reasoning_output_tokens'];
+function codexTotals(sessionId){
+  assert.match(sessionId,/^[0-9a-f-]{36}$/i);
+  let budget=30000;
+  function find(dir,depth){
+    let entries;
+    try{entries=readdirSync(dir,{withFileTypes:true});}catch{return;}
+    for(const entry of entries){
+      if(!budget--)return;
+      const file=path.join(dir,entry.name);
+      if(entry.isFile()&&entry.name.endsWith(`-${sessionId}.jsonl`))return file;
+      if(entry.isDirectory()&&depth>0){const found=find(file,depth-1);if(found)return found;}
+    }
+  }
+  const file=find(path.join(process.env.CODEX_HOME||path.join(process.env.USERPROFILE,'.codex'),'sessions'),3);
+  assert(file,'Codex verification session counters were not retained');
+  const fd=openSync(file,'r');
+  let bytes,start;
+  try{
+    const size=fstatSync(fd).size;start=Math.max(0,size-512*1024);
+    bytes=Buffer.alloc(size-start);readSync(fd,bytes,0,bytes.length,start);
+  }finally{closeSync(fd);}
+  let total;
+  for(const [index,line] of bytes.toString('utf8').split('\n').entries()){
+    if(index===0&&start>0)continue;
+    let value;try{value=JSON.parse(line);}catch{continue;}
+    if(value.type==='event_msg'&&value.payload?.type==='token_count')total=value.payload.info?.total_token_usage;
+  }
+  assert(total,'Codex verification token_count record missing');
+  return Object.fromEntries(tokenKeys.map(key=>{
+    assert(Number.isSafeInteger(total[key])&&total[key]>=0,`Codex ${key} was not reported`);
+    return [key,total[key]];
+  }));
+}
 console.log(`Live provider evidence: ${runDir}`);
 try {
   if (!release) {
@@ -65,10 +100,11 @@ try {
     const marker=`VELUM_${provider.toUpperCase()}_OK`;
     await invoke('agent_new',{id,tabId:id,workspace,provider,options,resume:false});
     let eventCount=0, sessionId;
+    let previousCodexTotals=Object.fromEntries(tokenKeys.map(key=>[key,0]));
     async function run(label, command, args) {
       const started=Date.now();
       await invoke(command,{id,yolo:false,...args});
-      const deadline=Date.now()+240000;
+      const deadline=Date.now()+(metricsOnly?90000:240000);
       while(Date.now()<deadline) {
         let saved;
         try { saved=JSON.parse(readFileSync(path.join(runDir,'settings','history',`${id}.json`),'utf8')); } catch{}
@@ -91,8 +127,22 @@ try {
       assert.equal(answer.trim(),marker);
       if(turn) assert.equal(result.sessionId,sessionId,'Provider did not resume its conversation');
       sessionId=result.sessionId;
+      if(metricsOnly){
+        const usage=result.events.findLast(e=>e.kind==='usage'&&e.turn)?.turn;
+        assert(usage&&Number.isSafeInteger(usage.output_tokens)&&usage.output_tokens>0,`${provider} ${turn?'resume':'fresh'} output tokens were not reported`);
+        assert(Number.isSafeInteger(usage.elapsed_ms)&&usage.elapsed_ms>0,`${provider} duration was not measured`);
+        if(provider==='codex'){
+          const total=codexTotals(sessionId);
+          const expected=Object.fromEntries(tokenKeys.map(key=>[key,total[key]-previousCodexTotals[key]]));
+          for(const key of tokenKeys)assert.equal(usage[key],expected[key],`Codex ${turn?'resumed':'fresh'} ${key} included another turn`);
+          previousCodexTotals=total;
+          result.verifiedTurnUsage=expected;save();
+        }
+        console.log(`PASS: ${provider} ${turn?'resumed':'fresh'} measured ${usage.output_tokens} output tokens in ${usage.elapsed_ms}ms (${(usage.output_tokens*1000/usage.elapsed_ms).toFixed(1)} tok/s).`);
+      }
       console.log(`PASS: ${provider} ${turn?'resumed':'fresh'} reply (${result.elapsedMs}ms).`);
     }
+    if(metricsOnly){await invoke('agent_destroy',{id});continue;}
     const diagnosticTurn=await run('workspace access','agent_check_access',{});
     const diagnostic=await invoke('app_diagnostics',{workspace,id});
     report.diagnostics.push({provider,diagnostic});save();
@@ -101,7 +151,7 @@ try {
     if(provider==='muse') {
       assert.equal(diagnosticTurn.events.at(-1).status,'completed');
       assert(checks.every(c=>c.status==='pass'),JSON.stringify(checks));
-      assert.equal(diagnostic.provider_runtime.progress.phase,'connected');
+      assert.equal(diagnostic.provider_runtime.progress,null);
     } else if(diagnosticTurn.events.at(-1).status==='blocked') {
       assert(checks.some(c=>c.status==='blocked'&&c.error_code==='provider_policy'),'Denied command was not attributed to an operation');
       assert(checks.every(c=>['pass','blocked','untested'].includes(c.status)),'Policy denial mislabeled as filesystem failure');
@@ -130,7 +180,7 @@ try {
   }
   // Also drive the installed React controls, not just named native commands.
   await invoke('desktop_show');
-  for(const provider of providers) {
+  for(const provider of metricsOnly?[]:providers) {
     await page.getByLabel('AI provider').selectOption(provider);
     const chat=page.locator('.chat-wrap:not(.hidden)');
     const composer=chat.locator('.composer textarea');
@@ -156,7 +206,7 @@ try {
     console.log(`PASS: ${provider} real reply is visible after selecting a project in the installed UI.`);
   }
   assert.deepEqual(report.errors,[]);
-  console.log(`PASS: real ${providers.join(' and ')} ${process.argv.includes('--ui-only')?'UI':'native runner and UI'} validation completed. No provider permission rules or existing workspace files were changed.`);
+  console.log(`PASS: real ${providers.join(' and ')} ${metricsOnly?'native runner metrics':process.argv.includes('--ui-only')?'UI':'native runner and UI'} validation completed. No provider permission rules or existing workspace files were changed.`);
 } catch(error) { report.errors.push(String(error));console.error(error);process.exitCode=1; }
 finally {
   save();

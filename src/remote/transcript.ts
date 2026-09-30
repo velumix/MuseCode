@@ -3,7 +3,8 @@ export interface Entry { seq: number; event: AgentEvent }
 import type { Provider, RunOptions } from "../providers";
 import { mergeUsage, type UsageSnapshot } from "../usage";
 import type { ProviderProgress } from '../providerProgress';
-export interface Session { bot?: import('../bots').BotIdentity|null;options?: RunOptions; provider?: Provider; id: string; title: string; workspace: string; running: boolean; status: string; revision: number }
+import { emptyQueue, type MessageQueue } from '../messageQueue';
+export interface Session { queue?: MessageQueue; bot?: import('../bots').BotIdentity|null;options?: RunOptions; provider?: Provider; id: string; title: string; workspace: string; running: boolean; status: string; revision: number }
 export interface Replay { session: Session; events: Entry[]; truncated: boolean }
 export interface Block { id: number; kind: "user" | "assistant" | "tool" | "notice"; text: string; name?: string; task?: string; status?: string }
 
@@ -11,6 +12,7 @@ export function transcript(entries: Entry[]) {
   const blocks: Block[] = [];
   let todos: { text: string; status: string }[] = [];
   let activity = "";
+  let queue = emptyQueue();
   let providerProgress: ProviderProgress | null = null;
   let usage: UsageSnapshot = {};
   let memory: { titles: string[]; bytes: number } | null = null;
@@ -21,6 +23,7 @@ export function transcript(entries: Entry[]) {
   for (const { seq, event: e } of entries) {
     const task = text(e.task_id);
     switch (e.kind) {
+      case 'queue_state': queue = e.queue as unknown as MessageQueue; break;
       case "usage": usage = mergeUsage(usage, e); break;
       case "usage_reset": usage = {}; memory = null; providerProgress = null; break;
       case "memory_context":
@@ -31,10 +34,13 @@ export function transcript(entries: Entry[]) {
         assistant = undefined; seenAssistant = false; activity = "Working…";
         blocks.push({ id: seq, kind: "user", text: text(e.prompt) }); break;
       case "assistant_delta":
+        if (!text(e.text)) break;
+        providerProgress = null; activity = 'Responding…';
         seenAssistant = true;
         if (!assistant) { assistant = { id: seq, kind: "assistant", text: "" }; blocks.push(assistant); }
         assistant.text += text(e.text); break;
       case "tool_start": {
+        providerProgress = null; activity = `Running ${text(e.name) || 'tool'}…`;
         assistant = undefined;
         const tool: Block = { id: seq, kind: "tool", task, name: text(e.name), text: "", status: "running" };
         tools.set(task, tool); blocks.push(tool); break;
@@ -62,5 +68,5 @@ export function transcript(entries: Entry[]) {
         break;
     }
   }
-  return { blocks, todos, activity, usage, memory, providerProgress };
+  return { blocks, todos, activity, usage, memory, providerProgress, queue };
 }

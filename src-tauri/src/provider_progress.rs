@@ -54,11 +54,20 @@ pub fn muse(details: &Value, now: u64) -> Option<Progress> {
         "stream_succeeded" => Phase::Connected,
         _ => return None,
     };
-    let attempt = details["facets"].as_array()?.iter().find(|f| {
+    let facets = details["facets"].as_array();
+    let attempt = facets.into_iter().flatten().find(|f| {
         f["kind"] == "external_attempt"
             && f["system"] == "meta"
             && f["operation"] == "model.response"
-    })?;
+    });
+    // Healthy lifecycle phases often omit retry metadata. They must still
+    // replace an earlier retry; explicit facts for other operations are ignored.
+    if attempt.is_none()
+        && facets.is_some_and(|items| items.iter().any(|f| f["kind"] == "external_attempt"))
+    {
+        return None;
+    }
+    let attempt = attempt.unwrap_or(&Value::Null);
     let count = |key: &str| attempt[key].as_u64().filter(|n| (1..=1000).contains(n));
     let retrying = phase == Phase::Retrying;
     Some(Progress {
@@ -127,5 +136,15 @@ mod tests {
         assert_eq!(status.retry_at_ms, None);
         details["facets"][0]["operation"] = json!("tool.response");
         assert!(muse(&details, 0).is_none());
+    }
+    #[test]
+    fn healthy_phases_without_attempt_facets_replace_retry_states() {
+        let connecting = muse(&json!({"phase":"opening_stream"}), 1000).unwrap();
+        assert_eq!(connecting.phase, Phase::Connecting);
+        assert_eq!(connecting.http_status, None);
+        let connected = muse(&json!({"phase":"stream_succeeded","facets":[]}), 2000).unwrap();
+        assert_eq!(connected.phase, Phase::Connected);
+        assert_eq!(connected.retry_at_ms, None);
+        assert!(muse(&json!({"phase":"arbitrary"}), 3000).is_none());
     }
 }
