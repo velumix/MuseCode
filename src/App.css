@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   color-scheme: dark;
   --bg: #18191b;
   --panel: #242526;
@@ -200,12 +200,13 @@ kbd { font: inherit; }
 .message-author { display: flex; flex-direction: column; gap: 4px; }
 .message-author > strong { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; }
 .message-author > span { font-size: 10px; color: var(--subtle); }
+.message-author > .message-unsent { color: var(--danger); }
 .assistant-badge { font-size: 8px; font-weight: 500; color: #b6d4fe; background: #304158; border-radius: 4px; padding: 2px 4px; letter-spacing: .3px; }
 .msg-copy { position: relative; margin-left: auto; display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 7px; color: var(--subtle); background: transparent; opacity: 0; transition: opacity 140ms, background 140ms; }
 .msg:hover .msg-copy, .msg:focus-within .msg-copy { opacity: 1; }
 .msg-copy:hover { background: var(--hover); color: var(--text); }
 .msg-copy.copied { color: var(--ok); opacity: 1; }
-.copy-feedback { position: absolute; right: 34px; padding: 4px 7px; border: 1px solid #46534d; border-radius: 5px; background: #2a3630; color: #c0e9ce; font-size: 10px; pointer-events: none; animation: content-arrive 160ms var(--ease-out) both; }
+.copy-feedback { position: absolute; right: 34px; width: max-content; white-space: nowrap; padding: 4px 7px; border: 1px solid #46534d; border-radius: 5px; background: #2a3630; color: #c0e9ce; font-size: 10px; pointer-events: none; animation: content-arrive 160ms var(--ease-out) both; }
 .msg > pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 14px/1.75 "Segoe UI", sans-serif; }
 .md { font-size: 14px; line-height: 1.75; overflow-wrap: anywhere; }
 .md > :first-child { margin-top: 0; }

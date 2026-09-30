@@ -11,8 +11,22 @@ export interface SavedTab {
 }
 const KEY = "velum-desktop-tabs-v1";
 const DRAFT = "velum-desktop-draft-";
+interface DesktopSnapshot { tabs: SavedTab[]; activeId: string }
+let desktopCache: DesktopSnapshot | null = null;
+const draftCache = new Map<string, string>();
+let lastDesktopData = "";
 let queued = false;
+let writes: Promise<void> = Promise.resolve();
 export let recoveryError: string | null = null;
+function persist(command: string, args: Record<string, unknown>) {
+  // Keep whole-desktop checkpoints and individual drafts in submission order.
+  // Otherwise a slow checkpoint can replace a more recent draft in Rust.
+  writes = writes.then(() => invoke<void>(command, args)).catch((error) => {
+    window.dispatchEvent(
+      new CustomEvent("velum:recovery-error", { detail: String(error) }),
+    );
+  });
+}
 function checkpoint() {
   if (queued) return;
   queued = true;
@@ -23,12 +37,8 @@ function checkpoint() {
     const drafts = Object.fromEntries(
       desktop.tabs.map((t) => [t.id, readDraft(t.id)]),
     );
-    void invoke("history_desktop_save", {
+    persist("history_desktop_save", {
       snapshot: { ...desktop, drafts },
-    }).catch((error) => {
-      window.dispatchEvent(
-        new CustomEvent("velum:recovery-error", { detail: String(error) }),
-      );
     });
   });
 }
@@ -40,23 +50,23 @@ export async function initializeDesktop() {
       drafts: Record<string, string>;
     } | null>("history_desktop_load");
     if (!saved || !Array.isArray(saved.tabs)) return;
-    localStorage.setItem(
-      KEY,
-      JSON.stringify({ tabs: saved.tabs, activeId: saved.activeId }),
-    );
-    for (const tab of loadDesktop().tabs) {
+    desktopCache = parseDesktop(saved);
+    try { localStorage.setItem(KEY, JSON.stringify(desktopCache)); } catch { /* Native recovery remains available. */ }
+    for (const tab of desktopCache.tabs) {
       const draft = saved.drafts?.[tab.id];
-      if (typeof draft === "string")
-        localStorage.setItem(DRAFT + tab.id, draft.slice(0, 64000));
-      else localStorage.removeItem(DRAFT + tab.id);
+      const text = typeof draft === "string" ? draft.slice(0, 64000) : "";
+      draftCache.set(tab.id, text);
+      try {
+        if (text) localStorage.setItem(DRAFT + tab.id, text);
+        else localStorage.removeItem(DRAFT + tab.id);
+      } catch { /* The in-memory draft is backed by the native checkpoint. */ }
     }
   } catch (error) {
     recoveryError = `Could not load the recovery checkpoint: ${String(error)}`;
   }
 }
-export function loadDesktop(): { tabs: SavedTab[]; activeId: string } {
+function parseDesktop(value: { tabs?: SavedTab[]; activeId?: string } | null): DesktopSnapshot {
   try {
-    const value = JSON.parse(localStorage.getItem(KEY) || "null");
     if (!value || !Array.isArray(value.tabs)) return { tabs: [], activeId: "" };
     const seen = new Set<string>();
     const tabs: SavedTab[] = value.tabs
@@ -102,8 +112,14 @@ export function loadDesktop(): { tabs: SavedTab[]; activeId: string } {
     return { tabs: [], activeId: "" };
   }
 }
+export function loadDesktop(): DesktopSnapshot {
+  if (desktopCache) return desktopCache;
+  try { desktopCache = parseDesktop(JSON.parse(localStorage.getItem(KEY) || "null")); }
+  catch { desktopCache = { tabs: [], activeId: "" }; }
+  return desktopCache;
+}
 export function saveDesktop(tabs: SavedTab[], activeId: string) {
-  const data = JSON.stringify({
+  const desktop = {
     tabs: tabs.map(({ id, title, workspace, provider, options,bot_id,task_id }) => ({
       bot_id,task_id,
       id,
@@ -113,26 +129,33 @@ export function saveDesktop(tabs: SavedTab[], activeId: string) {
       options,
     })),
     activeId,
-  });
-  if (localStorage.getItem(KEY) !== data) {
-    localStorage.setItem(KEY, data);
+  };
+  const data = JSON.stringify(desktop);
+  desktopCache = desktop;
+  if (lastDesktopData !== data) {
+    lastDesktopData = data;
+    const open = new Set(tabs.map(tab => tab.id));
+    for (const id of draftCache.keys()) if (!open.has(id)) draftCache.delete(id);
+    try { localStorage.setItem(KEY, data); } catch { /* Native checkpoints do not depend on browser storage. */ }
     checkpoint();
   }
 }
 export function readDraft(id: string) {
+  if (draftCache.has(id)) return draftCache.get(id)!;
+  let text = "";
   try {
-    return (localStorage.getItem(DRAFT + id) || "").slice(0, 64000);
-  } catch {
-    return "";
-  }
+    text = (localStorage.getItem(DRAFT + id) || "").slice(0, 64000);
+  } catch { /* Native recovery or the current editor can supply the draft. */ }
+  draftCache.set(id, text);
+  return text;
 }
 export function saveDraft(id: string, text: string) {
+  text = text.slice(0, 64000);
   if (readDraft(id) === text) return;
-  if (text) localStorage.setItem(DRAFT + id, text.slice(0, 64000));
-  else localStorage.removeItem(DRAFT + id);
-  void invoke("history_draft_save", { tabId: id, text }).catch((error) => {
-    window.dispatchEvent(
-      new CustomEvent("velum:recovery-error", { detail: String(error) }),
-    );
-  });
+  draftCache.set(id, text);
+  try {
+    if (text) localStorage.setItem(DRAFT + id, text);
+    else localStorage.removeItem(DRAFT + id);
+  } catch { /* Preserve the draft in memory and still submit the native save. */ }
+  persist("history_draft_save", { tabId: id, text });
 }

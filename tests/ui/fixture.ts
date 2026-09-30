@@ -75,6 +75,18 @@ export async function boot(page: Page, delay = 0) {
         },
         async invoke(cmd: string, args: any = {}) {
           api.calls.push({ cmd, args });
+          if (cmd === "history_desktop_load") return w.qaRecovery || null;
+          if (cmd === "history_desktop_save") {
+            if (api.holdHistorySave) await new Promise<void>(resolve => { api.releaseHistorySave = resolve; });
+            if (api.failHistory) throw "Recovery disk unavailable";
+            api.recovery = structuredClone(args.snapshot);
+            return;
+          }
+          if (cmd === "history_draft_save") {
+            if (api.failHistory) throw "Recovery disk unavailable";
+            if (api.recovery?.tabs.some((tab: any) => tab.id === args.tabId)) api.recovery.drafts[args.tabId] = args.text;
+            return;
+          }
           if(cmd==='bots_request'){
             const q=args.request;let profiles=JSON.parse(localStorage.getItem('qa-bots')||'[]');
             if(q.action==='save'){if(api.botConflict)throw 'This bot was edited elsewhere. Reload before saving.';profiles=[...profiles.filter((b:any)=>b.id!==q.profile.id),{...q.profile,revision:`r${++serial}`}];}
@@ -313,6 +325,7 @@ export async function boot(page: Page, delay = 0) {
             };
           }
           if (cmd === "agent_send") {
+            if (api.holdSend) await new Promise<void>(resolve => { api.releaseSend = resolve; });
             if (api.failSend) throw "Could not launch muse";
             return { id: args.id, turn_id: "turn" };
           }

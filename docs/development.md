@@ -140,7 +140,10 @@ Open desktop tabs, drafts, options and bounded transcripts recover after Quit, a
 Windows restart. `history.rs` checkpoints dirty event logs and desktop state once a second
 on one background thread, using atomic file replacement. Normal exit flushes the latest native
 state. Browser local storage provides fast draft reads; native checkpoints make them durable
-even if WebView2 is killed. A crash can lose changes since the last checkpoint.
+even if WebView2 is killed. Unavailable or full browser storage falls back to an in-memory
+cache while native recovery continues to save tabs and drafts. Native saves run in order,
+so a delayed tab checkpoint cannot overwrite a newer draft. A crash can lose changes since
+the last checkpoint.
 Provider resume IDs are saved alongside transcripts. Interrupted turns are marked cancelled
 and never replayed as new commands. Missing resume IDs are disclosed before continuing.
 Terminal processes and scrollback are not restored. Closing a tab deletes its recovery data;
@@ -151,6 +154,10 @@ after seven days without a draft update. They do not restore a desktop session t
 Headless chat displays approval notices and auto-cancels `request_user_input`; it cannot
 collect interactive approval/question responses. Use a separate Terminal conversation for
 those workflows. YOLO changes approval/sandbox behavior; it does not add interactive responses.
+
+If a message cannot be submitted, it stays visible with **Not sent** and can be copied.
+An empty composer restores the failed prompt; a newer draft stays intact. Unsent messages
+are excluded from plugin conversation context and bot handoff excerpts.
 
 ## Layout
 

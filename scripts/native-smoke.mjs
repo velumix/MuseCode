@@ -100,6 +100,38 @@ try {
     await composer.press("Enter");
   }
   async function done() { await status.filter({ hasText: "Done" }).waitFor(); }
+  // Exercise recovery against the real Rust checkpoint while WebView storage fails.
+  await page.evaluate(() => {
+    const set = Storage.prototype.setItem, remove = Storage.prototype.removeItem;
+    window.__qaRestoreRecoveryStorage = () => {
+      Storage.prototype.setItem = set;
+      Storage.prototype.removeItem = remove;
+      delete window.__qaRestoreRecoveryStorage;
+    };
+    Storage.prototype.setItem = function (key, value) {
+      if (key.startsWith('velum-desktop')) throw new DOMException('Storage full', 'QuotaExceededError');
+      return set.call(this, key, value);
+    };
+    Storage.prototype.removeItem = function (key) {
+      if (key.startsWith('velum-desktop')) throw new DOMException('Storage unavailable', 'SecurityError');
+      return remove.call(this, key);
+    };
+  });
+  const recoveryDraft = 'Native draft survives browser quota failure';
+  const checkpointDrafts = () => {
+    try { return Object.values(JSON.parse(readFileSync(path.join(runDir, 'settings/history/desktop.json'), 'utf8')).drafts); }
+    catch { return []; }
+  };
+  try {
+    await composer.fill(recoveryDraft);
+    await expect.poll(() => checkpointDrafts().includes(recoveryDraft), { timeout: 10000 }).toBe(true);
+    assert.equal(await composer.inputValue(), recoveryDraft);
+    await composer.fill('');
+    await expect.poll(() => checkpointDrafts().includes(recoveryDraft), { timeout: 10000 }).toBe(false);
+  } finally {
+    await page.evaluate(() => window.__qaRestoreRecoveryStorage?.());
+  }
+  console.log('PASS: browser storage failures still save and clear drafts in the real native recovery checkpoint');
   const access=await invoke('workspace_check',{workspace:runDir,write:true});
   assert(access.readable && access.writable, 'Workspace probe failed in writable fixture');
   const diagnostic=await invoke('app_diagnostics',{workspace:runDir});

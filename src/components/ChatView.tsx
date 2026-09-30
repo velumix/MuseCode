@@ -24,7 +24,7 @@ export type AgentStatus =
   | { kind: "error"; message: string };
 
 type Block =
-  | { id: number; kind: "user"; text: string }
+  | { id: number; kind: "user"; text: string; notSent?: boolean }
   | { id: number; kind: "assistant"; text: string; open: boolean }
   | {
       id: number;
@@ -316,7 +316,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
   const inputRef = useRef(input); inputRef.current = input;
   useEffect(() => {
     onPluginHandle(sessionId, {
-      messages: () => blocksRef.current.filter(b => b.kind === "user" || b.kind === "assistant").map(b => ({ role: b.kind, text: "text" in b ? b.text : "" })),
+      messages: () => blocksRef.current.filter(b => (b.kind === "user" && !b.notSent) || b.kind === "assistant").map(b => ({ role: b.kind, text: "text" in b ? b.text : "" })),
       insert: text => {
         const next = inputRef.current ? `${inputRef.current}\n\n${text}` : text;
         if (next.length > 64000) throw new Error("The result would exceed your draft’s 64,000-character limit. Shorten the draft first.");
@@ -709,7 +709,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
       invoke("agent_send", { id: nativeId, prompt, yolo }).catch((err: unknown) => {
         if (nativeIdRef.current !== nativeId) return;
         const message = err instanceof Error ? err.message : String(err);
-        setBlocks((prev) => [...prev.filter((b) => b.id !== userId), { id: ++idRef.current, kind: "notice", text: message, tone: "error" }]);
+        setBlocks((prev) => [...prev.map((b) => b.id === userId && b.kind === "user" ? { ...b, notSent: true } : b), { id: ++idRef.current, kind: "notice", text: message, tone: "error" }]);
         setInput((draft) => draft || prompt);
         setRunning(false);
         runningRef.current = false;
@@ -787,7 +787,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
                 <div key={b.id} className="msg user">
                   <div className="message-header">
                     <span className="message-avatar user-avatar">Y</span>
-                    <div className="message-author"><strong>You</strong></div>
+                    <div className="message-author"><strong>You</strong>{b.notSent && <span className="message-unsent">Not sent</span>}</div>
                     <CopyButton text={b.text} />
                     <button type="button" className="memory-usage" aria-label="Remember this message" onClick={()=>onRemember(b.text)}><Icon name="memory" size={15}/></button>
                   </div>
