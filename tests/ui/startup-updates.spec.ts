@@ -36,11 +36,14 @@ test("update check is part of the first animation, before workspace or provider 
 
 test("verified startup update shows download progress then installation without opening the workspace", async ({ page }) => {
   await pendingLaunch(page);
-  await page.evaluate(() => (window as any).qa.update({ phase: "downloading", version: "0.6.9", downloaded: 40, total: 100 }));
-  await expect(page.locator("#startup-message")).toHaveText("Downloading Velum Code 0.6.9…");
+  const brandPosition = await page.locator(".startup-emblem").boundingBox();
+  await page.evaluate(() => (window as any).qa.update({ phase: "downloading", version: "0.6.10", downloaded: 40, total: 100 }));
+  await expect(page.locator("#startup-message")).toHaveText("Downloading Velum Code 0.6.10…");
   await expect(page.getByRole("progressbar", { name: "Startup update progress" })).toHaveAttribute("aria-valuenow", "40");
   await expect(page.locator("#startup-detail")).toHaveText("40%");
   await expect(page.locator(".startup-sweep")).toHaveCSS("animation-name", "none");
+  await expect.poll(() => page.locator(".startup-sweep").evaluate(element =>
+    element.getBoundingClientRect().width / element.parentElement!.getBoundingClientRect().width)).toBeCloseTo(.4, 2);
   // A late event must not rewind the current progress.
   await page.evaluate(() => (window as any).qa.emit("app-update-status", { ...(window as any).qa.updateStatus, revision: 0, downloaded: 5 }));
   await expect(page.locator("#startup-detail")).toHaveText("40%");
@@ -51,6 +54,7 @@ test("verified startup update shows download progress then installation without 
   await expect(page.locator("#startup-message")).toHaveText("Installing update…");
   await expect(page.locator("#startup-detail")).toHaveText("Velum Code will reopen automatically");
   await expect(page.getByRole("button", { name: "Open current version" })).toBeHidden();
+  expect((await page.locator(".startup-emblem").boundingBox())!.y).toBeCloseTo(brandPosition!.y, 1);
   await expectUnopened(page);
   expect(await page.evaluate(() => (window as any).qa.calls.some((c: any) => c.cmd === "updates_install"))).toBe(false);
 });
@@ -76,7 +80,7 @@ test("offline startup opens the current version and preserves recovered drafts",
 
 test("opening the current version cancels the startup operation before recovery", async ({ page }) => {
   await pendingLaunch(page);
-  await page.evaluate(() => (window as any).qa.update({ phase: "downloading", version: "0.6.9", downloaded: 10, total: 100 }));
+  await page.evaluate(() => (window as any).qa.update({ phase: "downloading", version: "0.6.10", downloaded: 10, total: 100 }));
   await page.getByRole("button", { name: "Open current version" }).click();
   await expect(page.locator("#startup")).toHaveCount(0);
   const calls = await page.evaluate(() => (window as any).qa.calls.map((c: any) => c.cmd));
@@ -87,7 +91,7 @@ test("opening the current version cancels the startup operation before recovery"
 for (const status of [
   { supported: false, automatic: true },
   { supported: true, automatic: false },
-  { supported: true, automatic: true, phase: "available", version: "0.6.9", error: "Previous installer did not finish; retry in Settings" },
+  { supported: true, automatic: true, phase: "available", version: "0.6.10", error: "Previous installer did not finish; retry in Settings" },
 ]) {
   test(`startup proceeds for ${JSON.stringify(status)}`, async ({ page }) => {
     await page.addInitScript(status => { (window as any).qaStartupStatus = status; }, status);

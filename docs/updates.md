@@ -2,7 +2,7 @@
 
 [Documentation](README.md) · [GitHub releases](https://github.com/velumix/VelumCode/releases)
 
-Starting with 0.6.8, the installed Windows app checks GitHub at the beginning
+Starting with 0.6.9, the installed Windows app checks GitHub at the beginning
 of its opening animation. **Automatic updates** is on by default. If a newer
 stable release is available, the animation shows download progress, then
 **Installing update…**. Velum verifies the installer's signature, installs
@@ -42,7 +42,7 @@ companion do not perform desktop updates.
 Versions through 0.6.5 do not contain an updater. Install the latest signed
 Windows bundle once to add it. Versions 0.6.6 and 0.6.7 can download the new
 version in Settings and require **Restart to update** once to install it.
-Automatic installation during launch starts with 0.6.8. The update
+Automatic installation during launch is available in the stable 0.6.9 release. The update
 feed only includes published stable GitHub releases; drafts and prereleases
 are excluded. Until the first release is published, Settings reports that
 the feed is unavailable.

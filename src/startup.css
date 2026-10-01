@@ -103,6 +103,7 @@
   font-size: 11px;
   cursor: pointer;
 }
+.startup-actions { height: 42px; }
 .startup-skip[hidden] { display: none; }
 .startup-skip:hover, .startup-skip:focus-visible { color: #e8eaed; border-color: #84baff; }
 .startup-skip:disabled { opacity: .5; cursor: default; }

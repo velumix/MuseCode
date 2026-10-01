@@ -88,7 +88,7 @@ CI artifacts require a GitHub sign-in and are retained for 14 days. These are un
 
 Prefer to build it yourself? See [Build from source](#build-from-source) below.
 
-Starting with 0.6.8, installed Windows copies check GitHub during the opening
+Starting with 0.6.9, installed Windows copies check GitHub during the opening
 animation, download signed updates, install silently and reopen automatically.
 Versions 0.6.6–0.6.7 need **Settings → Updates → Restart to update** once to add
 this startup behavior. GitHub builds future installers from version tags.

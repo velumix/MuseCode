@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use std::{
     io::{Read, Write},
     path::PathBuf,
-    process::{Child, Command, Stdio},
+    process::{Command, Stdio},
     time::{Duration, Instant},
 };
 
@@ -124,21 +124,33 @@ fn clean_profile(profile: &std::path::Path) {
     let Ok(base) = std::fs::canonicalize(std::env::temp_dir()) else {
         return;
     };
-    let Ok(target) = std::fs::canonicalize(profile) else {
-        return;
-    };
-    if target.parent() == Some(base.as_path())
-        && target
-            .file_name()
-            .is_some_and(|n| n.to_string_lossy().starts_with("velum-browser-"))
-        && std::fs::symlink_metadata(profile).is_ok_and(|m| !crate::workspace_tools::linked(&m))
-    {
-        let _ = std::fs::remove_dir_all(target);
+    let started = Instant::now();
+    loop {
+        // Revalidate before every recursive removal, including retries after a
+        // Windows sharing violation or a briefly open antivirus reader.
+        let Ok(target) = std::fs::canonicalize(profile) else {
+            return;
+        };
+        if target.parent() != Some(base.as_path())
+            || !target
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("velum-browser-"))
+            || !std::fs::symlink_metadata(profile)
+                .is_ok_and(|m| !crate::workspace_tools::linked(&m))
+        {
+            return;
+        }
+        match std::fs::remove_dir_all(target) {
+            Ok(()) => return,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+            Err(_) if started.elapsed() >= Duration::from_secs(2) => return,
+            Err(_) => std::thread::sleep(Duration::from_millis(50)),
+        }
     }
 }
 
 pub struct Browser {
-    child: Child,
+    child: Option<crate::child_process::Child>,
     profile: PathBuf,
     endpoint: String,
     node: PathBuf,
@@ -215,7 +227,7 @@ impl Browser {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        let mut child = match command.spawn() {
+        let mut child = match crate::child_process::Child::spawn(&mut command) {
             Ok(child) => child,
             Err(_) => {
                 let _ = std::fs::remove_dir(&profile);
@@ -250,14 +262,15 @@ impl Browser {
         let endpoint = match readiness {
             Ok(endpoint) => endpoint,
             Err(reason) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                // Close the owned job/group before deleting the profile. A
+                // browser descendant can outlive the direct process otherwise.
+                drop(child);
                 clean_profile(&profile);
                 return Err(reason);
             }
         };
         Ok(Self {
-            child,
+            child: Some(child),
             profile,
             endpoint,
             node: node.to_path_buf(),
@@ -302,8 +315,19 @@ fn ready_endpoint(client: &reqwest::blocking::Client, data: &str) -> Option<Stri
 impl Drop for Browser {
     fn drop(&mut self) {
         let _ = self.call("browser_close", &json!({}));
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Some(mut child) = self.child.take() {
+            // Give Browser.close a short chance to finish its profile writes.
+            // Dropping the job then stops every owned descendant and reaps the
+            // direct child even if the browser did not close cooperatively.
+            let started = Instant::now();
+            while started.elapsed() < Duration::from_millis(500) {
+                match child.try_wait() {
+                    Ok(None) => std::thread::sleep(Duration::from_millis(25)),
+                    _ => break,
+                }
+            }
+            drop(child);
+        }
         // This path was created here from a fixed prefix + UUID. Never remove
         // the user's browser profile or a tool-supplied path.
         clean_profile(&self.profile);
@@ -324,6 +348,40 @@ pub fn native(name: &str, args: &Value) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    fn profile_cleanup_retries_a_brief_windows_reader_lock() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let profile = std::env::temp_dir().join(format!("velum-browser-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&profile).unwrap();
+        let file = profile.join("locked-profile-data");
+        std::fs::write(&file, "fixture").unwrap();
+        let reader = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(3)
+            .open(&file)
+            .unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            drop(reader);
+        });
+        clean_profile(&profile);
+        release.join().unwrap();
+        assert!(
+            !profile.exists(),
+            "An owned profile remained after its reader closed"
+        );
+    }
+
+    #[test]
+    fn cleanup_preserves_directories_outside_the_owned_profile_prefix() {
+        let unrelated =
+            std::env::temp_dir().join(format!("velum-unrelated-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&unrelated).unwrap();
+        clean_profile(&unrelated);
+        assert!(unrelated.is_dir());
+        std::fs::remove_dir(unrelated).unwrap();
+    }
     #[test]
     fn native_helper_checks_window_ids_before_input() {
         if !cfg!(windows) {
