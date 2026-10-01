@@ -102,6 +102,7 @@ again after packaging.
 | --- | --- |
 | Velum Code 0.6.3 x64 installer | `661770b7940f7748db270b6ba562848d7646a112e426d1173d865787ad7a55da` |
 | Raw release executable | `bb7a3a113857dcbb5524104b1168e86355b1188c97090630ed24dede83a4e829` |
+| Installed executable | `dbf7b7786b0c5e1460b8df24e83968dbbbf2b32af6ff38f22d43119037690ff9` |
 
 The installer, raw executable, build manifest, 34 legal resources and debug/
 release verification reports are archived in the desktop workspace's
@@ -110,6 +111,25 @@ in `.qa/agent tools 1790828617099 & project/result.json` and
 `.qa/provider MCP 1790829274210/result.json` (latest path is also recorded in the
 archived `release-provider-mcp-verification.json`).
 
-**Installation is pending:** the existing installed 0.6.2 app is still running.
-The user was asked to finish work and fully quit from the tray before replacing
-the executable. No user conversation was interrupted to perform this update.
+### Installed application verification
+
+Velum Code **0.6.3 is installed** in `%LOCALAPPDATA%/Velum Code`. The previous
+app had exited before the silent NSIS update, which returned exit code zero.
+The installed executable reports version 0.6.3, and all 34 bundled legal files
+match the repository copies byte for byte. The only executable differences
+from the raw release build are Tauri's expected three-byte `UNK` to `NSS`
+bundle marker at offsets 9,470,364 through 9,470,366.
+
+Both smoke checks passed again against the installed executable: native tools
+and independent UI timing on the Muse, Codex and Antigravity fixture launch
+paths; plus real Muse/Codex adapter initialization and discovery without model
+requests. Antigravity's installed CLI configuration parsing also passed. The
+signed-in model-call limits described above still apply.
+
+Installed fixture evidence is in `.qa/agent tools 1790829934932 & project/`
+(`result.json` and `client-report.json`),
+`.qa/provider MCP 1790829934669/result.json`, and
+`.qa/legal-install-verification.json`. Copies are archived alongside the
+installer as `installed-tools-verification.json`,
+`installed-client-diagnostics.json`, `installed-provider-mcp-verification.json`
+and `installed-files-verification.json`.
