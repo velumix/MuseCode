@@ -49,5 +49,6 @@ about every future release, provider or device. Recent records:
 - [Provider access, September 29](provider-validation-2026-09-29.md).
 - [Phone and USB, September 29](phone-qa-2026-09-29.md).
 - [Legal/documentation audit, September 30](legal-audit-2026-09-30.md).
+- [Installed documentation update, September 30](qa-legal-install-2026-09-30.md).
 
 Older `qa-*.md` reports remain in this directory as historical records.

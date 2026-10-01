@@ -90,6 +90,7 @@ execution in their intended build environment before relying on a new installer.
 - Maintainer review of installer components, Android inventory, ownership and
   final packaged artifacts, including notices/source availability.
 
-The existing installed app and archived September 30 installers have not been
-replaced. Earlier binaries do not acquire the new resource files or acceptance
-behavior retroactively. See the [release guide](legal-release.md).
+At completion of this source audit, the installed app had not yet been replaced.
+The subsequent [installation record](qa-legal-install-2026-09-30.md) documents the
+successful rebuild, replacement and resource verification. Earlier archived
+binaries retain their original contents. See the [release guide](legal-release.md).
