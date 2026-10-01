@@ -8,6 +8,20 @@ import { chromium, expect } from "@playwright/test";
 import { checkStartup } from "./startup-smoke.mjs";
 
 if (process.platform !== "win32") throw new Error("This smoke test requires Windows/WebView2.");
+async function revealAssistant(page) {
+  const control=page.getByRole('button',{name:'Assistant settings',exact:true});
+  if(await control.count() && await control.getAttribute('aria-expanded')==='false') await control.click();
+}
+async function revealWorkspace(page) {
+  const chat=page.locator('.chat-wrap:not(.hidden)');
+  if(!await chat.getByLabel('Workspace directory').isVisible()) await chat.getByRole('button',{name:'Project folder',exact:true}).click();
+}
+async function pickProvider(page,provider) {
+  await revealAssistant(page); await page.getByLabel('AI provider').selectOption(provider);
+  await expect(page.getByLabel('AI provider')).toHaveValue(provider);
+  await revealAssistant(page); await revealWorkspace(page);
+}
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const installed = process.argv.includes("--installed");
 const release = installed || process.argv.includes("--release");
@@ -309,6 +323,7 @@ try {
   assert(!JSON.stringify(diagnostic).includes(runDir),'Diagnostics leaked the workspace path');
 
   // Validate workspace in the actual Rust backend, including a rejected path.
+  await revealWorkspace(page);
   await page.getByLabel("Workspace directory").fill(path.join(runDir, "missing"));
   await page.getByRole("button", { name: "Apply", exact: true }).click();
   await page.getByRole("alert").waitFor();
@@ -317,6 +332,7 @@ try {
   await page.waitForFunction((dir) => document.querySelector('[aria-label="Workspace directory"]')?.title === dir, runDir);
 
   async function chooseModel(label, effort = "High") {
+    await revealAssistant(page);
     await page.getByRole("button", { name: /^Model:/ }).click();
     await page.getByRole("option").getByText(label, { exact: true }).click();
     await page.getByRole("button", { name: /^Reasoning:/ }).click();
@@ -360,6 +376,30 @@ try {
 
   // Exercise memory through the actual Rust store and streaming CLI bridge.
   const memory = (request) => invoke("memory_request", { workspace: runDir, request });
+  async function checkReviewedLesson(provider) {
+    const lesson='Before editing '+provider+' work, keep unrelated changes outside the requested scope.';
+    const draft='Keep my next '+provider+' idea';
+    await composer.fill(draft);
+    await page.locator('.chat-wrap:not(.hidden)').getByRole('button',{name:'Correct response',exact:true}).last().click();
+    await page.getByLabel('What should change?',{exact:true}).fill('Keep the existing layout and focus on the requested change.');
+    await page.getByRole('checkbox',{name:'Remember a lesson for this project',exact:true}).check();
+    await page.getByLabel('Lesson for next time',{exact:true}).fill(lesson);
+    await page.getByRole('button',{name:'Send & save lesson',exact:true}).click();
+    await expect(page.locator('.chat-wrap:not(.hidden) .correction-composer')).toContainText('Lesson saved');
+    await done();
+    assert.equal(await composer.inputValue(),draft,'Correction replaced a newer draft');
+    const before=await memory({action:'list'});const note=before.notes.find(n=>n.body===lesson);
+    assert(note && note.pinned && note.status==='active' && note.scope==='project','Reviewed lesson was not active and scoped');
+    const repeated=await memory({action:'save_lesson',title:note.title,body:lesson});
+    assert.equal(repeated.notes.length,before.notes.length,'Repeated lesson created a duplicate');
+    assert.equal(repeated.notes.find(n=>n.id===note.id).revision,note.revision);
+    await page.getByRole('button',{name:'Back to the conversation',exact:true}).click();
+    await send('Recall reviewed lesson '+provider);await done();
+    const turn=records().find(r=>r.prompt==='Recall reviewed lesson '+provider);
+    assert(turn.input.includes(lesson),'Saved guidance did not reach '+provider+' input');
+    console.log('PASS: '+provider+' native correction, preserved draft, reviewed project lesson, idempotent save and future-turn recall');
+  }
+
   await send("MEMORY_FAIL");
   await page.locator(".notice.error").filter({hasText:"Muse exited unexpectedly (code Some(7))"}).waitFor();
   assert.equal((await memory({ action: "list" })).notes.length, 0, "Failed turn saved a memory");
@@ -403,6 +443,7 @@ try {
   await done();
   console.log("PASS: Stop kills descendants and accepts the next turn");
   await checkQueue('muse');
+  await checkReviewedLesson('muse');
 
   await composer.fill("draft preserved");
   await page.getByRole("button", { name: "Terminal", exact: true }).click();
@@ -484,7 +525,7 @@ try {
   assert(records().every((r) => !alive(r.pid)), "Closing the tab left native children running");
   console.log("PASS: closing a busy tab cleans up both sessions and opens a usable replacement");
   // Exercise the real ConPTY login bridge, nonce handling and account check.
-  await page.getByLabel("AI provider").selectOption("antigravity");
+  await pickProvider(page,"antigravity");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByLabel("Paste your authorization code").waitFor();
   await page.getByLabel("Paste your authorization code").fill("4/invalid-fixture-code");
@@ -500,7 +541,7 @@ try {
   assert(!readFileSync(logPath, "utf8").includes("fixture-code"), "Login code was logged");
   console.log("PASS: dedicated Antigravity login, rejected code, fresh retry, verified success and process cleanup");
   for (const provider of ["codex", "antigravity"]) {
-    await page.getByLabel("AI provider").selectOption(provider);
+    await pickProvider(page,provider);
     await composer.waitFor({ state: "visible" });
     await page.locator(".chat-wrap:not(.hidden)").getByLabel("Workspace directory").fill(runDir);
     if (await page.getByRole("button", { name: "Apply", exact: true }).count()) await page.getByRole("button", { name: "Apply", exact: true }).click();
@@ -532,11 +573,14 @@ try {
       await send('METRICS_CUMULATIVE');await done();await checkUsage(provider,'METRICS_CUMULATIVE',120);
       console.log('PASS: Codex per-turn and cumulative completion schemas both exclude earlier turns');
     }
+    assert(turns[0].input.includes("Before editing muse work"),"New provider did not receive the reviewed Muse lesson");
+    await checkReviewedLesson(provider);
     await send("FAIL");
     await page.locator(".chat-wrap:not(.hidden) .notice.error").filter({ hasText: "Provider fixture failure" }).waitFor();
     if(provider==='antigravity') {
       await send('DENIED');
       await page.locator('.chat-wrap:not(.hidden) .notice.error').filter({hasText:'Antigravity blocked a tool'}).waitFor();
+      await page.locator('.chat-wrap:not(.hidden) .agent-activity').filter({hasText:'An action needs attention'}).last().locator('.activity-toggle').click();
       assert.equal(await page.locator('.chat-wrap:not(.hidden) .tool-status').last().innerText(),'blocked');
       assert((await page.locator('.chat-wrap:not(.hidden) .msg.assistant').last().innerText()).includes('Reply: DENIED'));
       assert(!records().find(r=>r.prompt==='DENIED').args.includes('--dangerously-skip-permissions'));
@@ -561,7 +605,7 @@ try {
     await page.getByRole("tab", { selected: true }).locator(".tab-close").click();
     console.log(`PASS: ${provider} native stdin, resume isolation, failures, Stop, permissions and ConPTY`);
   }
-  await page.getByLabel("AI provider").selectOption("muse");
+  await pickProvider(page,"muse");
   await send("HOLD");
   for (let i = 0; i < 100 && records().filter((r) => r.kind === "descendant").length < 3; i++) await sleep(50);
   await page.getByRole("button", { name: "Close", exact: true }).click();

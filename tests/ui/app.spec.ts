@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-import { boot } from "./fixture";
+import {boot, pickProvider, revealAssistant} from "./fixture";
 const composer = (page: Page) => page.locator(".chat-wrap:not(.hidden) textarea");
 
 test('memory cannot close or prompt to discard while a save is pending',async({page})=>{
@@ -102,9 +102,10 @@ test("model and reasoning changes preserve the conversation and persist per prov
   await expect(composer(page)).toHaveValue("Keep my draft");
   await expect(page.locator(".msg.assistant")).toContainText("Existing answer");
   expect(await page.evaluate(() => (window as any).qa.calls.filter((c: any) => c.cmd === "agent_new").length)).toBe(registrations);
-  await page.getByLabel("AI provider").selectOption("codex");
+  await pickProvider(page,"codex");
   await expect(page.getByRole("button", { name: "Model: Deep model", exact: true })).toBeVisible();
   await page.getByRole("tab").first().click();
+  await revealAssistant(page);
   await expect(page.getByRole("button", { name: "Reasoning: Maximum", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Model: Deep model", exact: true }).click();
   await page.getByRole("option", { name: /^Fast model/ }).click();
@@ -113,9 +114,10 @@ test("model and reasoning changes preserve the conversation and persist per prov
   await expect(page.getByRole("option", { name: /^Maximum/ })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "Reasoning: Low", exact: true })).toBeFocused();
-  await page.getByLabel("AI provider").selectOption("codex");
-  await page.getByLabel("AI provider").selectOption("muse");
+  await pickProvider(page,"codex");
+  await pickProvider(page,"muse");
   await page.reload();
+  await revealAssistant(page);
   await expect(page.getByRole("button", { name: "Model: Fast model", exact: true })).toBeVisible();
   expect(await page.evaluate(() => (window as any).qa.calls.findLast((c: any) => c.cmd === "agent_new").args.options)).toEqual({ model: "muse-fast", reasoning: "low" });
 });
@@ -197,7 +199,7 @@ test("Antigravity sign-in keeps codes out of conversations and preserves drafts"
   await boot(page);
   await page.evaluate(() => { (window as any).qa.antigravityInstalled = true; });
   await page.getByLabel("Refresh providers and models").click();
-  await page.getByLabel("AI provider").selectOption("antigravity");
+  await pickProvider(page,"antigravity");
   await composer(page).fill("Keep this draft");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Connect Antigravity" });
@@ -216,7 +218,7 @@ test("Antigravity sign-in keeps codes out of conversations and preserves drafts"
 
 test("Antigravity authentication errors open sign-in and retries replace the session", async ({ page }) => {
   await boot(page);
-  await page.getByLabel("AI provider").selectOption("antigravity");
+  await pickProvider(page,"antigravity");
   await composer(page).fill("Start task"); await composer(page).press("Enter");
   await page.evaluate(() => (window as any).qa.agent({ kind: "turn_end", status: "failed", reason: "Please sign in to use Antigravity" }));
   await expect(page.getByRole("dialog")).toBeVisible();
@@ -231,7 +233,7 @@ test("Antigravity authentication errors open sign-in and retries replace the ses
 test("providers keep separate conversations, drafts and terminal sessions", async ({ page }) => {
   await boot(page);
   await composer(page).fill("My Muse draft");
-  await page.getByLabel("AI provider").selectOption("codex");
+  await pickProvider(page,"codex");
   await expect(page.getByRole("tab")).toHaveCount(2);
   await expect(page.getByRole("textbox", { name: "Message Codex", exact: true })).toBeVisible();
   await composer(page).fill("Codex conversation");
@@ -243,7 +245,7 @@ test("providers keep separate conversations, drafts and terminal sessions", asyn
   await page.getByRole("tab").first().click();
   await expect(composer(page)).toHaveValue("My Muse draft");
   await expect(page.getByLabel("AI provider")).toHaveValue("muse");
-  await page.getByLabel("AI provider").selectOption("antigravity");
+  await pickProvider(page,"antigravity");
   await expect(page.getByText("CLI not installed", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Setup", exact: true })).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
@@ -375,6 +377,8 @@ test("terminal-only final answer and failures are visible; interrupted tools sto
   await send(page, "Another turn");
   await event(page, { kind: "tool_start", task_id: "tool-1", name: "powershell" });
   await page.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(page.locator('.activity-toggle')).toContainText('Activity stopped');
+  await page.locator('.activity-toggle').click();
   await expect(page.locator(".tool-status")).toHaveText("cancelled");
   await send(page, "Fail this turn");
   await event(page, { kind: "turn_end", status: "failed" });
@@ -432,7 +436,9 @@ test("tools, todos, markdown, multi-tab isolation and terminal search work", asy
   await event(page, { kind: "assistant_delta", text: "**Review complete**\n\n```js\nconst x = 1;\n```\n\n[Docs](https://example.com)" });
   await event(page, { kind: "turn_end", status: "completed" });
   await expect(page.locator(".md strong")).toHaveText("Review complete");
+  await page.locator('.task-progress > summary').click();
   await expect(page.locator(".todos")).toContainText("Check tests");
+  await page.locator('.activity-toggle').click();
   await page.locator(".tool-head").click();
   await expect(page.locator(".tool-output.full")).toContainText("h");
   await page.getByRole("link", { name: "Docs" }).click();

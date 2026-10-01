@@ -1,11 +1,11 @@
 import {test, expect} from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import {boot} from './fixture';
+import {boot, pickProvider} from './fixture';
 
 test('a project path entered while a provider starts survives its late registration', async ({page}) => {
   await boot(page);
   await page.evaluate(() => { (window as any).qa.holdAgentNew = true; });
-  await page.getByLabel('AI provider').selectOption('codex');
+  await pickProvider(page,'codex');
   await page.waitForFunction(() => typeof (window as any).qa.releaseAgentNew === 'function');
   const field = page.locator('.chat-wrap:not(.hidden)').getByLabel('Workspace directory');
   await field.fill('C:\\My selected project');

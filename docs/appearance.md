@@ -31,6 +31,8 @@ Terminal colors follow the theme. Text size, line spacing, cursor style, blinkin
 
 Choose **Enter** or **Ctrl / ⌘ + Enter** to send a desktop message, the initial display of tool output, and the provider for new conversations. Existing conversations retain their provider. Background notification controls use the existing Windows notification preference.
 
+**Compact assistant controls** keeps model and provider choices behind **Assistant settings**. **Group agent activity** combines consecutive actions into an expandable summary, with failed or blocked actions visible while closed. Both default to on. Tool output preferences still control the individual actions inside an expanded group. See [the conversation guide](conversation-experience.md).
+
 ## Save, share, and restore
 
 Desktop settings are stored atomically in `appearance.json` in Tauri's per-user application configuration directory. Browser storage is a secondary cache. A save failure remains visible in Settings with a retry action.

@@ -28,6 +28,20 @@ assert.equal(
   "0",
   "Quit Velum Code before this isolated test.",
 );
+async function revealAssistant(page) {
+  const control=page.getByRole('button',{name:'Assistant settings',exact:true});
+  if(await control.count() && await control.getAttribute('aria-expanded')==='false') await control.click();
+}
+async function revealWorkspace(page) {
+  const chat=page.locator('.chat-wrap:not(.hidden)');
+  if(!await chat.getByLabel('Workspace directory').isVisible()) await chat.getByRole('button',{name:'Project folder',exact:true}).click();
+}
+async function pickProvider(page,provider) {
+  await revealAssistant(page); await page.getByLabel('AI provider').selectOption(provider);
+  await expect(page.getByLabel('AI provider')).toHaveValue(provider);
+  await revealAssistant(page); await revealWorkspace(page);
+}
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const installed = process.argv.includes("--installed");
 const release = installed || process.argv.includes("--release");
@@ -341,7 +355,7 @@ try {
   await composer().fill("Unsent Muse draft");
   const museId = records().find((r) => r.kind === "turn").args;
   const museSession = museId[museId.indexOf("--session-id") + 1];
-  await page.getByLabel("AI provider").selectOption("codex");
+  await pickProvider(page,"codex");
   await expect(composer()).toBeEnabled();
   await send("Codex before restart");
   await composer().fill("Unsent Codex draft");

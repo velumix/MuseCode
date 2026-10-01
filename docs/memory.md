@@ -20,6 +20,12 @@ Settings apply per workspace:
 
 The app asks for at most two concise suggestions in the existing agent response. It does not make a second model call. Suggestions are accepted only after a successful process exit and completed turn. Malformed, oversized, or obvious credential-bearing suggestions are rejected; exact duplicates are not stored again. This is format-based capture, not a guarantee that every provider will identify every useful fact. **Remember** and **New note** are independent of model cooperation.
 
+## Lessons from corrections
+
+Use **Correct response** below an answer to explain what should change. Optionally select **Remember a lesson for this project**, review the wording, and send. An accepted correction saves that reviewed lesson as an active, pinned project note. It preserves a matching note's identity, avoiding duplicates when a save is retried. Bot conversations use the bot's private memory. You can edit or archive these notes through the normal editor.
+
+Automatic suggestions can include lessons from user-confirmed corrections. A provider error alone does not establish a lesson. Under the default review mode, proposed notes wait for approval; **Memory** shows the number waiting. [The conversation guide](conversation-experience.md) explains the correction flow and recovery after a failed send or save.
+
 ## Files and Obsidian
 
 The default location is the Windows Documents folder under `Velum Code/Memory`. Choose **Memory settings → Open vault folder** to locate it, then open that folder as an Obsidian vault if desired. A redirected Documents folder follows Windows' configured location; Velum does not add its own sync service.

@@ -343,6 +343,8 @@ test("Enter preference, collapsed tools, and default provider apply to conversat
     qa.agent({ kind: "turn_end", status: "completed", text: "Done" });
   });
   await expect(page.locator(".tool-output")).toHaveCount(0);
+  await page.locator('.activity-toggle').click();
+  await expect(page.locator(".tool-output")).toHaveCount(0);
   await page.locator(".tool-head").click();
   await expect(page.locator(".tool-output")).toContainText(
     "Hidden tool output",

@@ -5,7 +5,7 @@ import Icon from "./Icon";
 import "./ModelControls.css";
 const effortLabels: Record<string, string> = { none: "None", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Maximum", ultra: "Ultra" };
 const effortDescriptions: Record<string, string> = { none: "No extra reasoning", minimal: "Lightest reasoning", low: "Quicker responses for straightforward work", medium: "A balance of speed and depth", high: "More thought for complex work", xhigh: "Deeper reasoning; takes longer", max: "Maximum depth for demanding tasks", ultra: "The provider's highest reasoning setting" };
-export default function ModelControls({ provider, options, onChange, load, disabled, refreshKey = 0, children, onRefresh, refreshLabel = "Refresh available models" }: { provider: Provider; options: RunOptions; onChange: (options: RunOptions) => Promise<void>; load: (provider: Provider, refresh: boolean) => Promise<ModelCatalog>; disabled?: boolean; refreshKey?: number; children?: ReactNode; onRefresh?: () => void; refreshLabel?: string }) {
+export default function ModelControls({ provider, options, onChange, load, disabled, refreshKey = 0, children, onRefresh, onSummary, refreshLabel = "Refresh available models" }: { provider: Provider; options: RunOptions; onChange: (options: RunOptions) => Promise<void>; load: (provider: Provider, refresh: boolean) => Promise<ModelCatalog>; disabled?: boolean; refreshKey?: number; children?: ReactNode; onRefresh?: () => void; onSummary?: (model: string, reasoning: string) => void; refreshLabel?: string }) {
   const [catalog, setCatalog] = useState<ModelCatalog>({ models: [], notice: null });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -49,6 +49,10 @@ export default function ModelControls({ provider, options, onChange, load, disab
     void apply(effective, true);
   }, [ready, disabled, busy, loadKey, options.model, options.reasoning, effective.model, effective.reasoning]);
   const display = unresolved ? options : effective;
+  const summary = useRef(onSummary); summary.current = onSummary;
+  useEffect(() => {
+    if (ready) summary.current?.(model?.label || display.model || 'Choose model', effortLabels[display.reasoning] || display.reasoning);
+  }, [ready, model?.label, display.model, display.reasoning]);
   const choices = catalog.models.map((m) => ({ id: m.id, label: m.label, description: m.description || m.id }));
   if (effective.model && !model) choices.push({ id: effective.model, label: effective.model, description: "Saved model ID · not in the current catalog" });
   choices.push({ id: "__custom", label: "Enter model ID…", description: "Use a model or alias you have configured" });

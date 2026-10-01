@@ -33,6 +33,7 @@ export default function MemoryPanel({
   openVault,
   seed,
   ownerName,
+  initialFilter = 'active',
 }: {
   request: (request: MemoryRequest) => Promise<MemoryView>;
   onClose: () => void;
@@ -40,6 +41,7 @@ export default function MemoryPanel({
   openVault?: () => Promise<unknown>;
   seed?: string;
   ownerName?: string;
+  initialFilter?: 'active' | 'pending' | 'archived';
 }) {
   const [view, setView] = useState<MemoryView | null>(null);
   const [excerpt] = useState(() => seedExcerpt(seed || ""));
@@ -48,7 +50,7 @@ export default function MemoryPanel({
   );
   const [dirty, setDirty] = useState(!!seed);
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState("active");
+  const [filter, setFilter] = useState<string>(initialFilter);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirm, setConfirm] = useState<"discard" | "delete" | null>(null);

@@ -24,6 +24,7 @@ export interface MemoryView {
 }
 export type MemoryRequest =
   | { action: "list"; query: string }
+  | { action: "save_lesson"; title: string; body: string }
   | ({ action: "save"; id: string | null; revision: string | null } & Pick<
       MemoryNote,
       "title" | "body" | "tags" | "scope" | "status" | "pinned"

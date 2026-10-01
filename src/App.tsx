@@ -15,7 +15,7 @@ const RemotePanel = lazy(() => import("./components/RemotePanel"));
 import type { PaletteAction } from "./components/CommandPalette";
 import "./App.css";
 import "./appearance.css";
-import { getPreferences } from "./preferences";
+import { getPreferences, usePreferences } from "./preferences";
 const SettingsPanel = lazy(() => import("./components/SettingsPanel"));
 import ProviderPicker from "./components/ProviderPicker";
 import ChoiceMenu from './components/ChoiceMenu';
@@ -91,6 +91,7 @@ function statusText(tab: Tab): string {
 }
 
 export default function App() {
+  const {settings} = usePreferences();
   const [recovery] = useState(loadDesktop);
   const [tabs, setTabs] = useState<Tab[]>(() => recovery.tabs.length ? recovery.tabs.map((saved, i) => ({ ...createTab(i + 1, saved.provider), ...saved })) : [createTab(1)]);
   const [activeId, setActiveId] = useState<string>(() => recovery.activeId);
@@ -104,7 +105,8 @@ export default function App() {
   useEffect(()=>{void refreshBots().catch(()=>{});const registration=listen('bots-changed',()=>void refreshBots().catch(()=>{}));return()=>{void registration.then(off=>off());};},[refreshBots]);
   const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
   const [pluginPanel, setPluginPanel] = useState<{ selection?: PluginSelection } | null>(null);
-  const [memory, setMemory] = useState<{workspace:string;seed?:string;bot_id?:string}|null>(null);
+  const [memory, setMemory] = useState<{workspace:string;seed?:string;bot_id?:string;initialFilter?:'active'|'pending'}|null>(null);
+  const [guidanceReviewCount, setGuidanceReviewCount] = useState(0);
   const [boardWorkspace, setBoardWorkspace] = useState<string | null>(null);
   const [desktop, setDesktop] = useState<DesktopStatus>({ notifications_enabled: true, last_error: null });
   const [desktopMessage, setDesktopMessage] = useState<{ text: string; error: boolean } | null>(() => recoveryError ? { text: recoveryError, error: true } : null);
@@ -439,6 +441,22 @@ export default function App() {
   }, []);
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[0];
+  useEffect(()=>{
+    let disposed = false, generation = 0;
+    setGuidanceReviewCount(0);
+    const workspace = activeTab?.workspace, botId = activeTab?.bot_id;
+    if (!workspace) return;
+    const refresh = async () => {
+      const version = ++generation;
+      try {
+        const view = await invoke<MemoryView>(botId?'bots_memory':'memory_request',{id:botId,workspace,request:{action:'list',query:''}});
+        if(!disposed && version===generation) setGuidanceReviewCount(view.notes.filter(note=>note.status==='pending').length);
+      } catch { if(!disposed && version===generation) setGuidanceReviewCount(0); }
+    };
+    void refresh();
+    const registration = listen('memory-changed',()=>void refresh());
+    return ()=>{disposed=true;void registration.then(off=>off()).catch(()=>{});};
+  },[activeTab?.workspace,activeTab?.bot_id]);
   const failed = activeTab && (tabStatus(activeTab).kind === "error" || tabStatus(activeTab).kind === "exited");
 
   const paletteActions: PaletteAction[] = [
@@ -514,12 +532,12 @@ export default function App() {
           </div>
         )}
         {activeTab?.mode === "terminal" && <button type="button" className="status-btn" onClick={clearActive}>Clear</button>}
-        <button type="button" className="status-btn" disabled={!activeTab?.workspace} onClick={()=>{if(activeTab?.workspace)setMemory({workspace:activeTab.workspace,bot_id:activeTab.bot_id});}}><Icon name="memory" size={17}/>Memory</button>
+        <button type="button" aria-label="Memory" title={guidanceReviewCount ? `${guidanceReviewCount} suggestions to review` : "Project guidance and saved notes"} className="status-btn" disabled={!activeTab?.workspace} onClick={()=>{if(activeTab?.workspace)setMemory({workspace:activeTab.workspace,bot_id:activeTab.bot_id,initialFilter:guidanceReviewCount?'pending':'active'});}}><Icon name="memory" size={17}/><span>Memory</span>{guidanceReviewCount>0&&<span className="guidance-review-count" aria-label={`${guidanceReviewCount} suggestions to review`}>{guidanceReviewCount}</span>}</button>
         <button type="button" className={`restart-btn${failed ? " primary" : ""}`} onClick={restartActive} aria-label="Restart" title="Restart this session">
           <Icon name="reset" size={17} />
         </button>
       </div>
-      {activeTab && <ProviderPicker key={activeTab.id} value={activeTab.provider} options={activeTab.options} onOptionsChange={(options) => configure(activeTab, options)} disabled={activeTab.agentStatus.kind === "starting" || activeTab.agentStatus.kind === "running" || (activeTab.agentStatus.queued ?? 0) > 0} terminal={activeTab.mode === "terminal"} failure={activeTab.agentStatus.kind === "error" ? activeTab.agentStatus.message : undefined} onChange={(provider) => { if (provider !== activeTab.provider) openProvider(provider); }}
+      {activeTab && <ProviderPicker compact={settings.compactControls} key={activeTab.id} value={activeTab.provider} options={activeTab.options} onOptionsChange={(options) => configure(activeTab, options)} disabled={activeTab.agentStatus.kind === "starting" || activeTab.agentStatus.kind === "running" || (activeTab.agentStatus.queued ?? 0) > 0} terminal={activeTab.mode === "terminal"} failure={activeTab.agentStatus.kind === "error" ? activeTab.agentStatus.message : undefined} onChange={(provider) => { if (provider !== activeTab.provider) openProvider(provider); }}
         botPicker={activeTab.mode === 'agent' && <ChoiceMenu label="Bot" value={activeTab.bot_id||'provider'} choices={[{id:'provider',label:'Provider assistant',description:'Use the CLI without a custom personality'},...bots.filter(b=>b.enabled).map(b=>({id:b.id,label:b.name,description:b.role||providerNames[b.provider]})),{id:'manage',label:'Create or edit bots…'}]} onChange={id=>{
             if(id==='manage')setBotPanel('manage');
             else if(id==='provider')openProvider(activeTab.provider,false);
@@ -584,7 +602,7 @@ export default function App() {
       {remoteOpen && <Suspense fallback={null}><RemotePanel onClose={() => setRemoteOpen(false)} /></Suspense>}
       {boardWorkspace && <Suspense fallback={null}><KanbanPanel workspace={boardWorkspace} bots={bots} previewSchedule={(cron,timezone)=>invoke('automation_request',{request:{action:'preview',cron,timezone}})} request={request=>invoke<Board>("kanban_request",{workspace:boardWorkspace,request})} onClose={()=>setBoardWorkspace(null)} onWork={workOnCard}/></Suspense>}
       {pluginPanel && <Suspense fallback={null}><PluginPanel plugins={plugins} selection={pluginPanel.selection} onClose={() => setPluginPanel(null)} onRefresh={refreshPlugins} workspace={activeTab?.workspace || ""} messages={() => pluginHandles.current.get(activeTab?.id)?.messages() || []} onInsert={text => { pluginHandles.current.get(activeTab?.id)?.insert(text); focusComposer(); }} /></Suspense>}
-      {memory&&<Suspense fallback={null}><MemoryPanel ownerName={bots.find(b=>b.id===memory.bot_id)?.name} seed={memory.seed} onClose={()=>setMemory(null)} request={(request)=>invoke<MemoryView>(memory.bot_id?'bots_memory':'memory_request',{workspace:memory.workspace,request,id:memory.bot_id})} openVault={()=>memory.bot_id?invoke('bots_open',{id:memory.bot_id,memory:true}):invoke("memory_open")}/></Suspense>}
+      {memory&&<Suspense fallback={null}><MemoryPanel initialFilter={memory.initialFilter} ownerName={bots.find(b=>b.id===memory.bot_id)?.name} seed={memory.seed} onClose={()=>setMemory(null)} request={(request)=>invoke<MemoryView>(memory.bot_id?'bots_memory':'memory_request',{workspace:memory.workspace,request,id:memory.bot_id})} openVault={()=>memory.bot_id?invoke('bots_open',{id:memory.bot_id,memory:true}):invoke("memory_open")}/></Suspense>}
       {botPanel&&<Suspense fallback={null}><BotsPanel initialPage={botPanel==='activity'?'activity':'profiles'} openMemory={id=>invoke('bots_open',{id,memory:true})} workspace={activeTab?.workspace||''} provider={activeTab?.provider||'muse'} options={activeTab?.options||{model:'',reasoning:''}} request={request=>invoke<BotView>('bots_request',{request})} automation={request=>invoke('automation_request',{request})} memory={(id,request)=>invoke<MemoryView>('bots_memory',{id,workspace:activeTab?.workspace||'',request})} loadModels={(provider,refresh)=>invoke<ModelCatalog>('provider_models',{provider,refresh})} openFolder={id=>invoke('bots_open',{id})} onClose={()=>setBotPanel(null)} chatLabel={botPanel==='handoff'?'Hand off':'Chat'} onChat={openBot} onChange={()=>void refreshBots()}/></Suspense>}
     </div>
   );

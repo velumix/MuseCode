@@ -10,6 +10,20 @@ import { chromium, expect } from '@playwright/test';
 
 assert(process.argv.includes('--live'), 'Pass --live to run signed-in provider turns.');
 assert.equal(process.platform, 'win32');
+async function revealAssistant(page) {
+  const control=page.getByRole('button',{name:'Assistant settings',exact:true});
+  if(await control.count() && await control.getAttribute('aria-expanded')==='false') await control.click();
+}
+async function revealWorkspace(page) {
+  const chat=page.locator('.chat-wrap:not(.hidden)');
+  if(!await chat.getByLabel('Workspace directory').isVisible()) await chat.getByRole('button',{name:'Project folder',exact:true}).click();
+}
+async function pickProvider(page,provider) {
+  await revealAssistant(page); await page.getByLabel('AI provider').selectOption(provider);
+  await expect(page.getByLabel('AI provider')).toHaveValue(provider);
+  await revealAssistant(page); await revealWorkspace(page);
+}
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runDir = path.join(root, '.qa', `providers-verified-${Date.now()}`);
 const workspace = path.join(runDir, "project ' & spaces");
@@ -181,7 +195,7 @@ try {
   // Also drive the installed React controls, not just named native commands.
   await invoke('desktop_show');
   for(const provider of metricsOnly?[]:providers) {
-    await page.getByLabel('AI provider').selectOption(provider);
+    await pickProvider(page,provider);
     const chat=page.locator('.chat-wrap:not(.hidden)');
     const composer=chat.locator('.composer textarea');
     await expect(composer).toBeEnabled();

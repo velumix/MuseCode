@@ -1,6 +1,40 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+test('phone corrections keep drafts and save reviewed project guidance',async({page})=>{
+  const remote=await boot(page,true,true,'codex',false);
+  await expect(page.locator('.phone-assistant-controls')).not.toHaveAttribute('open','');
+  const draft=page.getByRole('textbox',{name:'Message your desktop agent'});await draft.fill('Keep my next thought');
+  await page.getByRole('button',{name:'Correct response',exact:true}).click();
+  await page.getByLabel('What should change?',{exact:true}).fill('Explain what was changed before listing implementation details.');
+  await page.getByRole('checkbox',{name:'Remember a lesson for this project',exact:true}).check();
+  await page.getByLabel('Lesson for next time',{exact:true}).fill('Start summaries with the outcome and the next action.');
+  for(const [width,height] of [[390,844],[844,390],[320,568]]){
+    await page.setViewportSize({width,height});
+    expect(await page.locator('.phone-transcript').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
+    await expect(page.getByRole('button',{name:'Send message',exact:true})).toBeInViewport();
+  }
+  await page.setViewportSize({width:390,height:844});
+  await page.screenshot({path:'.qa/focus-ux-phone.png',animations:'disabled'});
+  expect((await new AxeBuilder({page}).include('.correction-composer').withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations).toEqual([]);
+  await page.getByRole('button',{name:'Send & save lesson',exact:true}).click();
+  await expect(page.getByRole('region',{name:'Correct this response'})).toContainText('Lesson saved');
+  await expect(draft).toHaveValue('Keep my next thought');expect(remote.sends).toHaveLength(1);
+  expect(remote.sends[0]).toContain('What to change');expect(remote.memory.notes[0].body).toBe('Start summaries with the outcome and the next action.');
+  expect(remote.memory.notes[0].scope).toBe('project');expect(remote.memory.notes[0].pinned).toBe(true);
+});
+test('a phone retries only the lesson save and view-only devices have no correction actions',async({page})=>{
+  const remote=await boot(page,true,true,'muse',false);remote.failMemorySave=true;
+  await page.getByRole('button',{name:'Correct response',exact:true}).click();
+  await page.getByLabel('What should change?',{exact:true}).fill('Use the existing design tokens.');
+  await page.getByRole('checkbox',{name:'Remember a lesson for this project',exact:true}).check();
+  await page.getByRole('button',{name:'Send & save lesson',exact:true}).click();
+  await expect(page.locator('.correction-error')).toContainText('Correction sent');remote.failMemorySave=false;
+  await page.getByRole('button',{name:'Retry saving lesson',exact:true}).click();
+  await expect(page.getByRole('region',{name:'Correct this response'})).toContainText('Lesson saved');expect(remote.sends).toHaveLength(1);
+  await boot(page,true,false,'muse',false);await expect(page.getByRole('button',{name:'Correct response',exact:true})).toHaveCount(0);
+});
+
 test('phone appearance is local, responsive, and preserves the draft', async ({ page }) => {
   const remote = await boot(page);
   const input = page.getByRole('textbox', {name:'Message your desktop agent'});
@@ -53,9 +87,9 @@ test('phone replays the original Muse retry deadline and clears it after recover
   await expect(page.locator('.phone-message.assistant').last()).toContainText('Recovered');
 });
 
-async function boot(page: Page, paired = true, control = true, provider = "muse") {
+async function boot(page: Page, paired = true, control = true, provider = "muse", configure = true) {
   const remote = {
-    paired, control, pending: false, failSend: false, revoked: false, sends: [] as string[],
+    paired, control, pending: false, failSend: false, failMemorySave: false, revoked: false, sends: [] as string[],
     memory: {root:"C:\\Vault",settings:{enabled:true,capture:"review",budget_bytes:3000},notes:[] as any[],warning:null},
     board: {revision:0,cards:[] as any[],trash:[] as any[]},
     bots:{profiles:[] as any[],root:'C:\\Bots',warnings:[]},jobs:{enabled:true,jobs:[] as any[],runs:[] as any[],warning:null},
@@ -101,6 +135,10 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
       expect(request.headers()["x-muse-request"]).toBe("1");
       if(body.action!=="list"&&!control)return answer({error:"View only"},403);
       if(body.action==="save")remote.memory.notes=[{...body,id:"phone-note",revision:"r1",source:"Saved by you",created_at:1,updated_at:1}];
+      if(body.action==='save_lesson'){
+        if(remote.failMemorySave)return answer({error:'Fixture could not save the lesson'},500);
+        if(!remote.memory.notes.some(note=>note.scope==='project'&&note.body===body.body&&note.pinned))remote.memory.notes.push({...body,id:'lesson-note',revision:'r1',tags:['lesson','correction'],scope:'project',status:'active',pinned:true,source:'Reviewed correction',created_at:1,updated_at:1});
+      }
       return answer(remote.memory);
     }
     if(url.pathname.endsWith("/kanban")) {
@@ -156,6 +194,7 @@ async function boot(page: Page, paired = true, control = true, provider = "muse"
     return answer({ error: "Not found" }, 404);
   });
   await page.goto(`/remote.html${paired ? "" : "#pair=one-use-test-invitation"}`);
+  if(paired && configure)await page.locator('.phone-assistant-controls > summary').click();
   return remote;
 }
 

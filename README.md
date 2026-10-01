@@ -40,6 +40,7 @@ So I made it. **Velum Code is the app I built around that idea.** It started as 
 | **Choose the model and depth.** | Model catalogs from your CLIs, reasoning levels for each model, and preferences that carry into new conversations. |
 | **Give the agent its bearings.** | A project folder picker, access checks, automatic app context, and previewable diagnostics and chat layout attachments on desktop and phone. [How context works](docs/project-context.md). |
 | **Keep what matters.** | A local Markdown memory vault, shared preferences, project notes, and selective recall with a strict context budget. Edit the same notes on desktop, phone, or in Obsidian. |
+| **Stay with the idea.** | Folded assistant controls, quiet activity summaries, and editable starters keep attention on creating. Correct a response and optionally save a reviewed project lesson. [Conversation guide](docs/conversation-experience.md). |
 | **Make it your own.** | A permission-based plugin system, command palette integration, and a small TypeScript SDK. Plugins run on demand in isolated workers. |
 | **A team with personality.** | Named bots with profile pictures, editable soul.md and agent.md, preferred models and reasoning, and private memory that follows them across providers. |
 | **Work that keeps moving.** | Kanban assignments create cron jobs. Bots update cards and hand off to teammates, with pause/stop controls and a clear activity history. |

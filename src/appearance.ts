@@ -236,6 +236,8 @@ export interface AppearanceValues {
   alwaysShowCopy: boolean;
   sendShortcut: "enter" | "ctrl-enter";
   toolOutput: "preview" | "collapsed" | "expanded";
+  compactControls: boolean;
+  groupActivity: boolean;
   terminalFontSize: number;
   terminalLineHeight: number;
   terminalCursor: "bar" | "block" | "underline";

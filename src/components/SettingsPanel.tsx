@@ -1025,6 +1025,8 @@ export default function SettingsPanel({
                         a new line.
                       </p>
                     )}
+                    {toggle("compactControls", "Compact assistant controls", "Keep provider and model controls folded until you need them.")}
+                    {toggle("groupActivity", "Group agent activity", "Keep actions together so the response stays easy to follow. Open a group for the full details.")}
                     {select(
                       "toolOutput",
                       "Tool output by default",

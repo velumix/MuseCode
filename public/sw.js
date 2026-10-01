@@ -1,6 +1,6 @@
 // Offline launch caches only the phone shell. Messages, API responses, and QR
 // pairing data never enter Cache Storage. Commands are never queued offline.
-const CACHE = "velum-phone-v8";
+const CACHE = "velum-phone-v9";
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then(async (cache) => {
     await cache.addAll(["/", "/manifest.webmanifest", "/velum-192.png", "/velum-512.png"]);

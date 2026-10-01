@@ -109,8 +109,11 @@ body { background: var(--phone-bg); }
   .phone-header h1, .phone-session-select .phone-eyebrow { display: none; }
   .phone-header > svg { width: 24px; height: 24px; }
   .phone-session-select { padding: 4px 15px; }
+  .phone-app .phone-session-select { min-height: 44px; }
+  .phone-app .phone-models { padding-block: 0; }
   .phone-transcript { padding-top: 12px; padding-bottom: 12px; }
   .phone-composer > form textarea { height: 44px; }
+  .phone-composer > form { padding: 5px; }
   .phone-app .phone-composer-note { display: none; }
   .phone-app .usage-summary { font-size: calc(10px * var(--ui-scale)); }
   .phone-latest { bottom: 130px; }
@@ -120,7 +123,7 @@ body { background: var(--phone-bg); }
   .phone-header { grid-column: 1; grid-row: 1; }
   .phone-tools { grid-column: 2; grid-row: 1; }
   .phone-conversations { grid-column: 1; grid-row: 2; }
-  .phone-models { grid-column: 2; grid-row: 2; }
+  .phone-assistant-controls { grid-column: 2; grid-row: 2; }
   .phone-transcript { grid-column: 1; grid-row: 3; }
   .phone-composer { grid-column: 2; grid-row: 3; overflow: auto; border-left: 1px solid var(--accent-border); }
   .phone-settings, .phone-reconnect { position: absolute; top: 44px; right: 0; z-index: 6; max-width: 100%; }
@@ -131,7 +134,7 @@ body { background: var(--phone-bg); }
 @media (max-height: 220px) {
   .phone-app { display: flex; }
   .phone-app .phone-header, .phone-app .phone-tools, .phone-app .phone-conversations,
-  .phone-app .phone-models, .phone-app .usage-strip, .phone-app .phone-latest { display: none; }
+  .phone-app .phone-assistant-controls, .phone-app .usage-strip, .phone-app .phone-latest { display: none; }
   .phone-transcript { padding: 0 15px; }
   .phone-composer { padding: 3px 12px; overflow: auto; }
   .phone-composer > form { padding: 4px; }

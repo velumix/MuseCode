@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import Markdown from "./Markdown";
@@ -12,6 +12,10 @@ import type { BotIdentity } from '../bots';
 import BotAvatar from './BotAvatar';
 import UsageStrip from './UsageStrip';
 import MessageQueue from './MessageQueue';
+import AgentActivity from './AgentActivity';
+import CorrectionComposer from './CorrectionComposer';
+import { correctionPrompt, groupActivity, lastMatch, lessonTitle, projectName } from '../conversationUX';
+import type { MemoryView } from '../memory';
 import { emptyQueue, type MessageQueue as Queue } from '../messageQueue';
 import ProviderWait from './ProviderWait';
 import { progressMessage, type ProviderProgress } from '../providerProgress';
@@ -176,22 +180,22 @@ function YoloIcon() {
 
 const STARTERS: { label: string; description: string; icon: IconName; prompt: string }[] = [
   {
-    label: "Explore a project",
-    description: "See how it all fits together",
+    label: "Build something",
+    description: "Turn an idea into a first version",
+    icon: "plus",
+    prompt: "Help me build a new feature. Here's the idea: ",
+  },
+  {
+    label: "Improve what's here",
+    description: "Fix a bug or refine an experience",
+    icon: "edit",
+    prompt: "I'd like to improve this project. Here's what should change: ",
+  },
+  {
+    label: "Understand a project",
+    description: "Find a clear starting point",
     icon: "folder",
-    prompt: "Give me a high-level map of this codebase: main components and how they connect.",
-  },
-  {
-    label: "Find the rough edges",
-    description: "Catch bugs before they grow",
-    icon: "search",
-    prompt: "What are the riskiest or most fragile parts of this code? List them briefly.",
-  },
-  {
-    label: "Understand the code",
-    description: "Take a closer look",
-    icon: "code",
-    prompt: "Pick the most important file in this project and explain what it does.",
+    prompt: "Help me understand this project. Map the main pieces and suggest a good place to start.",
   },
 ];
 
@@ -298,6 +302,9 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
   const [memoryUsage,setMemoryUsage]=useState<{titles:string[];bytes:number}|null>(null);
   const [usage, setUsage] = useState<UsageSnapshot>({});
   const [draftError, setDraftError] = useState(false);
+  const [correction, setCorrection] = useState<{id:number;answer:string}|null>(null);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const workspaceEditorId = useId();
   const identityRef = useRef({ workspace, sessionKey });
   useEffect(() => {
     if (!ready) return;
@@ -371,6 +378,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
     nativeIdRef.current = null;
     idRef.current = 0;
     setBlocks([]);
+    setCorrection(null);
     setTodos([]);
     // Choosing a usable project is a recovery step; keep the unsent prompt.
     setInput(explicitRestart ? "" : readDraft(sessionId));
@@ -724,19 +732,19 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
   }, []);
 
   const sendText = useCallback(
-    (text: string) => {
+    (text: string, preserveDraft = false) => {
       const prompt = text.trim();
       const nativeId = nativeIdRef.current;
-      if (!prompt || !ready || !nativeId || applyingRef.current) return;
+      if (!prompt || !ready || !nativeId || applyingRef.current) return Promise.resolve(false);
       if (runningRef.current || queueRef.current.items.length || queueRef.current.paused) {
-        inputRef.current = ''; setInput(''); setHistIdx(null);
-        invoke('agent_send', { id: nativeId, prompt, yolo }).catch((error: unknown) => {
-          if (nativeIdRef.current !== nativeId) return;
-          setInput(draft => draft || prompt);
+        if (!preserveDraft) { inputRef.current = ''; setInput(''); setHistIdx(null); }
+        return invoke('agent_send', { id: nativeId, prompt, yolo }).then(()=>nativeIdRef.current === nativeId).catch((error: unknown) => {
+          if (nativeIdRef.current !== nativeId) return false;
+          if (!preserveDraft) setInput(draft => draft || prompt);
           setBlocks(previous => [...previous, { id: ++idRef.current, kind: 'user', text: prompt, notSent: true },
             { id: ++idRef.current, kind: 'notice', text: `Could not queue: ${String(error)}`, tone: 'error' }]);
+          return false;
         });
-        return;
       }
       stickRef.current = true;
       setShowLatest(false);
@@ -746,8 +754,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
         onTitle(sessionId, prompt.replace(/\s+/g, " ").slice(0, 48));
         titleAssignedRef.current = true;
       }
-      setInput("");
-      inputRef.current = '';
+      if (!preserveDraft) { setInput(""); inputRef.current = ''; }
       setUsage(previous => ({ ...previous, turn: null }));
       setMemoryUsage(null);
       setHistIdx(null);
@@ -760,20 +767,22 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
       setRunning(true);
       setActivity("");
       setStatus({ kind: "running" });
-      invoke<{ queued?: boolean }>("agent_send", { id: nativeId, prompt, yolo }).then(info => {
+      return invoke<{ queued?: boolean }>("agent_send", { id: nativeId, prompt, yolo }).then(info => {
         if (nativeIdRef.current === nativeId && info?.queued) {
           if (optimisticPromptRef.current?.blockId === userId) optimisticPromptRef.current = null;
           setBlocks(previous => previous.filter(block => block.id !== userId));
         }
+        return nativeIdRef.current === nativeId;
       }).catch((err: unknown) => {
-        if (nativeIdRef.current !== nativeId) return;
+        if (nativeIdRef.current !== nativeId) return false;
         if (optimisticPromptRef.current?.blockId === userId) optimisticPromptRef.current = null;
         const message = err instanceof Error ? err.message : String(err);
         setBlocks((prev) => [...prev.map((b) => b.id === userId && b.kind === "user" ? { ...b, notSent: true } : b), { id: ++idRef.current, kind: "notice", text: message, tone: "error" }]);
-        setInput((draft) => draft || prompt);
+        if (!preserveDraft) setInput((draft) => draft || prompt);
         setRunning(false);
         runningRef.current = false;
         setStatus({ kind: "error", message });
+        return false;
       });
     },
     [ready, sessionId, setStatus, yolo, onTitle],
@@ -812,24 +821,35 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
 
   const openTodos = todos.filter((t) => t.status !== "completed");
   const doneTodos = todos.filter((t) => t.status === "completed");
+  const lastAssistant = lastMatch(blocks,b=>b.kind==='assistant');
+  const lastNotice = lastMatch(blocks,b=>b.kind==='notice');
+  const workspaceEditorOpen = workspaceOpen || !settings.compactControls || draft !== effective || !!workspaceError;
+  const rememberLesson = async (lesson: string) => {
+    if (!effective || !nativeIdRef.current) throw new Error('Choose a project before saving guidance.');
+    const view = await invoke<MemoryView>(botId ? 'bots_memory' : 'memory_request', {id:botId,workspace:effective,request:{
+      action:'save_lesson',title:lessonTitle(lesson),body:lesson.trim(),
+    }});
+    return view.settings.enabled ? undefined : 'Lesson saved. Memory is off for this project; enable it in Memory to use saved guidance.';
+  };
+  const closeCorrection = () => { setCorrection(null); composerRef.current?.focus(); };
 
   return (
     <div className={active ? "chat-wrap" : "chat-wrap hidden"}>
       <div ref={scrollRef} className="chat-scroll" onScroll={onScroll}>
         {blocks.length === 0 && (
           <div className="chat-empty">
-            <div className="welcome-mark">{bot?<BotAvatar bot={bot} size={84}/>:<VelumMark size={100}/>}</div>
-            <span className="welcome-eyebrow">A fresh conversation</span>
+            <div className="welcome-mark">{bot?<BotAvatar bot={bot} size={62}/>:<VelumMark size={62}/>}</div>
+            <span className="welcome-eyebrow">From an idea to something real</span>
             <h2>{bot?`${bot.name}, ready to help.`:'What are we building?'}</h2>
-            <p>A fresh set of eyes for your code.<br />Start with an idea. We’ll take it from there.</p>
+            <p>Describe what you want to make. Or choose a starting point and make the prompt your own.</p>
             <div className="chat-starters">
               {STARTERS.map((s) => (
                 <button
                   key={s.label}
                   type="button"
                   className="starter-btn"
-                  disabled={!ready || running || applying}
-                  onClick={() => sendText(s.prompt)}
+                  disabled={!ready || running || applying || (input ? input.length + 2 + s.prompt.length : s.prompt.length) > 64000}
+                  onClick={() => { const next = inputRef.current ? `${inputRef.current}\n\n${s.prompt}` : s.prompt; if(next.length > 64000) return; inputRef.current=next; setInput(next); setHistIdx(null); composerRef.current?.focus(); }}
                 >
                   <span className="starter-icon"><Icon name={s.icon} size={21} /></span>
                   <strong>{s.label}</strong>
@@ -840,7 +860,13 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
             </div>
           </div>
         )}
-        {blocks.map((b) => {
+        {groupActivity(blocks, settings.groupActivity).map((row) => {
+          if (row.kind === 'activity_group') {
+            const tools = row.items.filter((item): item is Extract<Block,{kind:'tool'}> => item.kind === 'tool');
+            const current = lastMatch(tools,tool=>statusTone(tool.status)==='busy');
+            return <AgentActivity key={`activity-${row.id}`} count={tools.length} current={current ? `${friendlyTool(current.name)} in progress` : ''} failed={tools.some(tool=>['failed','blocked','rejected'].includes(tool.status))} stopped={tools.some(tool=>tool.status==='cancelled')} busy={!!current}>{tools.map(tool=><ToolBlock key={tool.id} block={tool}/>)}</AgentActivity>;
+          }
+          const b = row.block;
           switch (b.kind) {
             case "user":
               return (
@@ -864,6 +890,17 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
                     <button type="button" className="memory-usage" aria-label="Remember this answer" onClick={()=>onRemember(b.text)}><Icon name="memory" size={15}/></button>
                   </div>
                   <Markdown text={b.text} />
+                  {!b.open && <div className={`response-actions${lastAssistant?.id===b.id ? ' latest-response' : ''}`}><button type="button" onClick={()=>setCorrection({id:b.id,answer:b.text})}><Icon name="edit" size={14}/>Correct response</button>{lastAssistant?.id===b.id && !running && lastStatusRef.current.kind==='done' && <span className="response-finish"><Icon name="check" size={12}/>Ready for your next idea</span>}</div>}
+                  {correction?.id === b.id && <CorrectionComposer running={running} disabled={!ready || applying} owner={bot?.name} onClose={closeCorrection} remember={rememberLesson} submit={async (text,lesson)=>{
+                    const nativeId = nativeIdRef.current;
+                    if (!await sendText(correctionPrompt(b.text,text),true)) throw new Error('Correction was not sent. Your edits are still here; try again when ready.');
+                    let notice: string | undefined;
+                    if (lesson) {
+                      if (nativeId !== nativeIdRef.current) return {sent:true,remembered:false,error:'Correction sent. The conversation changed; save the lesson in Memory for the correct project.'};
+                      try { notice = await rememberLesson(lesson); } catch(error) { return {sent:true,remembered:false,error:`Correction sent. The lesson could not be saved: ${String(error)}`}; }
+                    }
+                    return {sent:true,remembered:!!lesson,notice};
+                  }}/>}
                 </div>
               );
             case "tool":
@@ -872,6 +909,12 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
               return (
                 <div key={b.id} className={`notice ${b.tone}`}>
                   {b.text}
+                  {b.tone==='error' && lastNotice?.id===b.id && !running && <div className="recovery-actions"><button type="button" disabled={!ready || applying} onClick={()=>{
+                    const previous = lastMatch(blocks,item=>item.kind==='user');
+                    if (previous?.kind !== 'user') return;
+                    if (!inputRef.current.trim()) { inputRef.current=previous.text;setInput(previous.text); }
+                    composerRef.current?.focus();
+                  }}>Revise request</button></div>}
                 </div>
               );
             case "approval":
@@ -909,7 +952,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
       }} />
       {showLatest && <div className="latest-wrap"><button type="button" className="latest-btn" onClick={jumpToLatest}><Icon name="down" size={14} />Back to latest</button></div>}
       {todos.length > 0 && (
-        <div className="todos">
+        <details className="task-progress"><summary><Icon name="check" size={13}/><span>{doneTodos.length} of {todos.length} steps complete{openTodos.find(t=>t.status==='in_progress') ? ` · ${openTodos.find(t=>t.status==='in_progress')!.text}` : ''}</span><Icon name="down" size={12}/></summary><div className="todos">
           <span className="todos-title">Tasks</span>
           {openTodos.map((t, i) => (
             <span key={`o${i}`} className={`todo ${t.status}`}>
@@ -917,7 +960,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
             </span>
           ))}
           {doneTodos.length > 0 && <span className="todo done">✓ {doneTodos.length} done</span>}
-        </div>
+        </div></details>
       )}
       {workspaceError && <div className="notice error" role="alert">{workspaceError}</div>}
       {!yolo && workspaceNotice && <div className="notice" role="status">{workspaceNotice}</div>}
@@ -995,7 +1038,8 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
           </button>
         </div>
       </div>
-      <div className="workspace-bar">
+      <div className="project-context-row"><button type="button" className="project-context-toggle" aria-label="Project folder" aria-controls={workspaceEditorId} aria-expanded={workspaceEditorOpen} title={effective || 'Choose a project'} onClick={()=>setWorkspaceOpen(open=>!open)}><Icon name="folder" size={13}/><span>{projectName(effective)}</span><Icon name="down" size={11}/></button>{running && <small>You can queue your next thought</small>}</div>
+      <div id={workspaceEditorId} className="workspace-bar" hidden={!workspaceEditorOpen}>
         <button type="button" className="workspace-btn" aria-label="Choose project folder" title="Choose project folder, then Apply" disabled={running || queue.items.length > 0 || applying} onClick={async () => {
           if (runningRef.current || queueRef.current.items.length || applyingRef.current) return;
           applyingRef.current = true; setApplying(true); setWorkspaceError('');
@@ -1009,6 +1053,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
         {(draft !== effective || !ready || workspaceError) && <button type="button" className="workspace-btn" onClick={applyWorkspace} disabled={running || queue.items.length > 0 || applying || initializing} title="Apply workspace (restarts this tab's session)">Apply</button>}
         <span className="workspace-label">Workspace</span>
       </div>
+      {workspaceEditorOpen && blocks.some(b=>b.kind==='assistant') && <p className="workspace-editor-hint">Applying a different project starts a fresh conversation in this tab.</p>}
       </div>
       {contextSnapshot !== null && active && <Suspense fallback={null}><ContextPanel key={`${nativeIdRef.current}:${yolo}`} snapshot={contextSnapshot} load={() => invoke<Diagnostics>('app_diagnostics', { workspace: effective, id: nativeIdRef.current })} check={() => invoke<AccessCheck>('workspace_check', { workspace: effective, write: true, id: nativeIdRef.current })} agentBusy={running || queue.items.length > 0 || !ready} checkAgent={async () => {
         if (!nativeIdRef.current || runningRef.current || queueRef.current.items.length) throw new Error('Finish or clear queued messages before testing agent access.');

@@ -1,7 +1,24 @@
 import { expect, type Page } from "@playwright/test";
 // Exercise the real React UI and xterm with a controlled IPC boundary.
 // Native process/CLI behavior is covered separately; no provider calls here.
-export async function boot(page: Page, delay = 0) {
+export async function revealAssistant(page: Page) {
+  const toggle = page.getByRole('button',{name:'Assistant settings',exact:true});
+  if(await toggle.count() && await toggle.getAttribute('aria-expanded')==='false') await toggle.click();
+}
+export async function revealWorkspace(page: Page) {
+  const chat = page.locator('.chat-wrap:not(.hidden)');
+  if(!await chat.getByLabel('Workspace directory').isVisible()) await chat.getByRole('button',{name:'Project folder',exact:true}).click();
+}
+export async function pickProvider(page: Page, provider: string) {
+  await revealAssistant(page);
+  await page.getByLabel('AI provider').selectOption(provider);
+  await expect(page.getByLabel('AI provider')).toHaveValue(provider);
+  await revealAssistant(page);
+  await revealWorkspace(page);
+}
+// Configuration tests reveal the controls explicitly. Pass false to inspect
+// the focused default without changing preferences or mocking its layout.
+export async function boot(page: Page, delay = 0, configure = true) {
   await page.addInitScript(
     ({ delay }) => {
       const w = window as any;
@@ -169,19 +186,23 @@ export async function boot(page: Page, delay = 0) {
             if (q.action === "configure") m.settings = q.settings;
             if (q.action === "delete")
               m.notes = m.notes.filter((n: any) => n.id !== q.id);
-            if (q.action === "save") {
+            if (q.action === "save" || q.action === 'save_lesson') {
               if (api.holdMemorySave) await new Promise<void>(resolve => { api.releaseMemorySave = resolve; });
               if (api.memoryConflict)
                 throw "This note changed elsewhere. Refresh to load the latest copy before saving.";
+              const existing = q.action==='save_lesson' ? m.notes.find((note:any)=>note.scope==='project'&&note.status!=='archived'&&note.body.trim()===q.body.trim()) : undefined;
+              if(existing?.status==='active'&&existing.pinned)return structuredClone(m);
               const note = {
                 ...q,
-                id: q.id || `note-${++serial}`,
+                ...(q.action==='save_lesson'?{scope:'project',status:'active',pinned:true,tags:['lesson','correction']}:{}),
+                id: existing?.id || q.id || `note-${++serial}`,
                 revision: `r-${serial}`,
-                source: "Saved by you",
+                source: q.action==='save_lesson'?'Reviewed correction':'Saved by you',
                 created_at: 1,
                 updated_at: 1,
               };
               m.notes = [...m.notes.filter((n: any) => n.id !== note.id), note];
+              api.emit('memory-changed',{});
             }
             return structuredClone(m);
           }
@@ -424,4 +445,5 @@ export async function boot(page: Page, delay = 0) {
     "aria-busy",
     "false",
   );
+  if(configure){await revealAssistant(page);await revealWorkspace(page);await page.locator('.chat-wrap:not(.hidden) .composer textarea').focus();}
 }

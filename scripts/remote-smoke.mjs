@@ -99,7 +99,7 @@ try {
     assert(!(await offline.locator("body").innerText()).includes("Old phone shell"));
     await offline.close();
     await context.setOffline(false);
-    const cached = await phone.evaluate(async () => (await (await caches.open("velum-phone-v7")).keys()).map((r) => r.url));
+    const cached = await phone.evaluate(async (name) => (await (await caches.open(name)).keys()).map((r) => r.url),workerCache);
     assert(cached.every((url) => !url.includes("/api/") && !url.includes("pair=")), "Phone cache contains private data");
     console.log("PASS: old phone cache migrates, offline launch has current branding, private data stays uncached");
   }
@@ -119,6 +119,8 @@ try {
   assert(!readFileSync(path.join(run, "settings/remote.json"), "utf8").includes(cookie.value));
   console.log("PASS: QR pairing requires desktop confirmation; phone replays desktop history; credentials are hashed at rest");
   await desktop.getByRole("button", { name: "Close remote access" }).click();
+  await phone.locator(".phone-assistant-controls > summary").click();
+  await desktop.getByRole("button", { name: "Assistant settings", exact: true }).click();
   await phone.getByRole("button", { name: /^Model:/ }).click();
   await phone.getByRole("option").getByText("Fixture Muse", { exact: true }).click();
   await phone.getByRole("button", { name: /^Reasoning:/ }).click();
@@ -168,6 +170,26 @@ try {
   await phone.getByRole("button", { name: "Close memory" }).click();
   await expect(phone.getByLabel("Message your desktop agent")).toHaveValue("Recover this phone draft");
   console.log("PASS: phone drafts survive reload; authenticated phone editor writes the same desktop Markdown vault");
+  const phoneLesson='Before presenting a result, state what changed and the next useful action.';
+  await phone.getByRole('button',{name:'Correct response',exact:true}).last().click();
+  await phone.getByLabel('What should change?',{exact:true}).fill('Start with the outcome.');
+  await phone.getByRole('checkbox',{name:'Remember a lesson for this project',exact:true}).check();
+  await phone.getByLabel('Lesson for next time',{exact:true}).fill(phoneLesson);
+  await phone.getByRole('button',{name:'Send & save lesson',exact:true}).click();
+  await expect(phone.locator('.correction-composer')).toContainText('Lesson saved');
+  await expect(phone.getByRole('button',{name:'Stop task',exact:true})).toHaveCount(0);
+  await expect(phone.getByLabel('Message your desktop agent')).toHaveValue('Recover this phone draft');
+  const reviewed=await invoke('memory_request',{workspace:sessions[0].workspace,request:{action:'list'}});
+  assert(reviewed.notes.some(n=>n.body===phoneLesson && n.pinned && n.scope==='project' && n.status==='active'));
+  await phone.getByRole('button',{name:'Back to the conversation',exact:true}).click();
+  await phone.getByLabel('Message your desktop agent').fill('Recall reviewed phone lesson');
+  await phone.getByRole('button',{name:'Send message',exact:true}).click();
+  await expect(phone.getByText('Reply: Recall reviewed phone lesson',{exact:true})).toBeVisible();
+  const recalled=readFileSync(log,'utf8').trim().split('\n').map(line=>JSON.parse(line)).find(r=>r.prompt==='Recall reviewed phone lesson');
+  assert(recalled.input.includes(phoneLesson),'Reviewed phone guidance did not reach the native provider');
+  await phone.getByLabel('Message your desktop agent').fill('Recover this phone draft');
+  console.log('PASS: paired phone correction preserves its draft, saves a scoped lesson and supplies it to the next native turn');
+
   await phone.getByRole("button",{name:"Kanban",exact:true}).click();
   await phone.getByRole("button",{name:"Add task to Backlog",exact:true}).click();
   await phone.getByLabel("Title",{exact:true}).fill("From phone board");
@@ -220,7 +242,10 @@ try {
   await expect.poll(() => readFileSync(log, "utf8").includes('"kind":"descendant"')).toBe(true);
   await phone.getByRole("button", { name: "Stop task" }).click();
   await expect(phone.getByText("Task stopped.", { exact: true })).toBeVisible();
+  await invoke("desktop_show");
+  await desktop.locator(".activity-toggle").last().click();
   await expect(desktop.locator(".tool-status")).toHaveText("cancelled");
+  await desktop.getByRole("button",{name:"Close",exact:true}).click();
   const primary=(await phone.evaluate(async()=>(await (await fetch('/api/sessions')).json()).sessions)).find(s=>s.title==='Desktop fixture');
   assert(primary,'Primary desktop conversation missing');
   await invoke('agent_send',{id:primary.id,prompt:'HOLD',yolo:false});

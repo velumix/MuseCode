@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { boot } from "./fixture";
+import {boot, pickProvider} from "./fixture";
 import {duplicateBot, newBot} from "../../src/bots";
 test("duplicate names respect the native UTF-8 limit without splitting characters",()=>{
   const profile=newBot("muse",{model:"test",reasoning:"high"});
@@ -142,7 +142,7 @@ test("bot profile edits, provider preferences, private memory, and avatar persis
       provider: "codex",
       options: { model: "codex-deep", reasoning: "max" },
     });
-  await page.getByLabel("AI provider").selectOption("muse");
+  await pickProvider(page,"muse");
   const last = await page.evaluate(
     () =>
       (window as any).qa.calls.filter((c: any) => c.cmd === "agent_new").at(-1)

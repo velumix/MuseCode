@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { boot } from './fixture';
+import {boot, pickProvider} from './fixture';
 const composer = (page: Page) => page.locator('.chat-wrap:not(.hidden) .composer textarea');
 const queue = (page: Page) => page.getByRole('region', { name: 'Message queue' });
 async function send(page: Page, text: string) { await composer(page).fill(text); await composer(page).press('Enter'); }
@@ -15,7 +15,7 @@ for (const provider of ['muse', 'codex', 'antigravity']) {
       await page.evaluate(() => { (window as any).qa.antigravityInstalled = true; });
       await page.getByRole('button', {name:'Refresh providers and models',exact:true}).click();
     }
-    if (provider !== 'muse') await page.getByLabel('AI provider').selectOption(provider);
+    if (provider !== 'muse') await pickProvider(page,provider);
     await expect(composer(page)).toBeEnabled();
     await send(page, 'First active request');
     await send(page, 'Second pending request');

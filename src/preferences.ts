@@ -36,6 +36,8 @@ export const defaults: Readonly<Preferences> = {
   alwaysShowCopy: false,
   sendShortcut: "enter",
   toolOutput: "preview",
+  compactControls: true,
+  groupActivity: true,
   terminalFontSize: 14,
   terminalLineHeight: 1.2,
   terminalCursor: "bar",
