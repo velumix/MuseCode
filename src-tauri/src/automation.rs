@@ -368,6 +368,12 @@ pub fn setup(app: &tauri::AppHandle) {
     app.manage(Store::load(root.join("automation.json")));
     let app = app.clone();
     std::thread::spawn(move || {
+        while app.state::<crate::runner::AgentState>().startup_pending() {
+            if app.state::<Store>().stopped.load(Ordering::Acquire) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
         // Reconcile checkpoints once after restart, including a board write that
         // committed immediately before a crash interrupted its scheduler sync.
         let workspaces: std::collections::HashSet<_> = app
@@ -414,6 +420,9 @@ pub fn shutdown(app: &tauri::AppHandle) {
     app.state::<Store>().stopped.store(true, Ordering::Release);
 }
 fn tick(app: &tauri::AppHandle) -> Result<(), String> {
+    if app.state::<crate::runner::AgentState>().work_blocked() {
+        return Ok(());
+    }
     let snapshot = app.state::<Store>().view().snapshot;
     if let Some(run) = snapshot.runs.iter().find(|r| r.status == "running") {
         let current = (|| {
@@ -524,6 +533,9 @@ fn tick(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 fn start(app: &tauri::AppHandle, id: &str, manual: bool) -> Result<(), String> {
+    if app.state::<crate::runner::AgentState>().work_blocked() {
+        return Err("Velum is preparing an app update. Try again when it opens.".into());
+    }
     let store = app.state::<Store>();
     let mut job = store
         .state

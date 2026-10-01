@@ -2,7 +2,7 @@
 
 **DRAFT FOR OWNER AND LEGAL REVIEW — NOT YET A FINAL PUBLISHER NOTICE.**
 
-Behavior reviewed: desktop 0.6.7 and Android companion 0.6.1, October 1, 2026.
+Behavior reviewed: desktop 0.6.8 and Android companion 0.6.1, October 1, 2026.
 Effective date: **[EFFECTIVE_DATE]**.
 Publisher: **[PUBLISHER_LEGAL_NAME]**, **[PUBLISHER_COUNTRY_AND_STATE]**.
 Privacy contact: **[PRIVACY_CONTACT_EMAIL]**.
@@ -63,12 +63,15 @@ and [Microsoft's privacy statement](https://privacy.microsoft.com/en-us/privacys
 Use the current notice for your Muse operator and each other tool or service
 you connect. Consumer and business/API arrangements may differ.
 
-The installed Windows app checks GitHub for signed app updates after launch
-and every six hours by default, and downloads new stable releases in the
-background. Turn off automatic checks and downloads in **Settings → Updates**;
+The installed Windows app checks GitHub for signed app updates during the opening
+animation by default, downloads a newer stable release, verifies its signature,
+then installs and reopens automatically before recovering the workspace.
+It also checks every six hours while open and downloads releases in the
+background. Turn off automatic checks, downloads and startup installation in **Settings → Updates**;
 manual update actions still contact GitHub. Update requests carry connection
 metadata, not conversations, drafts, workspace paths or provider credentials.
-Restarting to install is a separate action.
+Updates downloaded during an open session require **Restart to update**, or install
+automatically on the next launch. Failed launch checks open the current version.
 
 Opening the plugin directory or checking/installing an update contacts GitHub's
 public repository/API services. Those services receive ordinary connection

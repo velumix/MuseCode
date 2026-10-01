@@ -15,14 +15,17 @@
 
   <body>
     <div id="startup" class="startup" role="status" aria-label="Starting Velum Code">
-      <div class="startup-brand" aria-hidden="true">
-        <div class="startup-emblem">
+      <div class="startup-brand">
+        <div class="startup-emblem" aria-hidden="true">
           <div class="startup-halo"></div>
           <img class="startup-mark" src="/src/assets/velum-mark.png" width="88" height="88" alt="" draggable="false" />
         </div>
-        <div class="startup-wordmark">Velum <span>Code</span></div>
-        <div class="startup-caption">Your space to create</div>
-        <div class="startup-track"><div class="startup-sweep"></div></div>
+        <div class="startup-wordmark" aria-hidden="true">Velum <span>Code</span></div>
+        <div class="startup-caption" aria-hidden="true">Your space to create</div>
+        <div id="startup-progress" class="startup-track" role="progressbar" aria-label="Startup update progress" aria-valuemin="0" aria-valuemax="100"><div class="startup-sweep"></div></div>
+        <div id="startup-message" class="startup-message">Checking for updates…</div>
+        <div id="startup-detail" class="startup-detail"></div>
+        <button id="startup-skip" class="startup-skip" type="button" hidden>Open current version</button>
       </div>
     </div>
     <div id="root" inert aria-busy="true"></div>

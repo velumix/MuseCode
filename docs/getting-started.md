@@ -1,8 +1,9 @@
 # Getting started
 
-After the first installation of 0.6.6 or newer, Velum checks GitHub and downloads
-signed app updates automatically. Use **Settings → Updates → Restart to update**
-when a new version is ready. See [App updates](updates.md).
+After installing 0.6.8 or newer, Velum checks GitHub during its opening animation,
+downloads and verifies newer releases, then installs and reopens automatically.
+Versions 0.6.6–0.6.7 need **Settings → Updates → Restart to update** once to add
+this behavior. Offline launches open the current version. See [App updates](updates.md).
 
 [Documentation](README.md)
 

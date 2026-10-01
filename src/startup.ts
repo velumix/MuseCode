@@ -1,4 +1,4 @@
-/** Called after the recovered desktop has mounted. Nothing waits on providers. */
+/** Called after the startup update gate and recovered desktop have finished. */
 export function finishStartup(onReady: () => void) {
   const splash = document.getElementById("startup");
   const root = document.getElementById("root");

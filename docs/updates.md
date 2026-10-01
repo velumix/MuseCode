@@ -2,21 +2,35 @@
 
 [Documentation](README.md) · [GitHub releases](https://github.com/velumix/VelumCode/releases)
 
-The installed Windows app checks GitHub 30 seconds after launch and every six
-hours while it stays open, including in the tray. **Automatic updates** is on
-by default. New stable releases download in the background. The app verifies
-the installer's signature against its bundled public key before offering it.
-An offline or failed check leaves the current app usable and retries on the
-next scheduled check. Startup does not wait for GitHub.
+Starting with 0.6.8, the installed Windows app checks GitHub at the beginning
+of its opening animation. **Automatic updates** is on by default. If a newer
+stable release is available, the animation shows download progress, then
+**Installing update…**. Velum verifies the installer's signature, installs
+silently and reopens automatically before recovering your workspace. Saved
+conversations, drafts and preferences are preserved. Scheduled and remote agent
+work waits until this startup decision finishes.
+
+The launch check has an eight-second deadline. If GitHub is offline, the feed
+is invalid, or download/signature verification fails, the installed version
+opens normally and Settings records the error. **Open current version** cancels
+the launch check or download; it is unavailable once installation starts.
+If an installer fails to replace the app, the next launch opens the current
+version instead of repeatedly restarting. Retry that release manually in
+Settings; a newer release can still install automatically.
+
+While Velum stays open, including in the tray, it checks every six hours and
+downloads new stable releases in the background. It does not interrupt active
+work to install them.
 
 When the download is ready, **Update ready** appears in the footer. Open it,
-then choose **Restart to update**. Finish or stop running conversations and
+then choose **Restart to update**, or quit and let the next launch update
+automatically. Finish or stop running conversations and
 pause pending queues first. Velum saves the desktop, drafts, preferences and
 conversation recovery before launching the installer. Terminal sessions close.
 The installer keeps app data and reopens the updated app.
 
 In **Settings → Updates**, you can check manually, read release notes, or turn
-off automatic checks and downloads. Turning it off does not cancel a download
+off automatic checks, downloads and startup installation. Turning it off does not cancel a download
 already in progress. With automatic updates off, **Check for updates** offers
 a separate **Download update** action. Downloaded bytes are held for the current
 app session; quitting without installing means a later session downloads again.
@@ -26,8 +40,9 @@ companion do not perform desktop updates.
 ## First installation
 
 Versions through 0.6.5 do not contain an updater. Install the latest signed
-Windows bundle once to add it. Local 0.6.6 copies already include it. Afterwards,
-use the in-app update control. The update
+Windows bundle once to add it. Versions 0.6.6 and 0.6.7 can download the new
+version in Settings and require **Restart to update** once to install it.
+Automatic installation during launch starts with 0.6.8. The update
 feed only includes published stable GitHub releases; drafts and prereleases
 are excluded. Until the first release is published, Settings reports that
 the feed is unavailable.
@@ -57,7 +72,7 @@ installer and do not need Rust, Node or a local checkout.
    new version instead of replacing a published installer.
 
 The workflow creates drafts so publishing remains an intentional action.
-The app's check and download are automatic after publication. Updater signing
+The app's launch check, download and installation are automatic after publication. Updater signing
 is separate from Windows Authenticode code signing.
 
 ## Local signing

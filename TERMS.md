@@ -136,15 +136,16 @@ confidential material into public support reports.
 
 ## 8. Fees, support and changes
 
-Version 0.6.7 has no Velum account, in-app billing or paid feature system. Provider
+Version 0.6.8 has no Velum account, in-app billing or paid feature system. Provider
 and other third-party charges are separate. Any future Velum purchase requires
 its own disclosed price, billing and cancellation/refund terms before purchase;
 these terms do not authorize undisclosed charges.
 
-Installed Windows copies check GitHub for signed app updates and download new
-stable releases automatically by default. You can turn those checks and
-downloads off in **Settings → Updates**. Installing a downloaded update requires
-the separate **Restart to update** action and closes terminal sessions. An app
+Installed Windows copies check GitHub for signed app updates, download new
+stable releases, verify their signatures, then install and reopen automatically
+during startup by default. You can turn automatic updates off in **Settings → Updates**.
+Updates downloaded while the app is open require **Restart to update**, which
+closes terminal sessions, or install automatically on the next launch. An app
 update does not establish acceptance of these draft terms.
 
 Unless a separate agreement says otherwise, no uptime, response-time, recovery,

@@ -18,7 +18,7 @@ export async function pickProvider(page: Page, provider: string) {
 }
 // Configuration tests reveal the controls explicitly. Pass false to inspect
 // the focused default without changing preferences or mocking its layout.
-export async function boot(page: Page, delay = 0, configure = true) {
+export async function boot(page: Page, delay = 0, configure = true, waitForStartup = true) {
   await page.addInitScript(
     ({ delay }) => {
       const w = window as any;
@@ -64,6 +64,17 @@ export async function boot(page: Page, delay = 0, configure = true) {
         },
         desktop: { notifications_enabled: true, last_error: null },
         pendingNavigation: null as string | null,
+        updateStatus: {
+          revision: 0, supported: false, automatic: true, current_version: "0.6.8",
+          phase: "idle", version: null, downloaded: 0, total: null, checked_at: null, error: null,
+          ...w.qaStartupStatus,
+        },
+        releaseStartup: null as null | ((restarting?: boolean) => void),
+        startupFinished: false,
+        update(change: Record<string, unknown>) {
+          Object.assign(api.updateStatus, change, { revision: api.updateStatus.revision + 1 });
+          api.emit("app-update-status", structuredClone(api.updateStatus));
+        },
         emit(event: string, payload: unknown) {
           for (const [id, entry] of listeners) {
             if (entry.event === event)
@@ -119,6 +130,27 @@ export async function boot(page: Page, delay = 0, configure = true) {
         },
         async invoke(cmd: string, args: any = {}) {
           api.calls.push({ cmd, args });
+          if (cmd === "updates_status") return structuredClone(api.updateStatus);
+          if (cmd === "updates_startup") {
+            if (w.qaStartupIPCFailure) throw "Startup IPC unavailable";
+            if (w.qaHoldStartup && !api.startupFinished) {
+              api.update({ phase: "checking" });
+              return await new Promise(resolve => {
+                api.releaseStartup = (restarting = false) => {
+                  api.startupFinished = true;
+                  resolve({ restarting, status: structuredClone(api.updateStatus) });
+                };
+              });
+            }
+            api.startupFinished = true;
+            return { restarting: false, status: structuredClone(api.updateStatus) };
+          }
+          if (cmd === "updates_skip_startup") {
+            if (api.updateStatus.phase === "installing") throw "The installer has started";
+            api.update({ phase: "idle" });
+            api.releaseStartup?.(false);
+            return;
+          }
           if (cmd === "preferences_load") return w.qaPreferences ?? JSON.parse(localStorage.getItem("qa-native-preferences") || "null");
           if (cmd === "preferences_save") {
             if (api.holdPreferences) await new Promise<void>(resolve => { api.releasePreferences = resolve; });
@@ -449,6 +481,7 @@ export async function boot(page: Page, delay = 0, configure = true) {
     { delay },
   );
   await page.goto("/");
+  if (!waitForStartup) return;
   await expect(page.locator("#startup")).toHaveCount(0);
   await expect(page.locator("#root")).not.toHaveAttribute("inert", "");
   await expect(page.locator(".chat-wrap:not(.hidden) textarea")).toBeEnabled();

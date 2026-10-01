@@ -126,6 +126,7 @@ pub struct AgentState {
     sessions: Mutex<HashMap<String, Arc<AgentSession>>>,
     next_registration: AtomicU64,
     updating: AtomicBool,
+    startup_pending: AtomicBool,
 }
 
 impl AgentSession {
@@ -151,6 +152,18 @@ impl AgentSession {
 }
 
 impl AgentState {
+    pub fn set_startup_pending(&self, pending: bool) {
+        self.startup_pending.store(pending, Ordering::SeqCst);
+    }
+
+    pub fn startup_pending(&self) -> bool {
+        self.startup_pending.load(Ordering::SeqCst)
+    }
+
+    pub fn work_blocked(&self) -> bool {
+        self.startup_pending() || self.updating.load(Ordering::SeqCst)
+    }
+
     /// Registration and update admission share the sessions lock. A queued,
     /// remote, or scheduled send cannot slip between the idle check and restart.
     pub fn begin_update(&self) -> Result<(), String> {
@@ -1542,6 +1555,9 @@ fn send_inner(
     if state.updating.load(Ordering::SeqCst) {
         return Err("Velum is restarting to install an update. Try again after it reopens.".into());
     }
+    if state.startup_pending() {
+        return Err("Velum is checking for updates at startup. Try again when it opens.".into());
+    }
     let session = sessions
         .get(&id)
         .ok_or_else(|| "agent session not found; reopen the tab".to_string())?;
@@ -2158,6 +2174,20 @@ mod tests {
         std::fs::create_dir(&other).unwrap();
         assert_eq!(state.session_context("native-1", &other), None);
         std::fs::remove_dir(&other).unwrap();
+    }
+
+    #[test]
+    fn startup_and_installation_each_block_agent_work() {
+        let state = super::AgentState::default();
+        assert!(!state.work_blocked());
+        state.set_startup_pending(true);
+        assert!(state.startup_pending());
+        assert!(state.work_blocked());
+        state.begin_update().unwrap();
+        state.set_startup_pending(false);
+        assert!(state.work_blocked());
+        state.cancel_update();
+        assert!(!state.work_blocked());
     }
 
     #[test]

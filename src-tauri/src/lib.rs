@@ -72,6 +72,7 @@ pub fn run() {
         .manage(AgentState::default())
         .manage(session_log::SessionLog::default())
         .setup(|app| {
+            updates::setup(app.handle())?;
             memory::setup(app.handle());
             bots::setup(app.handle());
             plugins::setup(app.handle());
@@ -83,7 +84,7 @@ pub fn run() {
             preferences::setup(app)?;
             tool_bridge::setup(app)?;
             remote::setup(app)?;
-            updates::setup(app.handle())
+            Ok(())
         })
         .on_window_event(desktop::close_to_tray)
         .invoke_handler(tauri::generate_handler![
@@ -151,6 +152,8 @@ pub fn run() {
             desktop::desktop_show,
             desktop::desktop_quit,
             updates::updates_status,
+            updates::updates_startup,
+            updates::updates_skip_startup,
             updates::updates_set_automatic,
             updates::updates_check,
             updates::updates_download,
