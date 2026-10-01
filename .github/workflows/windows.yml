@@ -44,7 +44,9 @@ jobs:
       - name: Check documentation and dependency notices
         run: |
           cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run legal:notices:check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run legal:check
       - name: Build Windows installer
         run: npx tauri build --bundles nsis --config src-tauri/tauri.preview.conf.json

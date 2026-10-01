@@ -600,10 +600,13 @@ mod tests {
         assert!(cli_first_line(
             &fixture.script,
             &[fixture.pids.to_str().unwrap()],
-            Duration::from_secs(8)
+            crate::child_process::tests::STARTUP_TIMEOUT
         )
         .is_none());
-        assert!(before.elapsed() < Duration::from_secs(12));
+        assert!(
+            before.elapsed()
+                < crate::child_process::tests::STARTUP_TIMEOUT + Duration::from_secs(5)
+        );
         let pids = fixture.recorded_pids();
         assert_eq!(
             pids.len(),

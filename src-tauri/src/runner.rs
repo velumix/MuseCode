@@ -2287,8 +2287,9 @@ mod tests {
     fn workspace_accepts_existing_dirs_only() {
         let tmp = std::env::temp_dir();
         assert_eq!(
-            resolve_workspace(Some(tmp.display().to_string())).unwrap(),
-            tmp
+            std::fs::canonicalize(resolve_workspace(Some(tmp.display().to_string())).unwrap())
+                .unwrap(),
+            std::fs::canonicalize(&tmp).unwrap()
         );
         let missing = tmp.join(format!(
             "velum-code-no-such-workspace-{}",
@@ -2336,7 +2337,7 @@ mod tests {
         assert_eq!(silence_state(SILENCE_FAIL_MS - 1), Silence::Warn);
         assert_eq!(silence_state(SILENCE_FAIL_MS), Silence::Expired);
         assert_eq!(silence_state(u64::MAX), Silence::Expired);
-        assert!(SILENCE_WARN_MS < SILENCE_FAIL_MS);
+        const { assert!(SILENCE_WARN_MS < SILENCE_FAIL_MS) };
     }
 
     #[test]

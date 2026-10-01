@@ -50,7 +50,8 @@ installer and do not need Rust, Node or a local checkout.
    The **Windows release** workflow builds and signs the NSIS installer, writes
    `latest.json` and checksums, and creates a GitHub release draft. It can also
    be dispatched manually for an existing version tag.
-4. Review the draft and publish it as a stable release. GitHub's
+4. Wait for **Windows CI** and **Android CI** to pass for the release commit,
+   then review the draft and publish it as a stable release. GitHub's
    `releases/latest/download/latest.json` becomes the app's update feed.
    Published release assets are immutable in this workflow; make fixes in a
    new version instead of replacing a published installer.

@@ -379,6 +379,11 @@ pub(crate) mod tests {
         time::{Duration, Instant},
     };
 
+    // Cold Windows PowerShell startup can exceed five seconds on a loaded
+    // hosted runner. Readiness has its own bound; pipe polling and cleanup
+    // keep their shorter deadlines once the fixture is running.
+    pub(crate) const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+
     pub(crate) struct Fixture {
         directory: PathBuf,
         pub script: PathBuf,
@@ -415,7 +420,7 @@ pub(crate) mod tests {
             command
         }
         pub fn recorded_pids(&self) -> Vec<u32> {
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = Instant::now() + STARTUP_TIMEOUT;
             loop {
                 if let Ok(text) = fs::read_to_string(&self.pids) {
                     let pids: Vec<u32> =
@@ -426,7 +431,8 @@ pub(crate) mod tests {
                 }
                 assert!(
                     Instant::now() < deadline,
-                    "fixture never recorded its own PIDs"
+                    "fixture never recorded its own PIDs within {STARTUP_TIMEOUT:?}: {}",
+                    self.script.display()
                 );
                 std::thread::sleep(Duration::from_millis(10));
             }
@@ -546,12 +552,14 @@ Start-Sleep -Seconds 60
 [Console]::Out.Write("first`r`nsecond`nlast")
 [Console]::Error.WriteLine('diagnostic')
 [Console]::OpenStandardError().Write([byte[]]@(0xff, 0x0a), 0, 2)
+[IO.File]::WriteAllText($pidFile, [string]$PID)
 exit 7
 "#,
         );
         let mut child = Child::spawn(&mut fixture.command()).unwrap();
         let mut output = Output::new(child.stdout.take().unwrap(), child.stderr.take()).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
+        fixture.recorded_pids();
+        let deadline = Instant::now() + Duration::from_secs(3);
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         while !output.closed() {
