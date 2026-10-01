@@ -55,11 +55,41 @@ will succeed.
 | Clippy, all targets, warnings denied | Passed |
 | TypeScript and production frontend | Passed |
 | Usage and measurement UI checks | 7 passed |
+| Plugin SDK check | 1 passed |
 | Regenerated dependency notices and legal consistency | Passed; legal status remains draft |
+| Packaged native tool checks | Passed: all three provider fixture paths and one UI turn, full-hash deletion, paginated search, scoped vault, isolated browser actions/screenshots and live counters |
+| Packaged native client timing | Passed: independent completed client report, correct host/client rates and attachment without sending |
+| Real provider adapter configuration/discovery | Passed: Muse echo and Codex metadata initialize/discover tools; Antigravity parses configuration |
 
 The unchanged frontend also passed its full 150-test suite in the preceding
-[live-counter validation](qa-live-counters-2026-09-30.md). Native release and
-installer verification will be recorded after packaging.
+[live-counter validation](qa-live-counters-2026-09-30.md).
+
+Native release evidence is `.qa/agent tools 1790864444697 & project/result.json`
+and `client-report.json`. Real adapter evidence is
+`.qa/provider MCP 1790864444462/result.json`. Fixture token counters are
+deterministic; host/client durations and tool operations come from the packaged
+app. These checks use private configuration and do not make model requests or
+change the user's provider settings. They do not independently validate a
+provider tokenizer or establish new paid model calls for each provider.
+
+## Packaging and installation
+
+The optimized Windows x64 executable and NSIS installer were built from runtime
+source commit `7546d888303bc5f584025f4f03eaed5796f2e148`. Packaging succeeded;
+native tools, live counters, client timing and real adapter discovery passed
+against that release executable.
+
+The desktop archive is `Builds/Windows/2026-10-01-host-tools`, containing the
+installer, raw executable, 34 legal resources and verification reports. Its
+manifest records the runtime commit and checksums.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Velum Code 0.6.5 x64 installer | `2e87ba40306740f799d68ad1db82cf77477724167c72f5f577441740b8ef142c` |
+| Raw release executable | `0ab6cfb64296137197b3a8080188d946558b3d632a63ccb519ff67cce2992594` |
+
+Installation is pending while the existing 0.6.3 app is running. Windows needs
+Velum to fully quit before its installed executable can be replaced.
 
 See [agent tools](agent-tools.md) for hash copying, search pagination and browser
 behavior, and [usage](usage.md) for completed host/client diagnostics.
