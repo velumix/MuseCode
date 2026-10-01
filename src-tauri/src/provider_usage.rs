@@ -26,6 +26,11 @@ pub struct ContextUsage {
     pub used_tokens: u64,
     pub window_tokens: Option<u64>,
     pub measured_at: i64,
+    /// True when `used_tokens` is a clearly-marked provider-side estimate
+    /// rather than an exact reported snapshot (Muse reports per-step input
+    /// sizes but no window capacity). Absent/false keeps the exact meaning.
+    #[serde(default)]
+    pub estimated: bool,
 }
 
 pub struct CodexUsage {
@@ -177,6 +182,10 @@ pub struct MuseUsage {
     oversized: bool,
     seen: HashSet<String>,
     usage: Option<TurnUsage>,
+    /// High-water mark of this run's per-step `input_tokens`. Each step's
+    /// input already contains the conversation history, so the maximum is
+    /// the closest observable proxy for current context occupancy.
+    max_input: Option<u64>,
 }
 impl MuseUsage {
     pub fn new(offset: u64) -> Self {
@@ -186,7 +195,19 @@ impl MuseUsage {
             oversized: false,
             seen: HashSet::new(),
             usage: None,
+            max_input: None,
         }
+    }
+    /// Labeled context estimate for the usage strip. The retained schema
+    /// reports no window capacity, so `window_tokens` stays `None` and the
+    /// snapshot is flagged `estimated`; the UI must say so, never show a %.
+    pub fn context_estimate(&self) -> Option<ContextUsage> {
+        self.max_input.map(|used_tokens| ContextUsage {
+            used_tokens,
+            window_tokens: None,
+            measured_at: chrono::Utc::now().timestamp_millis(),
+            estimated: true,
+        })
     }
     pub fn finish(&mut self, path: &Path, session: &str, run: &str) -> Option<TurnUsage> {
         let length = fs::metadata(path).ok()?.len();
@@ -263,6 +284,9 @@ impl MuseUsage {
         }
         if self.seen.len() >= 100_000 || !self.seen.insert(record_id.to_owned()) {
             return;
+        }
+        if let Some(input) = usage.input_tokens {
+            self.max_input = Some(self.max_input.map_or(input, |mark| mark.max(input)));
         }
         self.usage = Some(
             self.usage
@@ -347,6 +371,7 @@ pub fn codex_usage(path: &Path, since_ms: i64) -> Option<CodexUsage> {
                     used_tokens,
                     window_tokens: counter(&info["model_context_window"]).filter(|n| *n > 0),
                     measured_at,
+                    estimated: false,
                 },
                 total: codex_turn(&info["total_token_usage"]),
             });
@@ -387,7 +412,45 @@ mod tests {
         let result = codex_usage(&log.0, i64::MIN).unwrap();
         assert_eq!(result.context.used_tokens, 18300);
         assert_eq!(result.context.window_tokens, Some(258400));
+        assert!(!result.context.estimated);
         assert_eq!(result.total.unwrap().input_tokens, Some(146448));
+    }
+    #[test]
+    fn muse_context_estimate_tracks_input_high_water_mark() {
+        let session = uuid::Uuid::new_v4().to_string();
+        let run = uuid::Uuid::new_v4().to_string();
+        let record = |id: &str, input: u64| {
+            json!({"stream":{"kind":"session","id":session},"payload_type":"runtime.session",
+                "id":id,"payload":{"run_id":run,"source_run_record_id":id,
+                "event":{"kind":"model_completed",
+                "usage":{"input_tokens":input,"output_tokens":10,"reasoning_tokens":2}}}})
+            .to_string()
+        };
+        // No records yet: no estimate rather than a zero that looks measured.
+        assert!(MuseUsage::new(0).context_estimate().is_none());
+        let first = uuid::Uuid::new_v4().to_string();
+        let log = Log::new(&format!("{}\n", record(&first, 27020)));
+        let mut monitor = MuseUsage::new(0);
+        monitor.poll(&log.0, &session, &run);
+        let estimate = monitor.context_estimate().unwrap();
+        assert_eq!(estimate.used_tokens, 27020);
+        assert_eq!(estimate.window_tokens, None);
+        assert!(estimate.estimated);
+        // A later step with a smaller input (e.g. a compacted retry) must not
+        // lower the occupancy mark; duplicates must not move it either.
+        let second = uuid::Uuid::new_v4().to_string();
+        std::fs::write(&log.0, format!("{}\n{}\n", record(&first, 27020), record(&second, 8000))).unwrap();
+        monitor.poll(&log.0, &session, &run);
+        assert_eq!(monitor.context_estimate().unwrap().used_tokens, 27020);
+        // Growth is reflected on the next poll.
+        let third = uuid::Uuid::new_v4().to_string();
+        std::fs::write(
+            &log.0,
+            format!("{}\n{}\n{}\n", record(&first, 27020), record(&second, 8000), record(&third, 27299)),
+        )
+        .unwrap();
+        monitor.poll(&log.0, &session, &run);
+        assert_eq!(monitor.context_estimate().unwrap().used_tokens, 27299);
     }
     #[test]
     fn resumed_turn_subtracts_baseline_and_missing_or_reset_counts_stay_unknown() {

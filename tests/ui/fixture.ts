@@ -253,6 +253,10 @@ export async function boot(page: Page, delay = 0, configure = true) {
               setup_url:
                 "https://antigravity.google/docs/getting-started?tab=cli",
             }));
+          if (cmd === "provider_warmup")
+            return w.qaFailWarmup
+              ? { installed: true, version: null, catalog_models: 0, catalog_notice: "Warmup failed.", elapsed_ms: 5 }
+              : { installed: true, version: "Muse Code 1.4.2", catalog_models: 2, catalog_notice: null, elapsed_ms: 12 };
           if (cmd === "antigravity_login_status") return { ...api.auth };
           if (cmd === "antigravity_login_submit") {
             api.auth = {

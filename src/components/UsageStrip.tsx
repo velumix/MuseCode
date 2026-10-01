@@ -32,7 +32,9 @@ export default function UsageStrip({ usage, memory, provider, running, elapsed, 
   const turn = usage.turn;
   const percent = context?.window_tokens ? context.used_tokens / context.window_tokens * 100 : null;
   const filled = percent == null ? 0 : Math.min(100, Math.max(0, percent));
-  const contextLabel = percent == null ? context ? `${compactCount(context.used_tokens)} tokens` : "—"
+  const estimated = context?.estimated === true;
+  const contextLabel = percent == null
+    ? context ? estimated ? `~${compactCount(context.used_tokens)} tokens est.` : `${compactCount(context.used_tokens)} tokens` : "—"
     : percent > 100 ? ">100%" : percent > 99 && percent < 100 ? ">99%" : percent > 0 && percent < 1 ? "<1%" : `${Math.round(percent)}%`;
   const elapsedMs = running ? elapsed ?? turn?.elapsed_ms : turn?.elapsed_ms;
   const rate = tokenRate(turn, elapsedMs);
@@ -60,7 +62,7 @@ export default function UsageStrip({ usage, memory, provider, running, elapsed, 
     if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false);
   }}>
     <button ref={trigger} type="button" className="usage-summary" aria-expanded={open} aria-controls={open ? id : undefined} aria-haspopup="dialog"
-      aria-label={`Context and usage: ${percent == null ? "context capacity unavailable" : `${contextLabel} context used`}, ${rate == null ? "token speed unavailable" : `${speed} tokens per second average`}`}
+      aria-label={`Context and usage: ${percent == null ? (estimated ? `estimated ${contextLabel} context used, provider reports no capacity` : "context capacity unavailable") : `${contextLabel} context used`}, ${rate == null ? "token speed unavailable" : `${speed} tokens per second average`}`}
       title="Context, token speed, and memory details" onClick={() => setOpen(value => !value)}>
       <span className={`usage-context${percent == null ? " unknown" : percent >= 95 ? " critical" : percent >= 80 ? " warning" : ""}`}>
         <svg className="context-ring" width="18" height="18" viewBox="0 0 20 20" aria-hidden="true">
@@ -78,10 +80,10 @@ export default function UsageStrip({ usage, memory, provider, running, elapsed, 
     {open && active && <div id={id} ref={details} className="usage-details" role="dialog" aria-label="Context and usage" tabIndex={-1}>
       <header><strong>Context & usage</strong><button type="button" onClick={close} aria-label="Close usage details"><Icon name="close" size={14} /></button></header>
       <section className="usage-context-detail">
-        <div><span>Context window</span><strong>{context ? `${tokens(context.used_tokens)} / ${context.window_tokens ? tokens(context.window_tokens) : "unknown"}` : "Not reported"}</strong></div>
+        <div><span>Context window</span><strong>{context ? `${estimated ? "~" : ""}${tokens(context.used_tokens)} / ${context.window_tokens ? tokens(context.window_tokens) : "unknown"}` : "Not reported"}</strong></div>
         <div className={`usage-meter${percent == null ? " unknown" : percent >= 95 ? " critical" : percent >= 80 ? " warning" : ""}`} aria-hidden="true"><span style={{ width: `${filled}%` }} /></div>
         {context?.window_tokens && <p>{Math.max(0, 100 - percent!).toLocaleString(undefined, { maximumFractionDigits: 1 })}% available · {tokens(Math.max(0, context.window_tokens - context.used_tokens))} tokens remaining</p>}
-        <p>{context ? `Latest provider snapshot · ${new Date(context.measured_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. Your unsent draft is not included.` : `${providerNames[provider]} has not reported a context snapshot for this conversation.`}</p>
+        <p>{context ? estimated ? `Estimated from the largest input size the provider reported this turn · ${new Date(context.measured_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. No capacity figure is reported, so no percentage is shown. Your unsent draft is not included.` : `Latest provider snapshot · ${new Date(context.measured_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. Your unsent draft is not included.` : `${providerNames[provider]} has not reported a context snapshot for this conversation.`}</p>
       </section>
       <section>
         <div className="usage-section-title">{running ? "Current turn" : "Last turn"}<span>{rate == null ? "Speed not reported" : `${speed} tok/s average`}</span></div>

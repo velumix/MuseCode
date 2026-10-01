@@ -266,6 +266,11 @@ export function updatePreferences(patch: Partial<Preferences>) {
 export function retryPreferences() {
   updatePreferences({});
 }
+export async function flushPreferences() {
+  let pending: Promise<void>;
+  do { pending = writes; await pending; } while (pending !== writes);
+  if (snapshot.status === "error") throw new Error(snapshot.error);
+}
 // Settings in separate phone tabs share one local profile. Desktop preferences
 // are owned by the native single-instance app and do not follow browser writes.
 window.addEventListener("storage", (event) => {

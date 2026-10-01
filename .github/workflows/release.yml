@@ -1,0 +1,85 @@
+name: Windows release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing stable version tag, for example v0.6.6'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CI: true
+      CARGO_TERM_COLOR: always
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - name: Check release version
+        run: node scripts/release-manifest.mjs --version-only
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Prepare pinned Rust toolchain
+        run: rustup toolchain install
+      - name: Fetch dependencies and check bundled notices
+        run: |
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run legal:notices:check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run legal:check
+      - name: Build signed Windows installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw 'Configure the updater signing secrets before releasing.' }
+          npm run tauri -- build --ci --bundles nsis
+      - name: Prepare updater feed
+        run: |
+          npm run legal:notices:check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/release-manifest.mjs
+      - name: Save signed release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: VelumCode-${{ env.RELEASE_TAG }}-windows-x64
+          path: artifacts/release/${{ env.RELEASE_TAG }}/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+      - name: Create GitHub release draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $releaseDirectory = Join-Path 'artifacts/release' $env:RELEASE_TAG
+          $releaseAssets = @(Get-ChildItem -LiteralPath $releaseDirectory -File | ForEach-Object { $_.FullName })
+          $releaseNotes = Join-Path $releaseDirectory 'release-notes.md'
+          $existing = gh release view $env:RELEASE_TAG --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if (-not ($existing | ConvertFrom-Json).isDraft) { throw 'Published release assets are immutable. Bump the version instead.' }
+            gh release upload $env:RELEASE_TAG @releaseAssets --clobber
+          } else {
+            gh release create $env:RELEASE_TAG @releaseAssets --verify-tag --draft --title "Velum Code $env:RELEASE_TAG" --notes-file $releaseNotes
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

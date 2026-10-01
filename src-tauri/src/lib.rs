@@ -2,6 +2,7 @@ mod app_context;
 mod automation;
 mod bot_actions;
 mod bots;
+mod child_process;
 mod desktop;
 mod events;
 mod history;
@@ -27,6 +28,7 @@ mod storage;
 mod tailscale;
 mod tool_bridge;
 mod tool_control;
+mod updates;
 mod usb;
 mod workspace_access;
 mod workspace_tools;
@@ -80,7 +82,8 @@ pub fn run() {
             desktop::setup(app)?;
             preferences::setup(app)?;
             tool_bridge::setup(app)?;
-            remote::setup(app)
+            remote::setup(app)?;
+            updates::setup(app.handle())
         })
         .on_window_event(desktop::close_to_tray)
         .invoke_handler(tauri::generate_handler![
@@ -114,6 +117,7 @@ pub fn run() {
             pty::pty_spawn,
             providers::provider_status,
             provider_models::provider_models,
+            provider_models::provider_warmup,
             runner::agent_configure,
             runner::agent_set_permissions,
             runner::agent_check_access,
@@ -145,19 +149,30 @@ pub fn run() {
             desktop::desktop_test_notification,
             desktop::desktop_take_navigation,
             desktop::desktop_show,
-            desktop::desktop_quit
+            desktop::desktop_quit,
+            updates::updates_status,
+            updates::updates_set_automatic,
+            updates::updates_check,
+            updates::updates_download,
+            updates::updates_install
         ])
         .build(context)
         .expect("error while building tauri application")
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
-                automation::shutdown(app);
-                remote::shutdown(app);
-                desktop::shutdown(app);
-                app.state::<AgentState>().shutdown();
-                history::shutdown(app);
-                app.state::<PtyState>().shutdown();
-                app.state::<provider_auth::AuthState>().shutdown();
+                shutdown(app);
             }
         });
+}
+
+// The Windows updater exits directly after launching NSIS. Its before-exit
+// hook must perform the same cleanup as a normal Tauri exit.
+fn shutdown(app: &tauri::AppHandle) {
+    automation::shutdown(app);
+    remote::shutdown(app);
+    desktop::shutdown(app);
+    app.state::<AgentState>().shutdown();
+    history::shutdown(app);
+    app.state::<PtyState>().shutdown();
+    app.state::<provider_auth::AuthState>().shutdown();
 }

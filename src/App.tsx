@@ -30,6 +30,7 @@ import type { PluginSelection } from "./components/PluginPanel";
 import type { InstalledPlugin, PluginChatHandle } from "./plugins";
 import { loadDesktop, saveDesktop, saveDraft, recoveryError } from "./desktopHistory";
 import { finishStartup } from "./startup";
+import { useUpdates } from "./updates";
 import type { MemoryView } from "./memory";
 import { preferredProvider, preferredOptions, saveOptions, providerNames, type Provider, type RunOptions } from "./providers";
 
@@ -91,6 +92,7 @@ function statusText(tab: Tab): string {
 }
 
 export default function App() {
+  const updates = useUpdates();
   const {settings} = usePreferences();
   const [recovery] = useState(loadDesktop);
   const [tabs, setTabs] = useState<Tab[]>(() => recovery.tabs.length ? recovery.tabs.map((saved, i) => ({ ...createTab(i + 1, saved.provider), ...saved })) : [createTab(1)]);
@@ -99,6 +101,7 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [remoteOpen, setRemoteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsPage, setSettingsPage] = useState<"appearance" | "updates">("appearance");
   const [bots,setBots]=useState<BotProfile[]>([]);
   const [botPanel,setBotPanel]=useState<'manage'|'handoff'|'activity'|null>(null);
   const refreshBots=useCallback(async()=>{const view=await invoke<BotView>('bots_request',{request:{action:'list'}});setBots(view?.profiles||[]);},[]);
@@ -591,6 +594,7 @@ export default function App() {
           </>
         )}
         <span className="status-spacer" />
+        {updates?.phase === "ready" && <button type="button" className="notification-toggle update-ready" onClick={() => { setSettingsPage("updates"); setSettingsOpen(true); }}>Update ready · {updates.version}</button>}
         <button type="button" className="notification-toggle" onClick={() => setRemoteOpen(true)}><Icon name="phone" size={13} />Connect phone</button>
         <button type="button" className="notification-toggle" aria-label="Background notifications" aria-pressed={desktop.notifications_enabled} title={desktop.notifications_enabled ? "Background notifications on — click to mute" : "Background notifications muted — click to enable"} onClick={() => void toggleNotifications()}><Icon name="bell" size={13} />{desktop.notifications_enabled ? "Notifications on" : "Notifications muted"}</button>
         <span className="footer-hint" title="Closing the window keeps Velum Code running. Use the tray menu or Ctrl+K → Quit to exit.">Runs in tray</span>
@@ -598,7 +602,7 @@ export default function App() {
       </main>
       </div>
       {paletteOpen && <CommandPalette actions={paletteActions} onClose={() => setPaletteOpen(false)} />}
-      {settingsOpen && <Suspense fallback={null}><SettingsPanel onClose={() => setSettingsOpen(false)} notifications={{ enabled: desktop.notifications_enabled, toggle: toggleNotifications, test: testNotification }} /></Suspense>}
+      {settingsOpen && <Suspense fallback={null}><SettingsPanel initialPage={settingsPage} updates={updates} onClose={() => { setSettingsOpen(false); setSettingsPage("appearance"); }} notifications={{ enabled: desktop.notifications_enabled, toggle: toggleNotifications, test: testNotification }} /></Suspense>}
       {remoteOpen && <Suspense fallback={null}><RemotePanel onClose={() => setRemoteOpen(false)} /></Suspense>}
       {boardWorkspace && <Suspense fallback={null}><KanbanPanel workspace={boardWorkspace} bots={bots} previewSchedule={(cron,timezone)=>invoke('automation_request',{request:{action:'preview',cron,timezone}})} request={request=>invoke<Board>("kanban_request",{workspace:boardWorkspace,request})} onClose={()=>setBoardWorkspace(null)} onWork={workOnCard}/></Suspense>}
       {pluginPanel && <Suspense fallback={null}><PluginPanel plugins={plugins} selection={pluginPanel.selection} onClose={() => setPluginPanel(null)} onRefresh={refreshPlugins} workspace={activeTab?.workspace || ""} messages={() => pluginHandles.current.get(activeTab?.id)?.messages() || []} onInsert={text => { pluginHandles.current.get(activeTab?.id)?.insert(text); focusComposer(); }} /></Suspense>}

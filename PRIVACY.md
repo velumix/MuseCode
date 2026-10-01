@@ -2,7 +2,7 @@
 
 **DRAFT FOR OWNER AND LEGAL REVIEW — NOT YET A FINAL PUBLISHER NOTICE.**
 
-Behavior reviewed: desktop 0.6.5 and Android companion 0.6.1, October 1, 2026.
+Behavior reviewed: desktop 0.6.6 and Android companion 0.6.1, October 1, 2026.
 Effective date: **[EFFECTIVE_DATE]**.
 Publisher: **[PUBLISHER_LEGAL_NAME]**, **[PUBLISHER_COUNTRY_AND_STATE]**.
 Privacy contact: **[PRIVACY_CONTACT_EMAIL]**.
@@ -62,6 +62,13 @@ Relevant external notices include [OpenAI's privacy policy](https://openai.com/p
 and [Microsoft's privacy statement](https://privacy.microsoft.com/en-us/privacystatement).
 Use the current notice for your Muse operator and each other tool or service
 you connect. Consumer and business/API arrangements may differ.
+
+The installed Windows app checks GitHub for signed app updates after launch
+and every six hours by default, and downloads new stable releases in the
+background. Turn off automatic checks and downloads in **Settings → Updates**;
+manual update actions still contact GitHub. Update requests carry connection
+metadata, not conversations, drafts, workspace paths or provider credentials.
+Restarting to install is a separate action.
 
 Opening the plugin directory or checking/installing an update contacts GitHub's
 public repository/API services. Those services receive ordinary connection

@@ -1,4 +1,4 @@
-Velum Code 0.6.5 — third-party software notices
+Velum Code 0.6.6 — third-party software notices
 
 Conservative Windows x64 inventory: installed npm non-dev packages; Cargo normal and build dependency closure (including host/procedural-macro tools); pinned NSIS, WebView2 SDK and Rust standard-library notices. Not a byte-level binary SBOM. Android has its own inventory. External provider CLIs, Tailscale, ADB and the separately installed WebView2 Runtime are not included as Velum-bundled packages.
 
@@ -842,6 +842,11 @@ Upstream: https://github.com/hyperium/mime
   LICENSE-APACHE: TEXT a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2
   LICENSE-MIT: TEXT df9cfd06d8a44d9a671eadd39ffd97f166481da015a30f45dfd27886209c5922
 
+cargo: minisign-verify 0.2.5
+License metadata: MIT
+Upstream: https://github.com/jedisct1/rust-minisign-verify
+  LICENSE: TEXT 42c8695fbc468866d9756be99af0ba4e37d733f8daa3c8827c8d80b8bec1b2f9
+
 cargo: miniz_oxide 0.8.9
 License metadata: MIT OR Zlib OR Apache-2.0
 Upstream: https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide
@@ -1111,6 +1116,12 @@ Upstream: https://github.com/seanmonstar/reqwest
   LICENSE-APACHE: TEXT 751963a8b88c0e3a9f27e98933079fbcf09b9998b2c13ac49c2e4d58444520d6
   LICENSE-MIT: TEXT 47d4e1803702728e03d30f8a848ae2249ba274bbd9f8443e803f7924d83cd371
 
+cargo: reqwest 0.13.5
+License metadata: MIT OR Apache-2.0
+Upstream: https://github.com/seanmonstar/reqwest
+  LICENSE-APACHE: TEXT 751963a8b88c0e3a9f27e98933079fbcf09b9998b2c13ac49c2e4d58444520d6
+  LICENSE-MIT: TEXT dd87e27dfbaa888cb77ea34592648a7743636b8dce07e49543bddda0fcfc73bc
+
 cargo: ring 0.17.14
 License metadata: Apache-2.0 AND ISC
 Upstream: https://github.com/briansmith/ring
@@ -1138,6 +1149,12 @@ License metadata: MIT OR Apache-2.0
 Upstream: https://github.com/rustls/pki-types
   LICENSE-APACHE: TEXT 45fd05c4865e7c350b98ad7ac50e1b15462d49af4a91e9b0c9dd933dc9a69742
   LICENSE-MIT: TEXT 9117d922e667125508dde62b02c1f57ed22f5ad21eb536aa2e2d99e1c796e639
+
+cargo: rustls-platform-verifier 0.7.1
+License metadata: MIT OR Apache-2.0
+Upstream: https://github.com/rustls/rustls-platform-verifier
+  LICENSE-APACHE: TEXT c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
+  LICENSE-MIT: TEXT 1c7cf76689c837a68ed8d704994e52a0f2940c087958f860d17f3186afbdcc0c
 
 cargo: rustls-webpki 0.103.15
 License metadata: ISC
@@ -1462,6 +1479,13 @@ Upstream: https://github.com/tauri-apps/plugins-workspace
   LICENSE_APACHE-2.0: TEXT 0cec06e0e55fbc3dc5cee4fca9b607f66cb8f4e4dbcf3b3c013594dd156732e9
   LICENSE_MIT: TEXT b7f455413bfe5f9d7da501a4468d4c5f866a432c325947e98cc9535e8b26cd6d
 
+cargo: tauri-plugin-updater 2.12.0
+License metadata: Apache-2.0 OR MIT
+Upstream: https://github.com/tauri-apps/plugins-workspace
+  LICENSE.spdx: TEXT eb8a6c84630461b352badcab1dbe5d0168c56d377358b2b8c86b51003272d5ef
+  LICENSE_APACHE-2.0: TEXT 0cec06e0e55fbc3dc5cee4fca9b607f66cb8f4e4dbcf3b3c013594dd156732e9
+  LICENSE_MIT: TEXT 89ff9689dcf9dd53968785d05a26f7898bb169dbfcada8d032b3e68cf0d55607
+
 cargo: tauri-plugin 2.6.3
 License metadata: Apache-2.0 OR MIT
 Upstream: https://github.com/tauri-apps/tauri
@@ -1496,6 +1520,12 @@ License metadata: Apache-2.0 OR MIT
 Upstream: https://github.com/tauri-apps/tauri
   LICENSE_APACHE-2.0: TEXT 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594
   LICENSE_MIT: TEXT 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d
+
+cargo: tempfile 3.27.0
+License metadata: MIT OR Apache-2.0
+Upstream: https://github.com/Stebalien/tempfile
+  LICENSE-APACHE: TEXT a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2
+  LICENSE-MIT: TEXT 8b427f5bc501764575e52ba4f9d95673cf8f6d80a86d0d06599852e1a9a20a36
 
 cargo: tendril 0.5.1
 License metadata: MIT OR Apache-2.0
@@ -1567,6 +1597,11 @@ License metadata: MIT OR Apache-2.0
 Upstream: https://github.com/rustls/tokio-rustls
   LICENSE-APACHE: TEXT cc117d90b498b32b11a886f279b359da16a73c3b01efbb2f5cc004b20262334e
   LICENSE-MIT: TEXT e20fa2b8e0a2565f24a792b94b4bf4b6c2b9d36f781d8a9516e218a036e6677a
+
+cargo: tokio-util 0.7.19
+License metadata: MIT
+Upstream: https://github.com/tokio-rs/tokio
+  LICENSE: TEXT 253cd04c6714889df2d32f3f64d669179a1c95c76ac43c40882c52eb06bc3552
 
 cargo: tokio 1.53.1
 License metadata: MIT
@@ -1889,13 +1924,31 @@ Upstream: https://github.com/microsoft/windows-rs
   license-apache-2.0: TEXT c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b
   license-mit: TEXT c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383
 
+cargo: windows-registry 0.6.1
+License metadata: MIT OR Apache-2.0
+Upstream: https://github.com/microsoft/windows-rs
+  license-apache-2.0: TEXT c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b
+  license-mit: TEXT c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383
+
 cargo: windows-result 0.3.4
 License metadata: MIT OR Apache-2.0
 Upstream: https://github.com/microsoft/windows-rs
   license-apache-2.0: TEXT c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b
   license-mit: TEXT c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383
 
+cargo: windows-result 0.4.1
+License metadata: MIT OR Apache-2.0
+Upstream: https://github.com/microsoft/windows-rs
+  license-apache-2.0: TEXT c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b
+  license-mit: TEXT c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383
+
 cargo: windows-strings 0.4.2
+License metadata: MIT OR Apache-2.0
+Upstream: https://github.com/microsoft/windows-rs
+  license-apache-2.0: TEXT c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b
+  license-mit: TEXT c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383
+
+cargo: windows-strings 0.5.1
 License metadata: MIT OR Apache-2.0
 Upstream: https://github.com/microsoft/windows-rs
   license-apache-2.0: TEXT c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b
@@ -4363,6 +4416,31 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ===============================================================================
+TEXT 1c7cf76689c837a68ed8d704994e52a0f2940c087958f860d17f3186afbdcc0c
+===============================================================================
+MIT License
+
+Copyright (c) 2022 1Password
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+===============================================================================
 TEXT 1e697ce8d21401fbf1bddd9b5c3fd4c4c79ae1e3bdf51f81761c85e11d5a89cd
 ===============================================================================
 The MIT License (MIT)
@@ -6481,6 +6559,69 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+===============================================================================
+TEXT 42c8695fbc468866d9756be99af0ba4e37d733f8daa3c8827c8d80b8bec1b2f9
+===============================================================================
+Copyright (c) 2019-2025 Frank Denis
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+--
+
+Code in the src/crypto folder is derived from the rust-crypto project:
+https://github.com/DaGenix/rust-crypto
+
+Original ISC license follows:
+
+Copyright (c) 2006-2009 Graydon Hoare
+Copyright (c) 2009-2013 Mozilla Foundation
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 
 ===============================================================================
 TEXT 42d3bf7e7d4d49d72c0555d14ed99c3ee7ce9ce3cbffbc38bbafe8c103f50969
@@ -11202,6 +11343,35 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+===============================================================================
+TEXT 8b427f5bc501764575e52ba4f9d95673cf8f6d80a86d0d06599852e1a9a20a36
+===============================================================================
+Copyright (c) 2015 Steven Allen
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 
 ===============================================================================
 TEXT 8b43ce8accd61e9d370b5ca9e9c4f953279b5c239926c62315b40e24df51b726
@@ -16933,6 +17103,30 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
 CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+===============================================================================
+TEXT dd87e27dfbaa888cb77ea34592648a7743636b8dce07e49543bddda0fcfc73bc
+===============================================================================
+Copyright (c) 2016-2026 Sean McArthur
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
 
 ===============================================================================
 TEXT de701d0618d694feb1af90f02181a1763d9b0bdeb70a3a592781e529077dba65

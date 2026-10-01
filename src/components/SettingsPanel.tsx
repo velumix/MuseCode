@@ -10,6 +10,8 @@ import {
 } from "react";
 import Icon from "./Icon";
 import ToolsSettings from "./ToolsSettings";
+import { checkForUpdates, downloadUpdate, restartToUpdate, setAutomaticUpdates, updateMessage, type UpdateStatus } from "../updates";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { palette, themes } from "../appearance";
 import {
   defaults,
@@ -24,7 +26,7 @@ import {
 } from "../preferences";
 import "./SettingsPanel.css";
 
-type Page = "appearance" | "glass" | "layout" | "terminal" | "preferences";
+type Page = "appearance" | "glass" | "layout" | "terminal" | "preferences" | "updates";
 const pages: {
   id: Page;
   title: string;
@@ -59,6 +61,12 @@ const pages: {
     id: "preferences",
     title: "Preferences",
     subtitle: "The way you like to work",
+    icon: "command",
+  },
+  {
+    id: "updates",
+    title: "Updates",
+    subtitle: "Keep Velum current",
     icon: "command",
   },
 ];
@@ -252,9 +260,13 @@ export default function SettingsPanel({
   onClose,
   phone = false,
   notifications,
+  updates,
+  initialPage = "appearance",
 }: {
   onClose: () => void;
   phone?: boolean;
+  updates?: UpdateStatus | null;
+  initialPage?: Page;
   notifications?: {
     enabled: boolean;
     toggle: () => Promise<void>;
@@ -269,12 +281,13 @@ export default function SettingsPanel({
     error,
   } = usePreferences();
   const visiblePages = phone
-    ? pages.filter((item) => item.id !== "terminal")
+    ? pages.filter((item) => item.id !== "terminal" && item.id !== "updates")
     : pages;
-  const [page, setPage] = useState<Page>("appearance");
+  const [page, setPage] = useState<Page>(initialPage);
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("");
   const [fileError, setFileError] = useState("");
+  const [updateError, setUpdateError] = useState("");
   const [confirmReset, setConfirmReset] = useState(false);
   const [busy, setBusy] = useState(false);
   const dialog = useRef<HTMLDivElement>(null);
@@ -397,6 +410,14 @@ export default function SettingsPanel({
       setBusy(false);
     }
   };
+  const updateAction = async (run: () => Promise<unknown>) => {
+    setBusy(true);
+    setUpdateError("");
+    try { await run(); }
+    catch (error) { setUpdateError(String(error).replace(/^Error: /, "")); }
+    finally { setBusy(false); }
+  };
+  const updating = busy || updates?.phase === "checking" || updates?.phase === "downloading" || updates?.phase === "installing";
   const slider = (
     name: keyof Preferences,
     label: string,
@@ -1000,6 +1021,28 @@ export default function SettingsPanel({
                       "Scrollback lines",
                       "How much terminal output to keep in memory.",
                     )}
+                  </Group>
+                </div>
+              )}
+              {!phone && show("updates") && (
+                <div id="settings-page-updates" role={search ? undefined : "tabpanel"} aria-labelledby="settings-tab-updates">
+                  <Group title="App updates">
+                    <Setting label="Velum Code" hint={updates ? `Installed version ${updates.current_version}` : "Update status unavailable."}>
+                      {() => <button type="button" className="settings-button" onClick={() => void updateAction(() => openUrl("https://github.com/velumix/VelumCode/releases"))}>Release notes</button>}
+                    </Setting>
+                    {updates?.supported ? <>
+                      <Toggle label="Automatic updates" hint="Check GitHub and download updates in the background. Choose when to restart and install." value={updates.automatic} change={() => void updateAction(() => setAutomaticUpdates(!updates.automatic))} disabled={busy || updates.phase === "installing"} />
+                      <Setting label={updateMessage(updates)} hint="Updates are checked after launch and every six hours. Restart closes terminals and restores saved conversations and drafts.">
+                        {() => <div className="settings-update-actions">
+                          <button type="button" className="settings-button" disabled={updating || updates.phase === "ready"} onClick={() => void updateAction(checkForUpdates)}>Check for updates</button>
+                          {updates.phase === "available" && <button type="button" className="settings-button settings-primary" disabled={updating} onClick={() => void updateAction(downloadUpdate)}>Download update</button>}
+                          {updates.phase === "ready" && <button type="button" className="settings-button settings-primary" disabled={updating} onClick={() => void updateAction(restartToUpdate)}>Restart to update</button>}
+                        </div>}
+                      </Setting>
+                      {updates.phase === "downloading" && <progress className="settings-update-progress" aria-label="Update download progress" max={updates.total || undefined} value={updates.total ? updates.downloaded : undefined} />}
+                      {updates.checked_at && <p className="settings-info">Last checked {new Date(updates.checked_at).toLocaleString()}.</p>}
+                    </> : <p className="settings-info">App updates are available in the installed Windows release.</p>}
+                    {(updateError || updates?.error) && <p className="settings-error" role="alert">{updateError || updates?.error}</p>}
                   </Group>
                 </div>
               )}

@@ -48,7 +48,12 @@ if ($Build -or -not (Test-Path $installer)) {
   $prevEap = $ErrorActionPreference
   $ErrorActionPreference = 'Continue'
   try {
-    npx.cmd tauri build --bundles nsis
+    $localUpdateKey = Join-Path $env:USERPROFILE '.tauri\velum-code\updater.key'
+    if ($env:TAURI_SIGNING_PRIVATE_KEY -or (Test-Path -LiteralPath $localUpdateKey)) {
+      & (Join-Path $root 'scripts\build-release.ps1')
+    } else {
+      npx.cmd tauri build --bundles nsis --config src-tauri/tauri.preview.conf.json
+    }
     if ($LASTEXITCODE -ne 0) { throw "tauri build failed with code $LASTEXITCODE" }
   } finally {
     $ErrorActionPreference = $prevEap
@@ -62,6 +67,6 @@ if (-not (Test-Path $exe)) { throw "Install verification failed: $exe missing" }
 Write-Output "Installed $product $version -> $exe"
 
 if ($Launch) {
-  Start-Process -FilePath $exe
+  Start-Process -FilePath $exe -WindowStyle Hidden
   Write-Output 'Launched.'
 }

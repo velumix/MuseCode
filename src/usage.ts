@@ -2,6 +2,9 @@ export interface ContextUsage {
   used_tokens: number;
   window_tokens: number | null;
   measured_at: number;
+  /** True when the provider reported no capacity and `used_tokens` is a
+      flagged estimate (Muse). The strip must label it, never show a %. */
+  estimated?: boolean;
 }
 
 export interface TurnUsage {
@@ -32,7 +35,7 @@ export function mergeUsage(previous: UsageSnapshot, event: Record<string, unknow
   const stamp = count(context?.measured_at);
   if (context && used !== null && stamp !== null) {
     const capacity = count(context.window_tokens);
-    next.context = { used_tokens: used, window_tokens: capacity && capacity > 0 ? capacity : null, measured_at: stamp };
+    next.context = { used_tokens: used, window_tokens: capacity && capacity > 0 ? capacity : null, measured_at: stamp, estimated: context.estimated === true };
   }
   const turn = record(event.turn);
   if (turn) next.turn = {

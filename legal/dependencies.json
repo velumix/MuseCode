@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "appVersion": "0.6.5",
+  "appVersion": "0.6.6",
   "target": "x86_64-pc-windows-msvc",
   "scope": "Conservative Windows x64 inventory: installed npm non-dev packages; Cargo normal and build dependency closure (including host/procedural-macro tools); pinned NSIS, WebView2 SDK and Rust standard-library notices. Not a byte-level binary SBOM. Android has its own inventory. External provider CLIs, Tailscale, ADB and the separately installed WebView2 Runtime are not included as Velum-bundled packages.",
   "inputNormalization": "UTF-8 text with LF line endings; upstream notice/archive hashes use original bytes",
   "inputs": {
-    "package-lock.json": "db74a2839aafd388b2b2428224001fe58933732fdc59d27eda0f8a2b274815bc",
-    "src-tauri/Cargo.lock": "932def9462b36dfe1b04af502cc0cc27df574a92cd1cbef762cb4040e5452057",
+    "package-lock.json": "af7de2170a1407b0858da0e5b664c368b65694a9afeca1cce59c99cf3974d671",
+    "src-tauri/Cargo.lock": "558aef140d679596973bd01b3d2029e636965d6ee4cd5469e3025ef33cdff2c8",
     "rust-toolchain.toml": "887f9be066a15585a2c583578e84b0fcb541126d81546276bad3d2ff00d61167",
     "legal/upstream.json": "a6d226c4bd3ca3afe7f956a0a3c1f904c639c66945dd22f0d653b472019570a0"
   },
@@ -2605,6 +2605,21 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "minisign-verify",
+      "version": "0.2.5",
+      "license": "MIT",
+      "repository": "https://github.com/jedisct1/rust-minisign-verify",
+      "checksum": "22f9645cb765ea72b8111f36c522475d2daa0d22c957a9826437e97534bc4e9e",
+      "sourceUrl": "https://crates.io/api/v1/crates/minisign-verify/0.2.5/download",
+      "notices": [
+        {
+          "path": "LICENSE",
+          "sha256": "42c8695fbc468866d9756be99af0ba4e37d733f8daa3c8827c8d80b8bec1b2f9"
+        }
+      ]
+    },
+    {
+      "ecosystem": "cargo",
       "name": "miniz_oxide",
       "version": "0.8.9",
       "license": "MIT OR Zlib OR Apache-2.0",
@@ -3451,6 +3466,25 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "reqwest",
+      "version": "0.13.5",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/seanmonstar/reqwest",
+      "checksum": "16a1cfa75cc186dd73d5818e510e042e40927bccc9c236b061cea97e1eb08029",
+      "sourceUrl": "https://crates.io/api/v1/crates/reqwest/0.13.5/download",
+      "notices": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "751963a8b88c0e3a9f27e98933079fbcf09b9998b2c13ac49c2e4d58444520d6"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "dd87e27dfbaa888cb77ea34592648a7743636b8dce07e49543bddda0fcfc73bc"
+        }
+      ]
+    },
+    {
+      "ecosystem": "cargo",
       "name": "ring",
       "version": "0.17.14",
       "license": "Apache-2.0 AND ISC",
@@ -3538,6 +3572,25 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "9117d922e667125508dde62b02c1f57ed22f5ad21eb536aa2e2d99e1c796e639"
+        }
+      ]
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "rustls-platform-verifier",
+      "version": "0.7.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/rustls/rustls-platform-verifier",
+      "checksum": "1167586491e2b18b8bfbb293e8180ec17c201c4f076d7cb3070ca964e7598f98",
+      "sourceUrl": "https://crates.io/api/v1/crates/rustls-platform-verifier/0.7.1/download",
+      "notices": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "1c7cf76689c837a68ed8d704994e52a0f2940c087958f860d17f3186afbdcc0c"
         }
       ]
     },
@@ -4551,6 +4604,29 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "tauri-plugin-updater",
+      "version": "2.12.0",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/tauri-apps/plugins-workspace",
+      "checksum": "7a5cad8ed5948d988e1018ecd31e27cacedbf72ce3fb972940c3e4bf51639e4b",
+      "sourceUrl": "https://crates.io/api/v1/crates/tauri-plugin-updater/2.12.0/download",
+      "notices": [
+        {
+          "path": "LICENSE.spdx",
+          "sha256": "eb8a6c84630461b352badcab1dbe5d0168c56d377358b2b8c86b51003272d5ef"
+        },
+        {
+          "path": "LICENSE_APACHE-2.0",
+          "sha256": "0cec06e0e55fbc3dc5cee4fca9b607f66cb8f4e4dbcf3b3c013594dd156732e9"
+        },
+        {
+          "path": "LICENSE_MIT",
+          "sha256": "89ff9689dcf9dd53968785d05a26f7898bb169dbfcada8d032b3e68cf0d55607"
+        }
+      ]
+    },
+    {
+      "ecosystem": "cargo",
       "name": "tauri-plugin",
       "version": "2.6.3",
       "license": "Apache-2.0 OR MIT",
@@ -4654,6 +4730,25 @@
         {
           "path": "LICENSE_MIT",
           "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d"
+        }
+      ]
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "tempfile",
+      "version": "3.27.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/Stebalien/tempfile",
+      "checksum": "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd",
+      "sourceUrl": "https://crates.io/api/v1/crates/tempfile/3.27.0/download",
+      "notices": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "8b427f5bc501764575e52ba4f9d95673cf8f6d80a86d0d06599852e1a9a20a36"
         }
       ]
     },
@@ -4878,6 +4973,21 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "e20fa2b8e0a2565f24a792b94b4bf4b6c2b9d36f781d8a9516e218a036e6677a"
+        }
+      ]
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "tokio-util",
+      "version": "0.7.19",
+      "license": "MIT",
+      "repository": "https://github.com/tokio-rs/tokio",
+      "checksum": "494815d09bf52b5548659851081238f0ca39ff638363907596da739561c62c52",
+      "sourceUrl": "https://crates.io/api/v1/crates/tokio-util/0.7.19/download",
+      "notices": [
+        {
+          "path": "LICENSE",
+          "sha256": "253cd04c6714889df2d32f3f64d669179a1c95c76ac43c40882c52eb06bc3552"
         }
       ]
     },
@@ -5886,6 +5996,25 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "windows-registry",
+      "version": "0.6.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "02752bf7fbdcce7f2a27a742f798510f3e5ad88dbe84871e5168e2120c3d5720",
+      "sourceUrl": "https://crates.io/api/v1/crates/windows-registry/0.6.1/download",
+      "notices": [
+        {
+          "path": "license-apache-2.0",
+          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b"
+        },
+        {
+          "path": "license-mit",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ]
+    },
+    {
+      "ecosystem": "cargo",
       "name": "windows-result",
       "version": "0.3.4",
       "license": "MIT OR Apache-2.0",
@@ -5905,12 +6034,50 @@
     },
     {
       "ecosystem": "cargo",
+      "name": "windows-result",
+      "version": "0.4.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "7781fa89eaf60850ac3d2da7af8e5242a5ea78d1a11c49bf2910bb5a73853eb5",
+      "sourceUrl": "https://crates.io/api/v1/crates/windows-result/0.4.1/download",
+      "notices": [
+        {
+          "path": "license-apache-2.0",
+          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b"
+        },
+        {
+          "path": "license-mit",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ]
+    },
+    {
+      "ecosystem": "cargo",
       "name": "windows-strings",
       "version": "0.4.2",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/microsoft/windows-rs",
       "checksum": "56e6c93f3a0c3b36176cb1327a4958a0353d5d166c2a35cb268ace15e91d3b57",
       "sourceUrl": "https://crates.io/api/v1/crates/windows-strings/0.4.2/download",
+      "notices": [
+        {
+          "path": "license-apache-2.0",
+          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b"
+        },
+        {
+          "path": "license-mit",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ]
+    },
+    {
+      "ecosystem": "cargo",
+      "name": "windows-strings",
+      "version": "0.5.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/microsoft/windows-rs",
+      "checksum": "7837d08f69c77cf6b07689544538e017c1bfcf57e34b4c0ff58e6c2cd3b37091",
+      "sourceUrl": "https://crates.io/api/v1/crates/windows-strings/0.5.1/download",
       "notices": [
         {
           "path": "license-apache-2.0",

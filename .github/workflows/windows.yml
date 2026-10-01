@@ -47,7 +47,7 @@ jobs:
           npm run legal:notices:check
           npm run legal:check
       - name: Build Windows installer
-        run: npx tauri build --bundles nsis
+        run: npx tauri build --bundles nsis --config src-tauri/tauri.preview.conf.json
       - name: Check installer toolchain notices and prepare download
         shell: pwsh
         run: |

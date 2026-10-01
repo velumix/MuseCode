@@ -19,6 +19,32 @@ test("launch branding paints before the app bundle and blocks hidden controls", 
   await expect(page.locator("#root")).toHaveAttribute("aria-busy", "true");
 });
 
+test("launch warms the provider CLI and reports readiness before the first prompt", async ({ page }) => {
+  await boot(page);
+  await expect(page.locator(".provider-bar")).toBeVisible();
+  await expect(page.locator(".provider-bar")).toContainText("Muse CLI ready · Muse Code 1.4.2 · 2 models");
+  await expect.poll(() => page.evaluate(() => (window as any).qa.calls.some((call: any) => call.cmd === "provider_warmup"))).toBe(true);
+});
+
+test("a silent provider CLI reports not-responding instead of hanging the controls", async ({ page }) => {
+  await page.addInitScript(() => { (window as any).qaFailWarmup = true; });
+  await boot(page);
+  await expect(page.locator(".provider-bar")).toBeVisible();
+  await expect(page.locator(".provider-bar")).toContainText("Muse CLI did not respond");
+});
+
+test("refresh retries a failed CLI warmup and updates readiness", async ({ page }) => {
+  await page.addInitScript(() => { (window as any).qaFailWarmup = true; });
+  await boot(page);
+  await expect(page.locator(".provider-bar")).toBeVisible();
+  await expect(page.locator(".provider-bar")).toContainText("Muse CLI did not respond");
+  const count = await page.evaluate(() => (window as any).qa.calls.filter((call: any) => call.cmd === "provider_warmup").length);
+  await page.evaluate(() => { (window as any).qaFailWarmup = false; });
+  await page.getByRole("button", { name: "Refresh providers and models" }).click();
+  await expect(page.locator(".provider-bar")).toContainText("Muse CLI ready · Muse Code 1.4.2 · 2 models");
+  await expect.poll(() => page.evaluate(() => (window as any).qa.calls.filter((call: any) => call.cmd === "provider_warmup").length)).toBe(count + 1);
+});
+
 test("ready desktop dismisses the intro, focuses the composer and does not replay", async ({ page }) => {
   await boot(page);
   const composer = page.locator(".chat-wrap:not(.hidden) textarea");

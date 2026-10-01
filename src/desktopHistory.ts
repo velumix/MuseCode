@@ -17,15 +17,27 @@ const draftCache = new Map<string, string>();
 let lastDesktopData = "";
 let queued = false;
 let writes: Promise<void> = Promise.resolve();
+let writeError: string | null = null;
 export let recoveryError: string | null = null;
 function persist(command: string, args: Record<string, unknown>) {
   // Keep whole-desktop checkpoints and individual drafts in submission order.
   // Otherwise a slow checkpoint can replace a more recent draft in Rust.
-  writes = writes.then(() => invoke<void>(command, args)).catch((error) => {
+  writes = writes.then(async () => {
+    await invoke<void>(command, args);
+    writeError = null;
+  }).catch((error) => {
+    writeError = String(error);
     window.dispatchEvent(
       new CustomEvent("velum:recovery-error", { detail: String(error) }),
     );
   });
+}
+export async function flushDesktop() {
+  checkpoint();
+  await Promise.resolve();
+  let pending: Promise<void>;
+  do { pending = writes; await pending; } while (pending !== writes);
+  if (writeError) throw new Error(`Could not save the desktop before restarting: ${writeError}`);
 }
 function checkpoint() {
   if (queued) return;

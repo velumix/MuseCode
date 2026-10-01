@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     io::{BufRead, BufReader, Read, Write},
-    process::{Child, ChildStdin, Command, Stdio},
+    process::{ChildStdin, Command, Stdio},
     sync::{mpsc, LazyLock, Mutex},
     time::{Duration, Instant},
 };
@@ -89,19 +89,8 @@ static CATALOGS: LazyLock<Mutex<HashMap<Provider, (Instant, Catalog)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 // Every discovery process is bounded and reaped, including shim descendants.
-struct Process(Child);
-impl Drop for Process {
-    fn drop(&mut self) {
-        if self.0.try_wait().ok().flatten().is_none() {
-            #[cfg(windows)]
-            crate::runner::terminate_tree(self.0.id());
-            let _ = self.0.kill();
-        }
-        let _ = self.0.wait();
-    }
-}
-fn command(provider: Provider) -> Result<Command, String> {
-    let path = provider.resolve().ok_or_else(|| provider.missing())?;
+struct Process(crate::child_process::Child);
+fn command_path(path: &std::path::Path) -> Command {
     let mut cmd = if path
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("ps1"))
@@ -122,7 +111,11 @@ fn command(provider: Provider) -> Result<Command, String> {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000);
     }
-    Ok(cmd)
+    cmd
+}
+fn command(provider: Provider) -> Result<Command, String> {
+    let path = provider.resolve().ok_or_else(|| provider.missing())?;
+    Ok(command_path(&path))
 }
 struct Rpc {
     _process: Process,
@@ -139,7 +132,7 @@ impl Rpc {
             vec!["app-server", "--stdio"]
         });
         let mut process = Process(
-            cmd.spawn()
+            crate::child_process::Child::spawn(&mut cmd)
                 .map_err(|_| "Could not start model discovery.")?,
         );
         let input = process
@@ -373,7 +366,7 @@ fn discover(provider: Provider) -> Result<Catalog, String> {
         let mut cmd = command(provider)?;
         cmd.arg("models").stdin(Stdio::null());
         let mut process = Process(
-            cmd.spawn()
+            crate::child_process::Child::spawn(&mut cmd)
                 .map_err(|_| "Could not load Antigravity models.")?,
         );
         let mut out = process
@@ -488,9 +481,143 @@ pub async fn provider_models(provider: Provider, refresh: Option<bool>) -> Resul
         .map_err(|_| "Could not load models.".into())
 }
 
+#[derive(Clone, Serialize)]
+pub struct Warmup {
+    pub installed: bool,
+    pub version: Option<String>,
+    pub catalog_models: usize,
+    pub catalog_notice: Option<String>,
+    pub elapsed_ms: u64,
+}
+
+/// First stdout line of `program args`, or `None` when the binary is missing,
+/// exits nonzero, or outlives `timeout`. The caller owns the process tree and
+/// polls stdout itself; every return reaps the child and closes its job.
+fn cli_first_line(program: &std::path::Path, args: &[&str], timeout: Duration) -> Option<String> {
+    let mut command = command_path(program);
+    command
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = crate::child_process::Child::spawn(&mut command).ok()?;
+    let stdout = child.stdout.take()?;
+    let mut output = crate::child_process::Output::new(stdout, None).ok()?;
+    let deadline = Instant::now() + timeout;
+    let mut first = None;
+    loop {
+        if Instant::now() >= deadline {
+            return None;
+        }
+        let batch = output.poll().ok()?;
+        if first.is_none() {
+            first = batch
+                .stdout
+                .first()
+                .map(|line| line.chars().take(200).collect::<String>());
+        }
+        if let Some(status) = child.try_wait().ok()? {
+            if !status.success() {
+                return None;
+            }
+            if first.is_some() || output.closed() {
+                return first.filter(|line| !line.trim().is_empty());
+            }
+        }
+        if !batch.activity {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+/// Prove the CLI launches and prefill the model catalog cache at startup.
+/// Advisory only: every turn still validates and every exec still pays the
+/// provider's own connection cost (a persistent host is the follow-up).
+pub fn warmup(provider: Provider) -> Warmup {
+    let started = Instant::now();
+    let path = provider.resolve();
+    let version = path
+        .as_deref()
+        .and_then(|path| cli_first_line(path, &["--version"], Duration::from_secs(30)));
+    let found = if version.is_some() {
+        catalog(provider, false)
+    } else {
+        Catalog {
+            notice: Some(
+                "The CLI did not answer its version check. Check the Terminal view, then refresh."
+                    .into(),
+            ),
+            ..Default::default()
+        }
+    };
+    Warmup {
+        installed: path.is_some(),
+        version,
+        catalog_models: found.models.len(),
+        catalog_notice: found.notice,
+        elapsed_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+    }
+}
+
+#[tauri::command]
+pub async fn provider_warmup(provider: Provider) -> Result<Warmup, String> {
+    tauri::async_runtime::spawn_blocking(move || warmup(provider))
+        .await
+        .map_err(|_| "Could not warm up the provider.".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn warmup_reports_install_state_without_failing() {
+        let report = warmup(Provider::Muse);
+        assert_eq!(report.installed, Provider::Muse.resolve().is_some());
+        if !report.installed {
+            assert!(report.version.is_none());
+        }
+        if let Some(version) = report.version {
+            assert!(!version.trim().is_empty());
+        }
+    }
+    /// Verify a real timeout and cleanup, including the shim's descendants.
+    /// The fixture records only its own PIDs and actually sleeps past the
+    /// deadline; shell utilities that exit when stdin is redirected cannot
+    /// accidentally make this test pass.
+    #[cfg(windows)]
+    #[test]
+    fn cli_first_line_returns_output_and_enforces_timeout() {
+        let shell = std::path::Path::new("cmd");
+        assert_eq!(
+            cli_first_line(shell, &["/C", "echo hello"], Duration::from_secs(10)).as_deref(),
+            Some("hello")
+        );
+        let fixture = crate::child_process::tests::Fixture::new(&format!(
+            "{}\nStart-Sleep -Seconds 60",
+            crate::child_process::tests::SPAWN_DESCENDANT
+        ));
+        let before = Instant::now();
+        assert!(cli_first_line(
+            &fixture.script,
+            &[fixture.pids.to_str().unwrap()],
+            Duration::from_secs(8)
+        )
+        .is_none());
+        assert!(before.elapsed() < Duration::from_secs(12));
+        let pids = fixture.recorded_pids();
+        assert_eq!(
+            pids.len(),
+            2,
+            "both the probe and its descendant must have started"
+        );
+        crate::child_process::tests::assert_stopped(&pids);
+        assert!(cli_first_line(
+            std::path::Path::new("velum-missing-binary-xyz"),
+            &[],
+            Duration::from_secs(5)
+        )
+        .is_none());
+    }
     #[test]
     fn catalogs_keep_model_specific_efforts_and_hide_hidden_models() {
         let result = parse_rpc_models(

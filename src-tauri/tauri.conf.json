@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Velum Code",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "identifier": "com.velumix.musecode",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -28,6 +28,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": [
       "nsis"
     ],
@@ -86,6 +87,17 @@
         "headerImage": "nsis/header.bmp",
         "sidebarImage": "nsis/sidebar.bmp",
         "installerHooks": "nsis/installer-hooks.nsi"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM2MDNCRUI5OTRCNUI5NjIKUldSaXViV1V1YjRETnFCNWVDQkRnbU54THpNQm11ejRJKzRReHFpMHJZdGFGQXc2WDNxZzQ4RnQK",
+      "endpoints": [
+        "https://github.com/velumix/VelumCode/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

@@ -278,6 +278,11 @@ pub fn shutdown(app: &tauri::AppHandle) {
     let _ = state.flush(&app.state::<SessionLog>());
 }
 
+pub fn flush_before_update(app: &tauri::AppHandle) -> Result<(), String> {
+    app.state::<HistoryState>()
+        .flush(&app.state::<SessionLog>())
+}
+
 #[tauri::command]
 pub fn history_desktop_save(
     state: State<HistoryState>,

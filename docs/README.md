@@ -8,6 +8,7 @@
 - [Conversation experience](conversation-experience.md): focus, queues, corrections and reviewed lessons.
 - [Troubleshooting and support](support.md): common problems and a useful issue report.
 - [Data controls](data-controls.md): storage, retention, deletion and uninstalling.
+- [App updates](updates.md): automatic downloads and publishing signed GitHub releases.
 
 ## Features
 

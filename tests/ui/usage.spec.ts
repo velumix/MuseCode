@@ -14,6 +14,10 @@ test('usage accepts numeric provider data and rejects invalid counters', () => {
   expect(tokenRate(usage.turn, 4000)).toBe(30);
   expect(tokenRate({...usage.turn!,output_tokens:NaN})).toBeNull();
   expect(tokenRate(usage.turn,Infinity)).toBeNull();
+  const estimated = mergeUsage({}, { context: { used_tokens: 27299, window_tokens: null, measured_at: 10, estimated: true } });
+  expect(estimated.context).toMatchObject({ used_tokens: 27299, window_tokens: null, estimated: true });
+  expect(mergeUsage(estimated, { turn: { output_tokens: 5, elapsed_ms: 1000 } }).context?.estimated).toBe(true);
+  expect(mergeUsage({}, { context: { used_tokens: 50, window_tokens: 100, measured_at: 10 } }).context?.estimated).toBe(false);
 });
 
 test('phone event fold preserves context between turns and discards stale memory and reset counters', () => {
@@ -52,4 +56,18 @@ test('desktop context ring, rate, details and reset follow provider events', asy
   await expect(page.locator('.usage-context')).toHaveClass(/unknown/);
   await expect(page.locator('.usage-speed')).toHaveText('— tok/s');
   await expect(page.locator('.usage-memory')).not.toContainText('Memory');
+});
+
+test('estimated muse context shows a labeled estimate and never a percentage', async ({ page }) => {
+  await boot(page);
+  const input = page.locator('.chat-wrap:not(.hidden) textarea');
+  await input.fill('Estimate test');
+  await input.press('Enter');
+  await page.evaluate(() => {
+    (window as any).qa.agent({ kind: 'usage', context: { used_tokens: 27299, window_tokens: null, measured_at: Date.now(), estimated: true }, turn: null });
+  });
+  await expect(page.locator('.usage-context')).toContainText('est.');
+  await expect(page.locator('.usage-context')).toHaveClass(/unknown/);
+  await page.locator('.usage-summary').click();
+  await expect(page.locator('.usage-details')).toContainText('No capacity figure is reported');
 });

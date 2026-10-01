@@ -31,6 +31,17 @@ The installer is a custom NSIS bundle (`src-tauri/nsis/`): branded
 welcome/finish pages, custom header/sidebar art, plus a post-install check
 that migrates the previous default Muse Code installation and registers native notifications.
 
+For signed publisher builds, use `scripts/build-release.ps1`. It produces the
+installer, signature and `latest.json` updater feed under `artifacts/release`.
+For a preview without signing secrets, use:
+
+```powershell
+npx tauri build --bundles nsis --config src-tauri/tauri.preview.conf.json
+```
+
+See [App updates](updates.md) for GitHub release automation and the first updater
+installation.
+
 Brand exports are generated from the saved transparent master with
 `.\scripts\make-assets.ps1` (UI mark, favicon, platform icons, and NSIS artwork).
 See [the brand notes](brand.md) for the master asset, generation prompt, and export process.

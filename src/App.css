@@ -390,3 +390,4 @@ kbd { font: inherit; }
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   .starter-btn:hover:not(:disabled), .starter-btn:active:not(:disabled), .starter-btn:hover:not(:disabled) .starter-icon, .starter-btn:hover:not(:disabled) .starter-arrow, .tab-new:active, .composer-btn:hover:not(:disabled), .composer-btn:active:not(:disabled), .latest-btn:active { transform: none; }
 }
+.notification-toggle.update-ready { color: var(--accent); }

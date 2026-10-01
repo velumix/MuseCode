@@ -3,14 +3,14 @@
 //! Resume IDs come from the selected CLI; stderr is drained concurrently.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::child_process::{self, SharedChild};
 use crate::events::AgentEvent;
 use crate::provider_events::Stream;
 use crate::provider_models::RunOptions;
@@ -36,7 +36,7 @@ pub struct AgentSession {
     options: Mutex<RunOptions>,
     memory: Mutex<crate::memory::Session>,
     workspace: std::path::PathBuf,
-    child: Mutex<Option<Child>>,
+    child: Mutex<Option<Arc<SharedChild>>>,
     running: Mutex<bool>,
     queue: Mutex<crate::message_queue::Snapshot>,
     prompt: Mutex<Option<std::path::PathBuf>>,
@@ -125,6 +125,7 @@ impl AccessState {
 pub struct AgentState {
     sessions: Mutex<HashMap<String, Arc<AgentSession>>>,
     next_registration: AtomicU64,
+    updating: AtomicBool,
 }
 
 impl AgentSession {
@@ -140,7 +141,7 @@ impl AgentSession {
         let child = self.child.lock().ok().and_then(|mut child| child.take());
         let prompt = self.prompt.lock().ok().and_then(|mut file| file.take());
         if let Some(child) = child {
-            kill_tree(child);
+            child.stop();
         }
         // App exit may end reader threads before their guards can drop.
         if let Some(file) = prompt {
@@ -150,6 +151,34 @@ impl AgentSession {
 }
 
 impl AgentState {
+    /// Registration and update admission share the sessions lock. A queued,
+    /// remote, or scheduled send cannot slip between the idle check and restart.
+    pub fn begin_update(&self) -> Result<(), String> {
+        let sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| "Agent state unavailable.")?;
+        for session in sessions.values() {
+            let running = *session
+                .running
+                .lock()
+                .map_err(|_| "Agent state unavailable.")?;
+            let queue = session
+                .queue
+                .lock()
+                .map_err(|_| "Message queue unavailable.")?;
+            if running || (!queue.paused && !queue.items.is_empty()) {
+                return Err("Finish or stop running conversations and pause pending queues before restarting to update.".into());
+            }
+        }
+        self.updating.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    pub fn cancel_update(&self) {
+        self.updating.store(false, Ordering::SeqCst);
+    }
+
     pub fn measurement(&self, id: &str, workspace: &std::path::Path) -> Option<serde_json::Value> {
         let session = self.sessions.lock().ok()?.get(id)?.clone();
         if std::fs::canonicalize(&session.workspace).ok()?
@@ -353,8 +382,8 @@ fn mark_permission_blocked(terminal: &mut Option<AgentEvent>, denied: bool) {
     }
 }
 
-/// Take the tab's child (if any), kill it, and reap it. The reader thread
-/// observes the missing child after EOF and reports the turn cancelled.
+/// Stop the current turn's process tree. Its supervisor observes the stop
+/// even if a descendant has kept an output pipe open.
 fn kill_session(state: &State<AgentState>, id: &str) {
     let session = state
         .sessions
@@ -386,49 +415,147 @@ pub(crate) fn terminate_tree(pid: u32) {
         .status();
 }
 
-#[cfg(windows)]
-fn kill_tree(mut child: Child) {
-    if child.try_wait().ok().flatten().is_none() {
-        terminate_tree(child.id());
-    }
-    // Reap the direct child either way; fall back to a plain kill when
-    // taskkill itself failed (missing binary, access denied, ...).
-    if child.try_wait().ok().flatten().is_none() {
-        let _ = child.kill();
-    }
-    let _ = child.wait();
+/// Bound provider inactivity and allow a short drain after process exit or
+/// a terminal event. These timers live only in the owning turn's supervisor.
+pub const SILENCE_WARN_MS: u64 = 120_000;
+pub const SILENCE_FAIL_MS: u64 = 600_000;
+const OUTPUT_DRAIN_MS: u64 = 2_000;
+const PROCESS_POLL_MS: u64 = 20;
+
+#[derive(PartialEq, Eq, Debug)]
+pub enum Silence {
+    Active,
+    Warn,
+    Expired,
 }
 
-#[cfg(not(windows))]
-fn kill_tree(mut child: Child) {
-    let _ = child.kill();
-    let _ = child.wait();
+pub fn silence_state(silent_ms: u64) -> Silence {
+    if silent_ms >= SILENCE_FAIL_MS {
+        Silence::Expired
+    } else if silent_ms >= SILENCE_WARN_MS {
+        Silence::Warn
+    } else {
+        Silence::Active
+    }
 }
 
-/// Reap the tab's child after stdout EOF. Returns the exit code, or `None`
-/// when `kill_session` already reaped it (a user stop).
-fn reap_child(session: &AgentSession) -> Option<Option<i32>> {
-    loop {
-        {
-            let mut guard = session.child.lock().ok()?;
-            let child = guard.as_mut()?;
-            match child.try_wait() {
-                Ok(Some(status)) => {
-                    guard.take();
-                    return Some(status.code());
-                }
-                Err(_) => {
-                    return Some(None);
-                }
-                Ok(None) => {}
-            }
+#[derive(Debug, PartialEq, Eq)]
+enum Supervision {
+    Continue,
+    Warn,
+    Expired,
+    Finish,
+}
+struct Supervisor {
+    last_output: std::time::Instant,
+    settling: Option<std::time::Instant>,
+    warned: bool,
+}
+impl Supervisor {
+    fn new(started: std::time::Instant) -> Self {
+        Self {
+            last_output: started,
+            settling: None,
+            warned: false,
         }
-        // Keep the handle available to Stop while waiting for process exit.
-        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    fn observe(
+        &mut self,
+        now: std::time::Instant,
+        activity: bool,
+        terminal: bool,
+        child: child_process::Status,
+        pipes_closed: bool,
+    ) -> Supervision {
+        if activity {
+            self.last_output = now;
+        }
+        if child != child_process::Status::Running || terminal {
+            let settling = *self.settling.get_or_insert(now);
+            if (pipes_closed && child != child_process::Status::Running)
+                || now.saturating_duration_since(settling).as_millis() >= OUTPUT_DRAIN_MS as u128
+            {
+                return Supervision::Finish;
+            }
+            return Supervision::Continue;
+        }
+        let silent_ms = now
+            .saturating_duration_since(self.last_output)
+            .as_millis()
+            .min(u64::MAX as u128) as u64;
+        match silence_state(silent_ms) {
+            Silence::Expired => Supervision::Expired,
+            Silence::Warn if !self.warned => {
+                self.warned = true;
+                Supervision::Warn
+            }
+            _ => Supervision::Continue,
+        }
+    }
+}
+
+fn resolve_terminal(
+    provider: Provider,
+    terminal: Option<AgentEvent>,
+    exit: Option<Option<i32>>,
+    supervisor_failure: Option<String>,
+    terminal_cleanup: bool,
+    stderr: Option<String>,
+) -> AgentEvent {
+    let completed =
+        matches!(&terminal, Some(AgentEvent::TurnEnd { status, .. }) if status == "completed");
+    // A completion already read from this turn survives our own cleanup.
+    // A user stop and an independently reported nonzero exit retain their
+    // normal meaning.
+    if (exit.is_none() || exit == Some(Some(0)))
+        && ((terminal_cleanup && terminal.is_some()) || (completed && supervisor_failure.is_some()))
+    {
+        return terminal.unwrap();
+    }
+    if let Some(reason) = supervisor_failure {
+        return AgentEvent::TurnEnd {
+            status: "failed".into(),
+            text: None,
+            reason: Some(reason),
+        };
+    }
+    if exit == Some(Some(0)) {
+        if let Some(terminal) = terminal {
+            return terminal;
+        }
+        return AgentEvent::TurnEnd {
+            status: "failed".into(),
+            text: None,
+            reason: Some(format!("{} ended without a completion event. Open Terminal to check its sign-in and setup.", provider.label())),
+        };
+    }
+    let (status, reason) = match exit {
+        Some(code) => {
+            let structured = match terminal {
+                Some(AgentEvent::TurnEnd {
+                    reason: Some(reason),
+                    ..
+                }) if !reason.is_empty() => Some(reason),
+                _ => None,
+            };
+            (
+                "failed",
+                Some(structured.or(stderr).unwrap_or_else(|| {
+                    format!("{} exited unexpectedly (code {code:?})", provider.label())
+                })),
+            )
+        }
+        None => ("cancelled", None),
+    };
+    AgentEvent::TurnEnd {
+        status: status.into(),
+        text: None,
+        reason,
     }
 }
 
 struct TurnContext {
+    child: Arc<SharedChild>,
     tools: Option<crate::tool_bridge::Registration>,
     measurement: Arc<Mutex<crate::tool_bridge::Measurement>>,
     probe: Option<crate::workspace_access::Probe>,
@@ -445,11 +572,11 @@ fn spawn_reader(
     id: String,
     session: Arc<AgentSession>,
     prompt: StagedPrompt,
-    stdout: std::process::ChildStdout,
-    stderr: Option<std::process::ChildStderr>,
+    mut output: child_process::Output,
     context: TurnContext,
 ) {
     let TurnContext {
+        child,
         tools,
         measurement,
         mut probe,
@@ -461,37 +588,13 @@ fn spawn_reader(
         usage_baseline,
         muse_offset,
     } = context;
-    // Drain stderr on a side thread so verbose children can never block on
-    // a full pipe; the tail is only surfaced when the turn dies silently.
+    // Both pipes are polled by the supervisor. Neither a blocked read nor a
+    // stderr-thread join can prevent this turn from reaching its deadline.
     let stderr_tail: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let probe_errors: Arc<Mutex<HashMap<&'static str, crate::workspace_access::OperationFailure>>> =
         Arc::new(Mutex::new(HashMap::new()));
     let probe_id = probe.as_ref().map(|p| p.id.clone());
     let permission_denied = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let stderr_handle = stderr.map(|err| {
-        let tail = Arc::clone(&stderr_tail);
-        let denied = Arc::clone(&permission_denied);
-        let errors = Arc::clone(&probe_errors);
-        std::thread::spawn(move || {
-            for line in BufReader::new(err).lines().map_while(Result::ok) {
-                if let Some(id) = &probe_id {
-                    for error in crate::workspace_access::error_evidence(id, &line) {
-                        errors.lock().unwrap().insert(error.operation, error);
-                    }
-                }
-                if headless_permission_denied(&line) {
-                    denied.store(true, std::sync::atomic::Ordering::Relaxed);
-                }
-                if let Ok(mut guard) = tail.lock() {
-                    guard.push(line.chars().take(4000).collect());
-                    let len = guard.len();
-                    if len > STDERR_TAIL_LINES {
-                        guard.drain(..len - STDERR_TAIL_LINES);
-                    }
-                }
-            }
-        })
-    });
 
     std::thread::spawn(move || {
         let state = app.state::<AgentState>();
@@ -553,7 +656,7 @@ fn spawn_reader(
                                             &app,
                                             &id,
                                             AgentEvent::Usage {
-                                                context: None,
+                                                context: muse_usage.context_estimate(),
                                                 turn: Some(usage.clone()),
                                             },
                                         );
@@ -646,6 +749,10 @@ fn spawn_reader(
                     }
                 })
             });
+        let mut supervisor = Supervisor::new(started);
+        let mut supervisor_failure = None;
+        let mut terminal_cleanup = false;
+        let mut exit = None;
         let mut terminal = None;
         let mut memory_filter = crate::memory::Filter::default();
         let mut final_proposal = None;
@@ -656,124 +763,206 @@ fn spawn_reader(
         let mut answer = String::new();
         let mut action_error = None;
         let mut action_report = None;
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            if let Some(probe) = probe.as_mut() {
-                probe.observe_line(session.provider, &line);
-            }
-            let events = fold.fold_line(&line);
-            {
-                let mut measured = measurement.lock().unwrap();
-                let elapsed = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-                if !events.is_empty() && measured.first_event_ms.is_none() {
-                    measured.first_event_ms = Some(elapsed);
+        loop {
+            let batch = match output.poll() {
+                Ok(batch) => batch,
+                Err(error) => {
+                    supervisor_failure = Some(format!(
+                        "Could not read {} output: {error}. Check the Terminal view, then retry.",
+                        session.provider.label()
+                    ));
+                    break;
                 }
-                if events
-                    .iter()
-                    .any(|e| matches!(e, AgentEvent::AssistantDelta { text } if !text.is_empty()))
-                    && measured.first_output_ms.is_none()
-                {
-                    measured.first_output_ms = Some(elapsed);
-                }
-                measured.elapsed_ms = elapsed;
-            }
-            if fold.run_id.is_some() {
-                *muse_run.lock().unwrap() = fold.run_id.clone();
-            }
-            if let Some(resume_id) = &fold.session_id {
-                let mut previous = session.session_id.lock().unwrap();
-                let mut access = session.access.lock().unwrap();
-                if access.observe_session(&previous, resume_id) {
-                    if let Some(probe) = probe.as_mut() {
-                        probe.report.revision = access.revision;
-                        access.agent = probe.report.clone();
+            };
+            for line in batch.stderr {
+                if let Some(id) = &probe_id {
+                    for error in crate::workspace_access::error_evidence(id, &line) {
+                        probe_errors.lock().unwrap().insert(error.operation, error);
                     }
                 }
-                *previous = resume_id.clone();
-                drop(access);
-                drop(previous);
-                app.state::<crate::history::HistoryState>()
-                    .resume_id(&id, resume_id);
+                if headless_permission_denied(&line) {
+                    permission_denied.store(true, Ordering::Relaxed);
+                }
+                let mut tail = stderr_tail.lock().unwrap();
+                tail.push(line.chars().take(4000).collect());
+                let len = tail.len();
+                if len > STDERR_TAIL_LINES {
+                    tail.drain(..len - STDERR_TAIL_LINES);
+                }
             }
-            for mut event in events {
-                if let AgentEvent::Usage {
-                    turn: Some(usage), ..
-                } = &mut event
+            for line in batch.stdout {
+                if let Some(probe) = probe.as_mut() {
+                    probe.observe_line(session.provider, &line);
+                }
+                let events = fold.fold_line(&line);
                 {
-                    // Exec completion describes this turn, including resume.
-                    // Session-log totals are only a fallback/live estimate.
-                    usage.elapsed_ms =
-                        Some(started.elapsed().as_millis().min(u64::MAX as u128) as u64);
-                    turn_usage = Some(usage.clone());
                     let mut measured = measurement.lock().unwrap();
-                    stdout_usage.store(true, Ordering::Relaxed);
-                    measured
-                        .observe_usage(usage.clone(), "provider stdout completion/step counters");
+                    let elapsed = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+                    if !events.is_empty() && measured.first_event_ms.is_none() {
+                        measured.first_event_ms = Some(elapsed);
+                    }
+                    if events.iter().any(
+                        |e| matches!(e, AgentEvent::AssistantDelta { text } if !text.is_empty()),
+                    ) && measured.first_output_ms.is_none()
+                    {
+                        measured.first_output_ms = Some(elapsed);
+                    }
+                    measured.elapsed_ms = elapsed;
                 }
-                if matches!(&event, AgentEvent::ToolEnd { reason: Some(reason), .. } | AgentEvent::TurnEnd { reason: Some(reason), .. } if headless_permission_denied(reason))
-                {
-                    permission_denied.store(true, std::sync::atomic::Ordering::Relaxed);
+                if fold.run_id.is_some() {
+                    *muse_run.lock().unwrap() = fold.run_id.clone();
                 }
-                if action_context.is_some() {
-                    if let AgentEvent::AssistantDelta { text } = &mut event {
-                        *text = bot_output.push(text);
-                        if text.is_empty() {
-                            continue;
+                if let Some(resume_id) = &fold.session_id {
+                    let mut previous = session.session_id.lock().unwrap();
+                    let mut access = session.access.lock().unwrap();
+                    if access.observe_session(&previous, resume_id) {
+                        if let Some(probe) = probe.as_mut() {
+                            probe.report.revision = access.revision;
+                            access.agent = probe.report.clone();
                         }
                     }
-                    if let AgentEvent::TurnEnd {
-                        text: Some(text), ..
+                    *previous = resume_id.clone();
+                    drop(access);
+                    drop(previous);
+                    app.state::<crate::history::HistoryState>()
+                        .resume_id(&id, resume_id);
+                }
+                for mut event in events {
+                    if let AgentEvent::Usage {
+                        turn: Some(usage), ..
                     } = &mut event
                     {
-                        let mut output = crate::bot_actions::Output::default();
-                        let mut clean = output.push(text);
-                        clean.push_str(&output.finish());
-                        *text = clean;
-                        final_action = output.action;
-                        final_proposal = output.memory;
-                        invalid_action |= output.invalid;
+                        // Exec completion describes this turn, including resume.
+                        // Session-log totals are only a fallback/live estimate.
+                        usage.elapsed_ms =
+                            Some(started.elapsed().as_millis().min(u64::MAX as u128) as u64);
+                        turn_usage = Some(usage.clone());
+                        let mut measured = measurement.lock().unwrap();
+                        stdout_usage.store(true, Ordering::Relaxed);
+                        measured.observe_usage(
+                            usage.clone(),
+                            "provider stdout completion/step counters",
+                        );
                     }
-                } else if memory_mode != crate::memory::Capture::Manual {
-                    if let AgentEvent::AssistantDelta { text } = &mut event {
-                        *text = memory_filter.push(text);
-                        if text.is_empty() {
-                            continue;
-                        }
-                    }
-                    if let AgentEvent::TurnEnd {
-                        text: Some(text), ..
-                    } = &mut event
+                    if matches!(&event, AgentEvent::ToolEnd { reason: Some(reason), .. } | AgentEvent::TurnEnd { reason: Some(reason), .. } if headless_permission_denied(reason))
                     {
-                        let (clean, proposal, invalid) = crate::memory::clean_final(text);
-                        *text = clean;
-                        final_proposal = proposal;
-                        invalid_proposal |= invalid;
+                        permission_denied.store(true, std::sync::atomic::Ordering::Relaxed);
                     }
-                }
-                match &event {
-                    AgentEvent::AssistantDelta { text } => {
-                        if answer.len() < 16000 {
-                            answer.extend(text.chars().take(16000 - answer.len()));
+                    if action_context.is_some() {
+                        if let AgentEvent::AssistantDelta { text } = &mut event {
+                            *text = bot_output.push(text);
+                            if text.is_empty() {
+                                continue;
+                            }
+                        }
+                        if let AgentEvent::TurnEnd {
+                            text: Some(text), ..
+                        } = &mut event
+                        {
+                            let mut output = crate::bot_actions::Output::default();
+                            let mut clean = output.push(text);
+                            clean.push_str(&output.finish());
+                            *text = clean;
+                            final_action = output.action;
+                            final_proposal = output.memory;
+                            invalid_action |= output.invalid;
+                        }
+                    } else if memory_mode != crate::memory::Capture::Manual {
+                        if let AgentEvent::AssistantDelta { text } = &mut event {
+                            *text = memory_filter.push(text);
+                            if text.is_empty() {
+                                continue;
+                            }
+                        }
+                        if let AgentEvent::TurnEnd {
+                            text: Some(text), ..
+                        } = &mut event
+                        {
+                            let (clean, proposal, invalid) = crate::memory::clean_final(text);
+                            *text = clean;
+                            final_proposal = proposal;
+                            invalid_proposal |= invalid;
                         }
                     }
-                    AgentEvent::TurnEnd {
-                        text: Some(text), ..
-                    } if !text.is_empty() => answer = text.chars().take(16000).collect(),
-                    _ => {}
-                }
-                if matches!(event, AgentEvent::TurnEnd { .. }) {
-                    terminal = Some(event);
-                } else if state.sessions.lock().ok().is_some_and(|sessions| {
-                    sessions
-                        .get(&id)
-                        .is_some_and(|current| Arc::ptr_eq(current, &session))
-                }) {
-                    emit(&app, &id, event);
+                    match &event {
+                        AgentEvent::AssistantDelta { text } => {
+                            if answer.len() < 16000 {
+                                answer.extend(text.chars().take(16000 - answer.len()));
+                            }
+                        }
+                        AgentEvent::TurnEnd {
+                            text: Some(text), ..
+                        } if !text.is_empty() => answer = text.chars().take(16000).collect(),
+                        _ => {}
+                    }
+                    if matches!(event, AgentEvent::TurnEnd { .. }) {
+                        terminal = Some(event);
+                    } else if state.sessions.lock().ok().is_some_and(|sessions| {
+                        sessions
+                            .get(&id)
+                            .is_some_and(|current| Arc::ptr_eq(current, &session))
+                    }) {
+                        emit(&app, &id, event);
+                    }
                 }
             }
+            let status = match child.status() {
+                Ok(status) => status,
+                Err(error) => {
+                    supervisor_failure = Some(format!(
+                        "Could not check {} process: {error}. Check the Terminal view, then retry.",
+                        session.provider.label()
+                    ));
+                    break;
+                }
+            };
+            if let child_process::Status::Exited(code) = status {
+                exit = Some(code);
+            }
+            match supervisor.observe(
+                std::time::Instant::now(),
+                batch.activity,
+                terminal.is_some(),
+                status,
+                output.closed(),
+            ) {
+                Supervision::Continue => {}
+                Supervision::Warn => {
+                    let sessions = state.sessions.lock().unwrap();
+                    if sessions
+                        .get(&id)
+                        .is_some_and(|live| Arc::ptr_eq(live, &session))
+                    {
+                        emit(&app, &id, AgentEvent::Notice {
+                            text: format!("No output from {} for 2 minutes — still waiting. You can stop the turn and retry, or check the Terminal view.", session.provider.label()),
+                        });
+                    }
+                }
+                Supervision::Expired => {
+                    supervisor_failure = Some(format!("{} produced no output for 10 minutes, so the turn was stopped. Check the Terminal view for sign-in or setup issues, then retry.", session.provider.label()));
+                    // This handle belongs to this turn, regardless of which
+                    // conversation is currently registered under the tab id.
+                    child.stop();
+                    if let Some(tools) = tools.as_ref() {
+                        tools.scope.revoked.store(true, Ordering::Relaxed);
+                    }
+                    // Drain buffered output before resolving status: a
+                    // completion racing with the timeout must still win.
+                    continue;
+                }
+                Supervision::Finish => {
+                    terminal_cleanup =
+                        status == child_process::Status::Running && terminal.is_some();
+                    break;
+                }
+            }
+            if !batch.activity {
+                std::thread::sleep(std::time::Duration::from_millis(PROCESS_POLL_MS));
+            }
         }
-        if let Some(handle) = stderr_handle {
-            let _ = handle.join();
-        }
+        // Closing this process's job also stops descendants after their
+        // parent has exited. Completion never waits for inherited pipe EOF.
+        child.stop();
         let headless_denial = session.provider == Provider::Antigravity
             && permission_denied.load(std::sync::atomic::Ordering::Relaxed);
         let policy_tool_events = if headless_denial {
@@ -800,7 +989,6 @@ fn spawn_reader(
         } else {
             None
         };
-        let exit = reap_child(&session);
         let turn_elapsed = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
         let _ = usage_stop.send(turn_elapsed);
         if let Some(handle) = usage_handle {
@@ -838,39 +1026,19 @@ fn spawn_reader(
             }.into();
         }
         drop(tools);
-        if terminal.is_none() || exit.is_none() || exit.is_some_and(|code| code != Some(0)) {
-            // Reaped by us: exit code decides the status. Already reaped by
-            // `kill_session`: the user stopped the turn.
-            let (status, reason) = match exit {
-                Some(Some(0)) => ("failed".to_owned(), Some(format!("{} ended without a completion event. Open Terminal to check its sign-in and setup.", session.provider.label()))),
-                Some(code) => {
-                    let structured = match &terminal {
-                        Some(AgentEvent::TurnEnd { reason: Some(reason), .. }) if !reason.is_empty() => Some(reason.clone()),
-                        _ => None,
-                    };
-                    let tail = stderr_tail
-                        .lock()
-                        .ok()
-                        .map(|g| g.join("\n"))
-                        .filter(|t| !t.trim().is_empty());
-                    (
-                        "failed".to_owned(),
-                        Some(structured.or(tail).unwrap_or_else(|| {
-                            format!(
-                                "{} exited unexpectedly (code {code:?})",
-                                session.provider.label()
-                            )
-                        })),
-                    )
-                }
-                None => ("cancelled".to_owned(), None),
-            };
-            terminal = Some(AgentEvent::TurnEnd {
-                status,
-                text: None,
-                reason,
-            });
-        }
+        let tail = stderr_tail
+            .lock()
+            .ok()
+            .map(|tail| tail.join("\n"))
+            .filter(|tail| !tail.trim().is_empty());
+        terminal = Some(resolve_terminal(
+            session.provider,
+            terminal,
+            exit,
+            supervisor_failure,
+            terminal_cleanup,
+            tail,
+        ));
         if session.provider == Provider::Antigravity {
             mark_permission_blocked(
                 &mut terminal,
@@ -890,6 +1058,14 @@ fn spawn_reader(
                 .get(&id)
                 .is_some_and(|current| Arc::ptr_eq(current, &session))
         };
+        if let Ok(mut active) = session.child.lock() {
+            if active
+                .as_ref()
+                .is_some_and(|active| Arc::ptr_eq(active, &child))
+            {
+                active.take();
+            }
+        }
         *session.running.lock().unwrap() = false;
         {
             let mut access = session.access.lock().unwrap();
@@ -1363,6 +1539,9 @@ fn send_inner(
         .sessions
         .lock()
         .map_err(|_| "agent state is unavailable".to_string())?;
+    if state.updating.load(Ordering::SeqCst) {
+        return Err("Velum is restarting to install an update. Try again after it reopens.".into());
+    }
     let session = sessions
         .get(&id)
         .ok_or_else(|| "agent session not found; reopen the tab".to_string())?;
@@ -1634,7 +1813,7 @@ fn send_inner(
     }
     *session.measurement_clock.lock().unwrap() = Some(started);
     *session.measurement.lock().unwrap() = Some(measurement.clone());
-    let child = cmd.spawn().map_err(|e| {
+    let child = child_process::Child::spawn(&mut cmd).map_err(|e| {
         if let Some(probe) = pending.probe.as_mut() {
             session.access.lock().unwrap().agent = probe.finish();
         }
@@ -1656,6 +1835,9 @@ fn send_inner(
         "could not capture agent output".to_string()
     })?;
     let stderr = child.stderr.take();
+    let output = child_process::Output::new(stdout, stderr)
+        .map_err(|error| format!("Could not capture agent output: {error}"))?;
+    let child = Arc::new(SharedChild::new(child));
     {
         *session
             .prompt
@@ -1670,7 +1852,7 @@ fn send_inner(
         *session
             .child
             .lock()
-            .map_err(|_| "agent state is unavailable".to_string())? = Some(child);
+            .map_err(|_| "agent state is unavailable".to_string())? = Some(Arc::clone(&child));
     }
     if queued_id.is_some() {
         let mut queue = session.queue.lock().unwrap();
@@ -1724,9 +1906,9 @@ fn send_inner(
         id.clone(),
         session,
         staged,
-        stdout,
-        stderr,
+        output,
         TurnContext {
+            child,
             tools,
             measurement,
             probe: pending.probe.take(),
@@ -2145,6 +2327,152 @@ mod tests {
         assert!(!has_yolo(&shim));
     }
 
+    #[test]
+    fn silence_policy_warns_then_expires() {
+        use super::*;
+        assert_eq!(silence_state(0), Silence::Active);
+        assert_eq!(silence_state(SILENCE_WARN_MS - 1), Silence::Active);
+        assert_eq!(silence_state(SILENCE_WARN_MS), Silence::Warn);
+        assert_eq!(silence_state(SILENCE_FAIL_MS - 1), Silence::Warn);
+        assert_eq!(silence_state(SILENCE_FAIL_MS), Silence::Expired);
+        assert_eq!(silence_state(u64::MAX), Silence::Expired);
+        assert!(SILENCE_WARN_MS < SILENCE_FAIL_MS);
+    }
+
+    #[test]
+    fn supervisor_handles_exit_and_stop_without_waiting_for_inherited_pipe_eof() {
+        use super::*;
+        let started = std::time::Instant::now();
+        for status in [
+            child_process::Status::Exited(Some(0)),
+            child_process::Status::Stopped,
+        ] {
+            let mut supervisor = Supervisor::new(started);
+            assert_eq!(
+                supervisor.observe(started, false, false, status, false),
+                Supervision::Continue
+            );
+            assert_eq!(
+                supervisor.observe(
+                    started + std::time::Duration::from_millis(OUTPUT_DRAIN_MS),
+                    false,
+                    false,
+                    status,
+                    false
+                ),
+                Supervision::Finish
+            );
+        }
+    }
+
+    #[test]
+    fn supervisor_checks_silence_even_after_pipe_eof_and_accepts_output_at_the_deadline() {
+        use super::*;
+        let started = std::time::Instant::now();
+        let mut supervisor = Supervisor::new(started);
+        let running = child_process::Status::Running;
+        let warning = started + std::time::Duration::from_millis(SILENCE_WARN_MS);
+        assert_eq!(
+            supervisor.observe(warning, false, false, running, true),
+            Supervision::Warn
+        );
+        assert_eq!(
+            supervisor.observe(warning, false, false, running, true),
+            Supervision::Continue
+        );
+        let deadline = started + std::time::Duration::from_millis(SILENCE_FAIL_MS);
+        assert_eq!(
+            supervisor.observe(deadline, true, false, running, false),
+            Supervision::Continue
+        );
+        assert_eq!(
+            supervisor.observe(
+                deadline + std::time::Duration::from_millis(SILENCE_FAIL_MS),
+                false,
+                false,
+                running,
+                true
+            ),
+            Supervision::Expired
+        );
+    }
+
+    #[test]
+    fn terminal_event_bounds_cleanup_of_a_process_that_never_exits() {
+        use super::*;
+        let started = std::time::Instant::now();
+        let mut supervisor = Supervisor::new(started);
+        assert_eq!(
+            supervisor.observe(started, true, true, child_process::Status::Running, false),
+            Supervision::Continue
+        );
+        assert_eq!(
+            supervisor.observe(
+                started + std::time::Duration::from_millis(OUTPUT_DRAIN_MS),
+                false,
+                true,
+                child_process::Status::Running,
+                false
+            ),
+            Supervision::Finish
+        );
+    }
+
+    #[test]
+    fn a_completion_read_during_timeout_cleanup_keeps_its_status_and_answer() {
+        use super::*;
+        let completed = || {
+            Some(AgentEvent::TurnEnd {
+                status: "completed".into(),
+                text: Some("Finished answer".into()),
+                reason: None,
+            })
+        };
+        for (timeout, cleanup) in [(Some("Timeout".to_owned()), false), (None, true)] {
+            let terminal =
+                resolve_terminal(Provider::Muse, completed(), None, timeout, cleanup, None);
+            assert!(
+                matches!(terminal, AgentEvent::TurnEnd { status, text: Some(text), reason: None } if status == "completed" && text == "Finished answer")
+            );
+        }
+        let stopped = resolve_terminal(Provider::Muse, completed(), None, None, false, None);
+        assert!(matches!(stopped, AgentEvent::TurnEnd { status, .. } if status == "cancelled"));
+        let exited = resolve_terminal(
+            Provider::Muse,
+            completed(),
+            Some(Some(1)),
+            Some("Timeout".into()),
+            false,
+            None,
+        );
+        assert!(matches!(exited, AgentEvent::TurnEnd { status, .. } if status == "failed"));
+    }
+
+    #[test]
+    fn a_silent_turn_fails_and_provider_failures_survive_terminal_cleanup() {
+        use super::*;
+        let terminal = resolve_terminal(
+            Provider::Muse,
+            None,
+            None,
+            Some("No output for 10 minutes".into()),
+            false,
+            None,
+        );
+        assert!(
+            matches!(terminal, AgentEvent::TurnEnd { status, reason: Some(reason), .. } if status == "failed" && reason == "No output for 10 minutes")
+        );
+        let failed = Some(AgentEvent::TurnEnd {
+            status: "failed".into(),
+            text: None,
+            reason: Some("Provider failure".into()),
+        });
+        let terminal = resolve_terminal(Provider::Muse, failed, None, None, true, None);
+        assert!(
+            matches!(terminal, AgentEvent::TurnEnd { status, reason: Some(reason), .. } if status == "failed" && reason == "Provider failure")
+        );
+    }
+
     /// Stopping a turn must terminate the whole shim chain (`cmd` ->
     /// grandchild), not just the direct child, or survivors hold stdout open
     /// and the turn never ends. Spawns a real `cmd /C ping` chain, kills it,
@@ -2180,13 +2508,14 @@ mod tests {
         }
 
         let before = ping_pids();
-        let child = Command::new("cmd")
-            .args(["/C", "ping -n 30 127.0.0.1 > NUL"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn shim chain");
+        let child = crate::child_process::Child::spawn(
+            Command::new("cmd")
+                .args(["/C", "ping -n 30 127.0.0.1 > NUL"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null()),
+        )
+        .expect("spawn shim chain");
         // Catch the grandchild the moment it appears (tight window keeps
         // foreign pings out of our set).
         let mut ours = HashSet::new();
@@ -2198,7 +2527,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
         assert!(!ours.is_empty(), "grandchild ping never appeared");
-        super::kill_tree(child);
+        drop(child);
         std::thread::sleep(std::time::Duration::from_secs(2));
         let after = ping_pids();
         assert!(

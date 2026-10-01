@@ -1,5 +1,9 @@
 # Getting started
 
+After the first installation of 0.6.6 or newer, Velum checks GitHub and downloads
+signed app updates automatically. Use **Settings → Updates → Restart to update**
+when a new version is ready. See [App updates](updates.md).
+
 [Documentation](README.md)
 
 ## 1. Install and connect a provider
@@ -14,6 +18,14 @@ Install and sign in to at least one supported CLI: `muse`, `codex` or `agy`.
 Choose it through the app's assistant/provider controls. The CLI's account,
 models, limits and charges apply. Antigravity's dedicated sign-in flow forwards
 your one-time code to its CLI; do not paste sign-in codes into a conversation.
+
+The app checks the selected provider's installed CLI and prefills the model
+catalog cache, then reports `CLI ready` (with version and model count) in the
+assistant controls. A CLI that never answers is reported as not responding;
+its version probe stops and cleans up its process tree after 30 seconds.
+Each provider's result is cached until you choose **Refresh providers and
+models**. These checks are advisory: every prompt still resolves and validates
+the provider and starts its own CLI process, with its own connection cost.
 
 Read the [legal status](../LEGAL.md) and [privacy notice draft](../PRIVACY.md),
 especially the sections on provider processing and local storage.

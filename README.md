@@ -88,6 +88,10 @@ CI artifacts require a GitHub sign-in and are retained for 14 days. These are un
 
 Prefer to build it yourself? See [Build from source](#build-from-source) below.
 
+Starting with 0.6.6, installed Windows copies check GitHub and download signed
+updates automatically. Choose **Settings → Updates → Restart to update** when
+ready. GitHub builds future installers from version tags. See [App updates](docs/updates.md).
+
 ## Providers
 
 | Provider | Command | Account and setup |
