@@ -64,8 +64,14 @@ granted control can ask the agent to act in those sessions, so pair only devices
 Remote access preference and device grants survive an app restart. Conversation replay uses
 a bounded in-memory event buffer (up to 8,000 events / 2 MiB per session). Older activity is
 marked as truncated. The phone never caches API responses or transcripts in its service
-worker; only the interface assets are cached for an offline launch. Drafts and desktop
-sessions are not restored after an app exit or reload.
+worker; only the interface assets are cached for an offline launch. Unsent phone drafts
+are saved in IndexedDB, with a localStorage fallback, and can recover after reload or
+an Android process restart. Desktop Agent tabs, drafts, queues and bounded recent
+history recover after Quit or restart; interrupted work is stopped and its queue is
+paused for review. Terminal processes and scrollback do not recover. Revocation
+invalidates access immediately on the server; phone draft cleanup occurs when the
+phone observes the disconnected/revoked state. Clear app/site storage on an offline
+device to remove local copies. See [data controls](data-controls.md).
 
 ## Troubleshooting
 

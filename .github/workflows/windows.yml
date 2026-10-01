@@ -41,13 +41,29 @@ jobs:
         run: npm run check
       - name: Check Rust warnings
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+      - name: Check documentation and dependency notices
+        run: |
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+          npm run legal:notices:check
+          npm run legal:check
       - name: Build Windows installer
         run: npx tauri build --bundles nsis
+      - name: Check installer toolchain notices and prepare download
+        shell: pwsh
+        run: |
+          npm run legal:notices:check
+          if ($LASTEXITCODE -ne 0) { throw 'Installer toolchain notice review is required.' }
+          New-Item -ItemType Directory -Force artifacts/windows/legal | Out-Null
+          Copy-Item -Path src-tauri/target/release/bundle/nsis/*-setup.exe -Destination artifacts/windows
+          Copy-Item -LiteralPath THIRD_PARTY_NOTICES.txt, LEGAL.md, TERMS.md, PRIVACY.md, SECURITY.md -Destination artifacts/windows/legal
+          Copy-Item -LiteralPath legal/dependencies.json, legal/upstream.json -Destination artifacts/windows/legal
+          Copy-Item -LiteralPath legal/covered-sources -Destination artifacts/windows/legal -Recurse
+          Copy-Item -LiteralPath legal/upstream -Destination artifacts/windows/legal -Recurse
       - name: Upload installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: VelumCode-windows-x64
-          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          path: artifacts/windows/
           if-no-files-found: error
           retention-days: 14
           compression-level: 0

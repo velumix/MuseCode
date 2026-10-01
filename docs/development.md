@@ -127,6 +127,26 @@ accessibility, PTY decoding, native process trees, close-to-tray survival, singl
 restoration, notification activation, and explicit Quit cleanup.
 See [the QA report](qa-2026-09-26.md) for findings, evidence, and remaining work.
 
+## Documentation and legal packaging
+
+User guides start at the [documentation index](README.md). Legal files are
+explicit drafts until the publisher completes the [legal release guide](legal-release.md).
+Do not present a draft as a binding agreement.
+
+`npm run legal:notices` generates the Windows dependency inventory and full
+license/NOTICE texts from locked local dependencies and pinned upstream notices.
+`npm run legal:notices:check` verifies the generated files without changing them;
+`npm run legal:check` checks links, fingerprints and source-archive/resource inclusion.
+Use `npm run legal:release` before a final public release; it intentionally rejects
+the current unfinished publisher/license/acceptance fields. These are document
+and packaging checks, not a legal certification.
+
+Windows bundles include notices and unmodified covered-source archives. The
+Android build script and CI enable `scripts/legal-android.gradle`, which resolves
+runtime artifacts and refreshes the companion's existing notices asset before
+packaging. Dependency changes need a notice/source review; unknown Android
+licenses and changed native loader/installer versions require explicit updates.
+
 ## Session behavior
 
 Closing the window (including Alt+F4) hides Velum Code in the Windows system tray. Running Agent

@@ -56,7 +56,7 @@ try {
   Push-Location (Join-Path $root 'android')
   try {
     $variant = if ($DebugBuild) { 'Debug' } else { 'Release' }
-    & .\gradlew.bat --no-daemon --console=plain :app:testDebugUnitTest ":app:lint$variant" ":app:assemble$variant"
+    & .\gradlew.bat --no-daemon --console=plain -I ..\scripts\legal-android.gradle :app:legalNotices :app:testDebugUnitTest ":app:lint$variant" ":app:assemble$variant"
     if ($LASTEXITCODE -ne 0) { throw 'Android checks or build failed.' }
   } finally { Pop-Location }
   $lowerVariant = $variant.ToLowerInvariant()

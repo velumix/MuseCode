@@ -40,14 +40,19 @@ jobs:
           packages: 'platform-tools platforms;android-36 build-tools;35.0.0'
           log-accepted-android-sdk-licenses: false
       - name: Test, lint, and build APK
-        run: ./gradlew --no-daemon --console=plain :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+        run: ./gradlew --no-daemon --console=plain -I ../scripts/legal-android.gradle :app:legalNotices :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
       - name: Prepare installable preview
-        run: cp app/build/outputs/apk/debug/app-debug.apk VelumCode-Android-preview.apk
+        run: |
+          mkdir -p ../artifacts/android-preview/legal
+          cp app/build/outputs/apk/debug/app-debug.apk ../artifacts/android-preview/VelumCode-Android-preview.apk
+          cp app/src/main/assets/third-party-notices.txt ../artifacts/android-preview/legal/
+          cp ../legal/android-dependencies.json ../artifacts/android-preview/legal/
+          cp ../LEGAL.md ../TERMS.md ../PRIVACY.md ../SECURITY.md ../artifacts/android-preview/legal/
       - name: Upload APK
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: VelumCode-Android-preview
-          path: android/VelumCode-Android-preview.apk
+          path: artifacts/android-preview/
           if-no-files-found: error
           retention-days: 14
           compression-level: 0

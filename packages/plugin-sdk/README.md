@@ -2,6 +2,16 @@
 
 Small, typed command plugins. No runtime dependencies or always-running plugin processes.
 
+## License status
+
+The SDK has not yet been assigned a project license or published to npm. Public
+source is not an open source grant; review [legal status](../../LEGAL.md) before
+redistributing SDK code. The publisher must approve the SDK license and include
+it in the package before publication. Your own plugin and any included
+dependencies need their own appropriate licenses and retained notices.
+
+## Use the SDK
+
 Create a plugin from the repository:
 
 ```sh

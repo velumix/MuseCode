@@ -1,0 +1,23 @@
+{
+  "status": "draft",
+  "product": "Velum Code",
+  "reviewedAppVersion": "0.6.2",
+  "documentVersion": "draft-2026-09-30",
+  "effectiveDate": "",
+  "publisherLegalName": "",
+  "publisherCountryAndState": "",
+  "legalContactEmail": "",
+  "privacyContactEmail": "",
+  "securityContactEmail": "",
+  "distributionModel": "undecided",
+  "projectLicense": "",
+  "sdkLicense": "",
+  "liabilityCapAndCurrency": "",
+  "governingLawAndVenue": "",
+  "supportRetentionPolicy": "",
+  "ownerApproved": false,
+  "legalReviewCompleted": false,
+  "acceptanceImplemented": false,
+  "androidDependenciesReviewed": false,
+  "installerComponentsReviewed": false
+}

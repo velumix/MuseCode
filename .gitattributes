@@ -22,3 +22,11 @@
 *.bmp binary
 android/gradlew text eol=lf
 android/gradlew.bat text eol=crlf
+
+# Preserve upstream notice bytes, including original whitespace, across platforms.
+THIRD_PARTY_NOTICES.txt -text -whitespace
+legal/upstream/** -text -whitespace
+legal/covered-sources/*.crate binary
+legal/covered-sources/*.tar.bz2 binary
+android/app/src/main/assets/third-party-notices.txt -text -whitespace
+scripts/legal-android.gradle text eol=lf

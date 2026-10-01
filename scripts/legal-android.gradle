@@ -1,0 +1,129 @@
+import groovy.json.JsonOutput
+import groovy.xml.XmlSlurper
+import java.nio.charset.StandardCharsets
+import java.nio.charset.CodingErrorAction
+import java.security.MessageDigest
+import java.util.zip.ZipFile
+import java.util.zip.ZipInputStream
+
+// From android/: gradlew -I ../scripts/legal-android.gradle :app:legalNotices
+// Resolves the actual release runtime artifacts; does not execute app or unit tests.
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.findProject(':app')
+    if (app == null) throw new GradleException('Android app project was not found')
+    def repo = app.rootProject.projectDir.parentFile
+    def digest = { byte[] bytes -> MessageDigest.getInstance('SHA-256').digest(bytes).encodeHex().toString() }
+    def decode = { byte[] bytes ->
+        StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+    }
+    def task = app.tasks.register('legalNotices') {
+        group = 'documentation'
+        description = 'Generate Android runtime license inventory and bundled notices'
+        doLast {
+            def texts = new TreeMap<String, String>()
+            def noticePattern = ~/(?i)^(licen[cs]e|notice|copying|copyright)([._-].*)?$/
+            def storeNotice = { byte[] bytes, String name ->
+                if (bytes.length > 4 * 1024 * 1024) throw new GradleException("Notice too large: ${name}")
+                def text = decode(bytes)
+                if (!text.trim()) throw new GradleException("Empty notice: ${name}")
+                def hash = digest(bytes)
+                texts[hash] = text
+                [path: name, sha256: hash]
+            }
+            def apache = new File(repo, 'legal/upstream/Apache-2.0.txt')
+            def common = storeNotice(apache.bytes, 'Apache License 2.0')
+            def inventory = []
+            def artifacts = app.configurations.getByName('releaseRuntimeClasspath')
+                .resolvedConfiguration.resolvedArtifacts.sort { a, b -> a.moduleVersion.id.toString() <=> b.moduleVersion.id.toString() }
+            artifacts.each { artifact ->
+                def id = artifact.moduleVersion.id
+                def loadPom = { String coordinate ->
+                    def dependency = app.dependencies.create("${coordinate}@pom")
+                    def configuration = app.configurations.detachedConfiguration(dependency)
+                    configuration.transitive = false
+                    configuration.singleFile
+                }
+                def pomFile = loadPom(id.toString())
+                def pom = new XmlSlurper(false, false).parse(pomFile)
+                def licensePom = pom
+                def licenseOrigins = []
+                def licenses = licensePom.licenses.license.collect { [name: it.name.text(), url: it.url.text()] }
+                // Maven can inherit licensing from the published parent POM.
+                for (int depth = 0; !licenses && depth < 8; depth++) {
+                    def parent = licensePom.parent
+                    def parts = [parent.groupId.text(), parent.artifactId.text(), parent.version.text()]
+                    if (parts.any { !(it ==~ /[A-Za-z0-9_.-]+/) }) break
+                    def coordinate = parts.join(':')
+                    def parentFile = loadPom(coordinate)
+                    licenseOrigins.add([coordinate: coordinate, sha256: digest(parentFile.bytes)])
+                    licensePom = new XmlSlurper(false, false).parse(parentFile)
+                    licenses = licensePom.licenses.license.collect { [name: it.name.text(), url: it.url.text()] }
+                }
+                // The current resolved set declares Apache 2.0. A changed/unknown license
+                // requires review and a matching text, rather than silently reusing Apache.
+                if (!licenses || licenses.any { !(it.name.toLowerCase().contains('apache') &&
+                    (it.name.contains('2') || it.url.contains('2.0'))) }) {
+                    throw new GradleException("Review license for ${id}: ${licenses}")
+                }
+                def notices = [common]
+                def zip = new ZipFile(artifact.file)
+                try {
+                    zip.entries().toList().sort { a, b -> a.name <=> b.name }.each { entry ->
+                        if (!entry.directory && new File(entry.name).name ==~ noticePattern) {
+                            zip.getInputStream(entry).withCloseable { stream ->
+                                notices.add(storeNotice(stream.readAllBytes(), entry.name))
+                            }
+                        } else if (!entry.directory && entry.name.endsWith('.jar')) {
+                            zip.getInputStream(entry).withCloseable { stream ->
+                                new ZipInputStream(stream).withCloseable { nested ->
+                                    def child
+                                    while ((child = nested.nextEntry) != null) {
+                                        if (!child.directory && new File(child.name).name ==~ noticePattern) {
+                                            notices.add(storeNotice(nested.readAllBytes(), "${entry.name}!/${child.name}"))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } finally { zip.close() }
+                def relative = "${id.group.replace('.', '/')}/${id.name}/${id.version}/${id.name}-${id.version}.pom"
+                def base = id.group.startsWith('androidx.') ? 'https://dl.google.com/dl/android/maven2/' : 'https://repo.maven.apache.org/maven2/'
+                inventory.add([group: id.group, name: id.name, version: id.version,
+                    artifact: artifact.file.name, artifactSha256: digest(artifact.file.bytes),
+                    pomSha256: digest(pomFile.bytes), pomUrl: base + relative,
+                    license: 'Apache-2.0', declaredLicenses: licenses, inheritedLicensePoms: licenseOrigins,
+                    organization: pom.organization.name.text(), notices: notices.sort { a, b -> a.path <=> b.path }])
+            }
+            def model = [schemaVersion: 1, appVersion: app.android.defaultConfig.versionName,
+                scope: 'Resolved Android releaseRuntimeClasspath artifacts, before R8 shrinking; includes transitive runtime dependencies and provided archive notices. Build tools, test dependencies and Android system WebView are separate.',
+                inputNormalization: 'UTF-8 text with LF line endings; artifact and notice hashes use original bytes',
+                inputs: ['android/app/build.gradle': digest(new File(repo, 'android/app/build.gradle').getText('UTF-8').replace('\r\n', '\n').getBytes(StandardCharsets.UTF_8)),
+                    'legal/upstream/Apache-2.0.txt': digest(apache.bytes)],
+                packages: inventory]
+            def content = new StringBuilder('Velum Code Android third-party software\n\n')
+            content.append(model.scope).append('\n\nEach component retains its own license. No license to Velum-owned application source is granted by these notices.\n\nPACKAGE INDEX\n\n')
+            inventory.each { item ->
+                content.append("${item.group}:${item.name}:${item.version}\nLicense: ${item.license}\nUpstream metadata: ${item.pomUrl}\n")
+                item.notices.each { n -> content.append("  ${n.path}: TEXT ${n.sha256}\n") }
+                content.append('\n')
+            }
+            content.append('LICENSE AND NOTICE TEXTS\n\nIdentical texts appear once and are referenced by SHA-256 above.\n\n')
+            texts.each { hash, text ->
+                content.append('===============================================================================\n')
+                    .append("TEXT ${hash}\n")
+                    .append('===============================================================================\n')
+                    .append(text).append(text.endsWith('\n') ? '\n' : '\n\n')
+            }
+            def serialized = JsonOutput.prettyPrint(JsonOutput.toJson(model)).replaceAll(/(?m)[ \t]+$/, '')
+            new File(repo, 'legal/android-dependencies.json').setText(serialized + '\n', 'UTF-8')
+            new File(app.projectDir, 'src/main/assets/third-party-notices.txt').setText(content.toString(), 'UTF-8')
+            println "Generated Android notices: ${inventory.size()} runtime artifacts, ${texts.size()} distinct texts"
+        }
+    }
+    // An invocation of this init script keeps notices current before APK packaging.
+    app.tasks.named('preBuild').configure { dependsOn(task) }
+}

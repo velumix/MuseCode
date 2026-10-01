@@ -28,8 +28,46 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "resources": { "icons/128x128.png": "velum-notification.png" },
+    "targets": [
+      "nsis"
+    ],
+    "resources": {
+      "icons/128x128.png": "velum-notification.png",
+      "../LEGAL.md": "legal/LEGAL.md",
+      "../PRIVACY.md": "legal/PRIVACY.md",
+      "../SECURITY.md": "legal/SECURITY.md",
+      "../TERMS.md": "legal/TERMS.md",
+      "../THIRD_PARTY_NOTICES.txt": "legal/THIRD_PARTY_NOTICES.txt",
+      "../legal/covered-sources/README.md": "legal/covered-sources/README.md",
+      "../legal/covered-sources/cssparser-0.36.0.crate": "legal/covered-sources/cssparser-0.36.0.crate",
+      "../legal/covered-sources/cssparser-macros-0.6.1.crate": "legal/covered-sources/cssparser-macros-0.6.1.crate",
+      "../legal/covered-sources/dtoa-short-0.3.5.crate": "legal/covered-sources/dtoa-short-0.3.5.crate",
+      "../legal/covered-sources/nsis-3.11-src.tar.bz2": "legal/covered-sources/nsis-3.11-src.tar.bz2",
+      "../legal/covered-sources/option-ext-0.2.0.crate": "legal/covered-sources/option-ext-0.2.0.crate",
+      "../legal/covered-sources/selectors-0.36.1.crate": "legal/covered-sources/selectors-0.36.1.crate",
+      "../legal/dependencies.json": "legal/dependencies.json",
+      "../legal/upstream.json": "legal/upstream.json",
+      "../legal/upstream/MPL-2.0.txt": "legal/upstream/MPL-2.0.txt",
+      "../legal/upstream/NSIS-COPYING.txt": "legal/upstream/NSIS-COPYING.txt",
+      "../legal/upstream/NSIS-Modern-UI-2-License.txt": "legal/upstream/NSIS-Modern-UI-2-License.txt",
+      "../legal/upstream/NSISdl-License.txt": "legal/upstream/NSISdl-License.txt",
+      "../legal/upstream/alloc-stdlib-LICENSE": "legal/upstream/alloc-stdlib-LICENSE",
+      "../legal/upstream/defmt-parser-LICENSE-APACHE": "legal/upstream/defmt-parser-LICENSE-APACHE",
+      "../legal/upstream/defmt-parser-LICENSE-MIT": "legal/upstream/defmt-parser-LICENSE-MIT",
+      "../legal/upstream/serial-LICENSE": "legal/upstream/serial-LICENSE",
+      "../legal/upstream/tauri-plugin-LICENSE_MIT": "legal/upstream/tauri-plugin-LICENSE_MIT",
+      "../legal/upstream/unic-LICENSE-APACHE": "legal/upstream/unic-LICENSE-APACHE",
+      "../legal/upstream/unic-LICENSE-MIT": "legal/upstream/unic-LICENSE-MIT",
+      "../legal/upstream/unic-ucd-ident-LICENSE-APACHE": "legal/upstream/unic-ucd-ident-LICENSE-APACHE",
+      "../legal/upstream/unic-ucd-ident-LICENSE-MIT": "legal/upstream/unic-ucd-ident-LICENSE-MIT",
+      "../legal/upstream/webview2-SDK-LICENSE.txt": "legal/upstream/webview2-SDK-LICENSE.txt",
+      "../legal/upstream/webview2-SDK-NOTICE.txt": "legal/upstream/webview2-SDK-NOTICE.txt",
+      "../legal/upstream/webview2-com-LICENSE": "legal/upstream/webview2-com-LICENSE",
+      "../legal/upstream/webview2-com-macros-LICENSE": "legal/upstream/webview2-com-macros-LICENSE",
+      "../legal/upstream/Rust-1.98.1-MIT.txt": "legal/upstream/Rust-1.98.1-MIT.txt",
+      "../legal/upstream/Rust-1.98.1-Apache-2.0.txt": "legal/upstream/Rust-1.98.1-Apache-2.0.txt",
+      "../legal/upstream/Rust-1.98.1-COPYRIGHT-library.html": "legal/upstream/Rust-1.98.1-COPYRIGHT-library.html"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -39,7 +77,9 @@
     ],
     "windows": {
       "nsis": {
-        "languages": ["English"],
+        "languages": [
+          "English"
+        ],
         "displayLanguageSelector": false,
         "compression": "lzma",
         "startMenuFolder": "Velum Code",

@@ -15,7 +15,11 @@
     "check:native": "cargo build --manifest-path src-tauri/Cargo.toml && node scripts/native-smoke.mjs",
     "check:remote": "npm run build && cargo build --manifest-path src-tauri/Cargo.toml && node scripts/remote-smoke.mjs",
     "tauri": "tauri",
-    "check:bots": "cargo build --manifest-path src-tauri/Cargo.toml && node scripts/bots-smoke.mjs"
+    "check:bots": "cargo build --manifest-path src-tauri/Cargo.toml && node scripts/bots-smoke.mjs",
+    "legal:notices": "node scripts/legal-notices.mjs",
+    "legal:notices:check": "node scripts/legal-notices.mjs --check",
+    "legal:check": "node scripts/legal-check.mjs",
+    "legal:release": "node scripts/legal-check.mjs --release"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

@@ -13,7 +13,8 @@
   <p>
     <a href="#get-velumcode"><strong>Get VelumCode</strong></a> ·
     <a href="#why-i-built-it">The story</a> ·
-    <a href="docs/development.md">Development guide</a> ·
+    <a href="docs/README.md">Documentation</a> ·
+    <a href="LEGAL.md">Legal &amp; privacy</a> ·
     <a href="https://github.com/velumix/VelumCode/issues">Feedback &amp; ideas</a>
   </p>
 </div>
@@ -289,9 +290,24 @@ There are still a few things I want to improve:
 
 - **Browse older conversations.** Open conversations recover automatically; a searchable archive of closed conversations is not included yet.
 - **Interactive approvals in chat.** Chat cannot answer interactive approval prompts; each provider follows the policy described above. The terminal is available for interactive workflows.
-- **Easier project switching.** A folder picker, recent workspaces, and clearer project navigation are on the list.
+- **Clearer project navigation.** A folder picker and access checks are available; recent workspace navigation can be improved further.
 
 Agent and Terminal are separate conversations within a tab. Terminal work keeps running in the tray, but completion notifications currently come from structured Agent turns. Changing a tab's workspace intentionally starts a fresh session.
+
+## Documentation, privacy and licensing
+
+Start with the [documentation index](docs/README.md), [getting started](docs/getting-started.md),
+[troubleshooting](docs/support.md) and [data controls](docs/data-controls.md).
+The [terms](TERMS.md) and [privacy notice](PRIVACY.md) are drafts pending publisher
+details, a distribution/license decision and legal review. They are not yet an
+effective agreement. The app has no project source license selected; see
+[legal status](LEGAL.md). Dependency licenses and notices remain applicable.
+
+Velum Code is independent of its AI providers and other integrations. Prompts,
+files and selected context can go to the chosen provider; local history and
+memory are stored as plaintext. WebView2 and other external services have their
+own data practices. Review the privacy draft before using sensitive information.
+Report vulnerabilities through the [security policy](SECURITY.md).
 
 ---
 
