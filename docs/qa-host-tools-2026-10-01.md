@@ -88,8 +88,29 @@ manifest records the runtime commit and checksums.
 | Velum Code 0.6.5 x64 installer | `2e87ba40306740f799d68ad1db82cf77477724167c72f5f577441740b8ef142c` |
 | Raw release executable | `0ab6cfb64296137197b3a8080188d946558b3d632a63ccb519ff67cce2992594` |
 
-Installation is pending while the existing 0.6.3 app is running. Windows needs
-Velum to fully quit before its installed executable can be replaced.
+**Installed and file-verified:** after the owner fully quit 0.6.3, the verified
+0.6.5 installer completed with exit code zero. Windows reports product/file
+version 0.6.5. All 34 installed legal resources match the release inputs byte
+for byte. The installed executable matches the raw release except for the
+expected three-byte Tauri NSIS bundle marker.
+
+The installed executable SHA-256 is
+`34caf5b42d1ffc8da224afccfb6ba63905946c8bd030c6a3562e235451740435`.
+The file verification report is `.qa/legal-install-verification.json`; its
+runtime source commit is the build commit above. Terms remain drafts.
+
+Real Muse/Codex initialization and tool discovery and Antigravity configuration
+parsing passed again against the installed executable. Evidence:
+`.qa/provider MCP 1790865235491/result.json`.
+
+Installed native tool, live-counter and independent client-timing checks passed
+across all three provider fixture paths and the UI turn. Evidence:
+`.qa/agent tools 1790865413384 & project/result.json` and `client-report.json`.
+An initial installed run stopped when Windows rejected an optional native
+control operation (`.qa/agent tools 1790865235726 & project`). Repeating the
+same checks passed, including Unicode input and window capture. No runtime
+change or Windows policy change was made between attempts; this remains
+evidence of an intermittent desktop-control rejection, not a proven fix for it.
 
 See [agent tools](agent-tools.md) for hash copying, search pagination and browser
 behavior, and [usage](usage.md) for completed host/client diagnostics.

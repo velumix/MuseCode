@@ -77,7 +77,7 @@ Release evidence: `.qa/agent tools 1790831615429 & project/result.json` and
 The desktop archive is `Builds/Windows/2026-09-30-live-counters`, containing
 the installer, raw executable, 34 legal resources and verification reports.
 
-**Installation is pending:** the current 0.6.3 app is running. Windows requires
-it to fully quit before the installed executable can be replaced. Its final
-rates are already working; the 0.6.4 update adds the live-diagnostics fix and
-clearer measurement status.
+Installation was pending at the time of this validation because the 0.6.3 app
+was running. The subsequent [0.6.5 host tool update](qa-host-tools-2026-10-01.md)
+is installed and verified; it includes this live-diagnostics fix and clearer
+measurement status.
