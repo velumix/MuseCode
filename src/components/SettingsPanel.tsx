@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import Icon from "./Icon";
+import ToolsSettings from "./ToolsSettings";
 import { palette, themes } from "../appearance";
 import {
   defaults,
@@ -1050,6 +1051,7 @@ export default function SettingsPanel({
                         "Applies to new conversations. Existing conversations keep their provider.",
                       )}
                   </Group>
+                  {!phone && <ToolsSettings search={search} />}
                   {notifications && (
                     <Group title="Notifications">
                       <Toggle

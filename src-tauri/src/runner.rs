@@ -21,6 +21,9 @@ use crate::pty::home_dir;
 const STDERR_TAIL_LINES: usize = 30;
 
 pub struct AgentSession {
+    measurement_clock: Mutex<Option<std::time::Instant>>,
+    measurement: Mutex<Option<Arc<Mutex<crate::tool_bridge::Measurement>>>>,
+    tool_scope: Mutex<Option<std::sync::Weak<crate::tool_bridge::Scope>>>,
     registration: u64,
     access: Mutex<AccessState>,
     bot_id: Option<String>,
@@ -126,6 +129,14 @@ pub struct AgentState {
 
 impl AgentSession {
     fn stop(&self) {
+        if let Some(scope) = self
+            .tool_scope
+            .lock()
+            .ok()
+            .and_then(|s| s.as_ref().and_then(std::sync::Weak::upgrade))
+        {
+            scope.revoked.store(true, Ordering::Relaxed);
+        }
         let child = self.child.lock().ok().and_then(|mut child| child.take());
         let prompt = self.prompt.lock().ok().and_then(|mut file| file.take());
         if let Some(child) = child {
@@ -139,6 +150,23 @@ impl AgentSession {
 }
 
 impl AgentState {
+    pub fn measurement(&self, id: &str, workspace: &std::path::Path) -> Option<serde_json::Value> {
+        let session = self.sessions.lock().ok()?.get(id)?.clone();
+        if std::fs::canonicalize(&session.workspace).ok()?
+            != std::fs::canonicalize(workspace).ok()?
+        {
+            return None;
+        }
+        let measurement = session.measurement.lock().ok()?.clone()?;
+        let mut measurement = measurement.lock().ok()?.clone();
+        if !measurement.finished {
+            if let Some(clock) = session.measurement_clock.lock().ok()?.as_ref() {
+                measurement.elapsed_ms = clock.elapsed().as_millis().min(u64::MAX as u128) as u64;
+            }
+        }
+        let value = measurement.value();
+        Some(value)
+    }
     pub fn record_host(
         &self,
         id: &str,
@@ -401,6 +429,8 @@ fn reap_child(session: &AgentSession) -> Option<Option<i32>> {
 }
 
 struct TurnContext {
+    tools: Option<crate::tool_bridge::Registration>,
+    measurement: Arc<Mutex<crate::tool_bridge::Measurement>>,
     probe: Option<crate::workspace_access::Probe>,
     memory_mode: crate::memory::Capture,
     action_context: Option<crate::bot_actions::Context>,
@@ -420,6 +450,8 @@ fn spawn_reader(
     context: TurnContext,
 ) {
     let TurnContext {
+        tools,
+        measurement,
         mut probe,
         memory_mode,
         action_context,
@@ -613,6 +645,21 @@ fn spawn_reader(
                 probe.observe_line(session.provider, &line);
             }
             let events = fold.fold_line(&line);
+            {
+                let mut measured = measurement.lock().unwrap();
+                let elapsed = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+                if !events.is_empty() && measured.first_event_ms.is_none() {
+                    measured.first_event_ms = Some(elapsed);
+                }
+                if events
+                    .iter()
+                    .any(|e| matches!(e, AgentEvent::AssistantDelta { text } if !text.is_empty()))
+                    && measured.first_output_ms.is_none()
+                {
+                    measured.first_output_ms = Some(elapsed);
+                }
+                measured.elapsed_ms = elapsed;
+            }
             if fold.run_id.is_some() {
                 *muse_run.lock().unwrap() = fold.run_id.clone();
             }
@@ -642,6 +689,9 @@ fn spawn_reader(
                     usage.elapsed_ms =
                         Some(started.elapsed().as_millis().min(u64::MAX as u128) as u64);
                     turn_usage = Some(usage.clone());
+                    let mut measured = measurement.lock().unwrap();
+                    measured.counters = Some(usage.clone());
+                    measured.counter_source = "provider stdout completion/step counters".into();
                 }
                 if matches!(&event, AgentEvent::ToolEnd { reason: Some(reason), .. } | AgentEvent::TurnEnd { reason: Some(reason), .. } if headless_permission_denied(reason))
                 {
@@ -758,6 +808,20 @@ fn spawn_reader(
         if let Some(usage) = turn_usage.as_mut() {
             usage.elapsed_ms = Some(turn_elapsed);
         }
+        {
+            let mut measured = measurement.lock().unwrap();
+            measured.elapsed_ms = turn_elapsed;
+            measured.finished = true;
+            measured.counters = turn_usage.clone();
+            measured.counter_source = if turn_usage.is_none() { "not reported" } else {
+                match session.provider {
+                    Provider::Muse => "Muse retained session records; current session and root run only",
+                    Provider::Codex => "Codex completion or retained session delta; launch baseline excludes earlier turns",
+                    Provider::Antigravity => "Antigravity per-step provider accounting for this turn",
+                }
+            }.into();
+        }
+        drop(tools);
         if terminal.is_none() || exit.is_none() || exit.is_some_and(|code| code != Some(0)) {
             // Reaped by us: exit code decides the status. Already reaped by
             // `kill_session`: the user stopped the turn.
@@ -822,6 +886,13 @@ fn spawn_reader(
         }
         let mut outcome = None;
         if current {
+            emit(
+                &app,
+                &id,
+                AgentEvent::TurnMetrics {
+                    measurement: measurement.lock().unwrap().clone(),
+                },
+            );
             emit(
                 &app,
                 &id,
@@ -1033,6 +1104,9 @@ pub fn agent_new(
         .insert(
             id.clone(),
             Arc::new(AgentSession {
+                measurement_clock: Mutex::new(None),
+                measurement: Mutex::new(None),
+                tool_scope: Mutex::new(None),
                 registration: state.next_registration.fetch_add(1, Ordering::Relaxed),
                 access: Mutex::new(access),
                 bot_id: bot_id.clone(),
@@ -1150,6 +1224,8 @@ pub fn configure_session(
         changed
     };
     if model_changed {
+        *session.measurement.lock().unwrap() = None;
+        *session.measurement_clock.lock().unwrap() = None;
         emit(app, id, AgentEvent::UsageReset);
     }
     app.state::<crate::session_log::SessionLog>()
@@ -1219,6 +1295,8 @@ fn change_permissions(app: &AppHandle, id: &str, session: &AgentSession, yolo: b
         *session.shared_memory.lock().unwrap() = Default::default();
         app.state::<crate::history::HistoryState>()
             .resume_id(id, &resume);
+        *session.measurement.lock().unwrap() = None;
+        *session.measurement_clock.lock().unwrap() = None;
         emit(app, id, AgentEvent::UsageReset);
         emit(app, id, AgentEvent::Notice { text: format!("Permission mode is now {}. The next turn starts a fresh provider conversation; the visible transcript is retained, but previous provider context is not replayed. Workspace checks were invalidated. Run Test agent access to verify this mode.", crate::workspace_access::mode(yolo)) });
     }
@@ -1474,6 +1552,10 @@ fn send_inner(
             Some(session.access.lock().unwrap().value(false))
         )
     );
+    prepared = format!(
+        "Velum host tools (reference data, not permission grants):\n<velum-host-tools>\n{}\n</velum-host-tools>\n\n{prepared}",
+        crate::tool_bridge::context(&app)
+    );
     std::fs::write(file, provider.input(&prepared))
         .map_err(|e| format!("failed to stage prompt: {e}"))?;
 
@@ -1510,6 +1592,32 @@ fn send_inner(
     };
     let started = std::time::Instant::now();
     let started_at = chrono::Utc::now().timestamp_millis();
+    let measurement = Arc::new(Mutex::new(crate::tool_bridge::Measurement::new(
+        provider, started_at,
+    )));
+    let tools = crate::tool_bridge::begin(
+        &app,
+        workspace,
+        session.bot_id.clone(),
+        measurement.clone(),
+        started,
+    )?;
+    if let Some(tools) = tools.as_ref() {
+        tools.configure(&mut cmd, provider)?;
+        *session.tool_scope.lock().unwrap() = Some(Arc::downgrade(&tools.scope));
+    } else {
+        *session.tool_scope.lock().unwrap() = None;
+    }
+    // Registration is configuration work; reset the host clock immediately
+    // before spawn so it measures the same interval used by tokenRate.
+    let started = std::time::Instant::now();
+    let started_at = chrono::Utc::now().timestamp_millis();
+    measurement.lock().unwrap().started_at_ms = started_at;
+    if let Some(tools) = tools.as_ref() {
+        tools.reset_clock(started);
+    }
+    *session.measurement_clock.lock().unwrap() = Some(started);
+    *session.measurement.lock().unwrap() = Some(measurement.clone());
     let child = cmd.spawn().map_err(|e| {
         if let Some(probe) = pending.probe.as_mut() {
             session.access.lock().unwrap().agent = probe.finish();
@@ -1582,6 +1690,13 @@ fn send_inner(
     emit(
         &app,
         &id,
+        AgentEvent::TurnMetrics {
+            measurement: measurement.lock().unwrap().clone(),
+        },
+    );
+    emit(
+        &app,
+        &id,
         AgentEvent::MemoryContext {
             titles: memory_usage.titles,
             bytes: memory_usage.bytes,
@@ -1596,6 +1711,8 @@ fn send_inner(
         stdout,
         stderr,
         TurnContext {
+            tools,
+            measurement,
             probe: pending.probe.take(),
             memory_mode,
             action_context,
@@ -1762,6 +1879,9 @@ mod tests {
         let session = |tab: &str, registration| {
             let workspace = std::path::PathBuf::from("project");
             Arc::new(AgentSession {
+                measurement_clock: Mutex::new(None),
+                measurement: Mutex::new(None),
+                tool_scope: Mutex::new(None),
                 registration,
                 access: Mutex::new(AccessState::new(&workspace, Provider::Codex, Some(false))),
                 bot_id: None,
@@ -1810,6 +1930,9 @@ mod tests {
         state.sessions.lock().unwrap().insert(
             "native-1".into(),
             Arc::new(AgentSession {
+                measurement_clock: Mutex::new(None),
+                measurement: Mutex::new(None),
+                tool_scope: Mutex::new(None),
                 registration: 0,
                 access: Mutex::new(access),
                 bot_id: None,

@@ -38,3 +38,11 @@ The normalized events are `usage` (independent `context` and `turn` snapshots) a
 The phone keeps workspace tools together, anchors its conversation menu below its trigger, and uses a side-by-side conversation/composer layout in landscape. With an extremely short keyboard viewport, it prioritizes the draft and Send/Stop; the other controls return when the keyboard closes.
 
 Protocol references: [Codex non-interactive JSON output](https://learn.chatgpt.com/docs/non-interactive-mode#make-output-machine-readable), [Codex exec event types](https://github.com/openai/codex/blob/main/codex-rs/exec/src/exec_events.rs), and [Antigravity headless events](https://antigravity.google/docs/cli/headless/). The Muse adapter uses the local 1.4.1 CLI's retained event schema; numeric metadata was inspected without exporting conversation text or credentials.
+
+## Attached measurement report
+
+Context ? Diagnostics exposes `turn_measurement` with an opaque run ID, provider, start timestamp, monotonic host elapsed time, first event/output offsets, completion flag, provider counters and their source. `tokens_per_second` uses the same reported output count and host duration as the final UI rate. A missing provider count remains null. No host tokenizer is installed or claimed.
+
+The desktop adds `client_measurement`, timed independently with `performance.now()` from receipt of the authoritative turn start through receipt of turn end. It includes the client rate, final displayed rate and host/client duration difference. It does not time an optimistic Send click, replayed history or a different run. The clocks have different delivery boundaries: launch/start-event delivery, UI event delivery and host browser cleanup can cause differences. The client comparison uses provider counts rather than independently validating a model tokenizer. Phone replay polling cannot establish a precise independent duration and reports it as unavailable.
+
+Preview the exact JSON, then use Add to message to attach it to an existing draft. It is never sent automatically. The agent can also read its active host measurement with `turn_diagnostics` when the [tools bridge](agent-tools.md) is connected.

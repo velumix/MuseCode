@@ -15,6 +15,7 @@ pub struct Entry {
 
 #[derive(Clone, Serialize)]
 pub struct Summary {
+    pub measurement: Option<crate::tool_bridge::Measurement>,
     pub queue: crate::message_queue::Snapshot,
     pub provider_progress: Option<crate::provider_progress::Progress>,
     pub last_provider_retry: Option<crate::provider_progress::Progress>,
@@ -62,6 +63,7 @@ impl SessionLog {
             id.into(),
             Log {
                 summary: Summary {
+                    measurement: None,
                     queue: crate::message_queue::Snapshot::default(),
                     provider_progress: None,
                     last_provider_retry: None,
@@ -110,6 +112,7 @@ impl SessionLog {
                 log.summary.bot = Some(bot.clone());
             }
             AgentEvent::TurnStart { prompt, .. } => {
+                log.summary.measurement = None;
                 log.summary.provider_progress = None;
                 log.summary.last_provider_retry = None;
                 if !log.started {
@@ -132,8 +135,12 @@ impl SessionLog {
                 }
             }
             AgentEvent::UsageReset => {
+                log.summary.measurement = None;
                 log.summary.provider_progress = None;
                 log.summary.last_provider_retry = None;
+            }
+            AgentEvent::TurnMetrics { measurement } => {
+                log.summary.measurement = Some(measurement.clone());
             }
             AgentEvent::AssistantDelta { text } if !text.is_empty() => {
                 log.summary.provider_progress = None;

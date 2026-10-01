@@ -59,6 +59,8 @@ See [appearance and customization](appearance.md) for the settings controls and 
 
 ```sh
 npm run check          # TypeScript + production frontend build + browser tests + Rust tests
+npm run check:tools    # native MCP, all provider launch fixtures, search/vault scope, browser/native capture and real client timing (no model calls)
+npm run check:provider-mcp # installed CLI configuration + Muse local-echo adapter discovery (no API calls)
 npm run check:native   # Windows debug build + real WebView2/IPC/ConPTY smoke test
 npm run check:remote   # real Tailscale HTTPS + native app + phone browser (Tailscale sign-in required)
 npm run check:extensions # GitHub plugins, Kanban, permissions and restart/crash recovery (internet required)
@@ -71,7 +73,9 @@ Browser tests use installed Chrome or Edge; set `BROWSER_PATH` for another Chrom
 The native test starts Vite if needed, launches a separate debug app with an isolated WebView2
 profile, and substitutes a deterministic CLI fixture only in that child's environment. It
 does not use the configured AI provider, alter the installed app, or change your CLI settings.
-Quit any running Velum Code instance before testing. Use `node scripts/native-smoke.mjs --release`
+The agent-tools smoke uses an explicit separate app identifier and can run
+alongside the user's app. Other native harnesses require Velum fully quit.
+Use `node scripts/native-smoke.mjs --release`
 for the packaged build, or `node scripts/native-smoke.mjs --installed --notifications` after
 installing the current bundle to also verify Windows Notification Center delivery and the
 registered COM activation path. These checks use isolated notification preferences.

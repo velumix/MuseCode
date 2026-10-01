@@ -107,8 +107,8 @@ pub fn turn_context(
         "workspace_access": access,
         "repository": repository(workspace), "provider": provider, "options": options,
         "permission_mode": if yolo { "user enabled YOLO" } else { "standard; provider policy still applies to tool calls" },
-        "ui_access": "No live screenshot, browser attachment or native app control is supplied by Velum. A user can attach a previewed chat layout snapshot or diagnostics report.",
-        "memory": "Memory availability is not established by filesystem diagnostics. Any selected notes and usage are supplied separately; this context does not add a vault search tool.",
+        "ui_access": "Velum's MCP bridge can supply an isolated preview browser and separately enabled native screenshot/input tools. Discover the actual tool list; a setting is not connection evidence. A user can also attach a previewed chat layout snapshot or timing diagnostics report.",
+        "memory": "Selected notes and usage are supplied separately. With Velum tools connected, vault_search reads enabled active notes scoped to this project and the current bot. Pending, archived and other projects/bots are excluded.",
         "capabilities": "CLI installation does not establish authentication or working tool connections. Check actual tool results; do not infer access from this context."
     });
     // Count serialized bytes: escaping can expand paths and custom model names.
@@ -224,11 +224,13 @@ pub fn diagnostics(app: &tauri::AppHandle, workspace: &str, id: Option<&str>) ->
         "workspace_access":access,
         "providers":providers, "memory":memory,
         "provider_runtime":runtime,
+        "agent_tools":crate::tool_bridge::context(app),
+        "turn_measurement":id.and_then(|id|app.state::<crate::runner::AgentState>().measurement(id,path)),
         "sessions":{"active":sessions.iter().filter(|s| s.running).count(),"failed":sessions.iter().filter(|s| s.status=="failed").count(),"blocked":sessions.iter().filter(|s| s.status=="blocked").count()},
         "connections": (["GitHub", "Gmail", "Google Drive", "Trello"].map(|name| json!({"name":name,"status":"untested","checked_at":null,"environment":"active provider","detail":"Velum has no live connection-health evidence. CLI installation or earlier conversation claims do not verify a connection."}))),
-        "attachments":{"ui":{"status":"untested","attached_count":null,"discovery_implemented":false},"documents":{"status":"untested","attached_count":null,"discovery_implemented":false},"detail":"Velum does not discover provider UI/document sessions. No attached sessions are asserted by this report. A chat layout snapshot is structural data only."},
+        "attachments":{"ui":{"status":"untested","attached_count":null,"discovery_implemented":false},"documents":{"status":"untested","attached_count":null,"discovery_implemented":false},"detail":"Velum does not discover external provider UI/document sessions. Its own isolated browser and opt-in native tools are separate MCP capabilities. A chat layout snapshot is structural data only."},
         "permissions":"Windows folder access and provider command permissions are separate. On the desktop, open Terminal in an Antigravity tab and enter /permissions; allow only the command needed under permissions.allow in ~/.gemini/antigravity-cli/settings.json, then retry. Scheduled permission failures pause for review.",
-        "excluded":"Absolute paths, account identities, chat text, drafts, tokens, environment variables, raw logs, repository remotes, memory contents and custom permission rules."
+        "excluded":"Absolute paths, account identities, chat text, drafts, credential values, environment variables, raw logs, repository remotes, memory contents and custom permission rules. Provider token counts and timing are included."
     })
 }
 

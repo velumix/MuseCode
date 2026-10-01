@@ -245,7 +245,7 @@ impl Stream {
                             events.push(Event::ToolResult {
                                 task_id: Some(id.clone()),
                                 call_id: None,
-                                text: bounded(&output.to_string()),
+                                text: bounded(&crate::events::tool_output(output)),
                             });
                         }
                     }
@@ -357,7 +357,9 @@ impl Stream {
                 let info = &step["tool_info"];
                 let output = info["output"]
                     .as_str()
-                    .map(|output| self.append(&id, bounded(output)))
+                    .map(|output| {
+                        self.append(&id, bounded(&crate::events::tool_text(output.to_owned())))
+                    })
                     .unwrap_or_default();
                 if self
                     .agy_last_tool
@@ -412,6 +414,21 @@ impl Stream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn codex_mcp_images_do_not_dump_base64_in_tool_results() {
+        let mut stream = Stream::new(Provider::Codex);
+        let line = serde_json::json!({"type":"item.completed","item":{"id":"shot","type":"mcp_tool_call","tool":"browser_screenshot","status":"completed","result":{"content":[{"type":"image","mimeType":"image/png","data":"private-image-binary"}]}}}).to_string();
+        let events = stream.fold_line(&line);
+        let text = events
+            .iter()
+            .find_map(|event| match event {
+                Event::ToolResult { text, .. } => Some(text),
+                _ => None,
+            })
+            .unwrap();
+        assert!(text.contains("image/png"));
+        assert!(!text.contains("private-image-binary"));
+    }
     #[test]
     fn antigravity_usage_sums_step_snapshots_once_instead_of_lifetime_result() {
         let mut stream = Stream::new(Provider::Antigravity);

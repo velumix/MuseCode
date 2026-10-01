@@ -1,5 +1,6 @@
 import type { Provider, RunOptions } from './providers';
 import type { ProviderProgress } from './providerProgress';
+import type { HostMeasurement, ClientMeasurement } from './turnMeasurement';
 
 export interface AccessCheck {
   path: string;
@@ -37,6 +38,9 @@ export interface Diagnostics {
   providers: { provider: Provider; installed: boolean; authentication: string; tool_connections: string }[];
   provider_runtime?: { provider: Provider; turn_status: string; running: boolean; progress: ProviderProgress | null; last_retry: ProviderProgress | null; detail: string } | null;
   memory: { readable: boolean; enabled?: boolean; notes?: number; budget_bytes?: number; capture?: string };
+  agent_tools?: { enabled: boolean; delete_file: boolean; vault_search: boolean; isolated_browser: boolean; native_screenshot: boolean; native_input: boolean; scope: string; availability: string };
+  turn_measurement?: HostMeasurement | null;
+  client_measurement?: ReturnType<ClientMeasurement['report']>;
   sessions: { active: number; failed: number; blocked: number };
 }
 

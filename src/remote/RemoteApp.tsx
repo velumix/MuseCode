@@ -22,6 +22,7 @@ import ModelControls from "../components/ModelControls";
 import UsageStrip from "../components/UsageStrip";
 import ProviderWait from '../components/ProviderWait';
 import { attachment, chatSnapshot, type Diagnostics } from '../context';
+import { ClientMeasurement } from '../turnMeasurement';
 const ContextPanel = lazy(() => import('../components/ContextPanel'));
 
 interface Device { id: string; name: string; control: boolean }
@@ -344,7 +345,7 @@ export default function RemoteApp() {
       setDrafts(drafts=>({...drafts,[target]:prompt}));setSelected(target);setBoardSession("");
     }}/></Suspense>}
     {botsOpen&&current&&<Suspense fallback={null}><BotsPanel workspace={current.workspace} provider={current.provider||'muse'} options={current.options||defaultOptions} readOnly={!device.control||!connected} request={request=>api<BotView>('/bots',request)} automation={request=>api(`/sessions/${encodeURIComponent(selected)}/automation`,request)} memory={(id,request)=>api<MemoryView>(`/sessions/${encodeURIComponent(selected)}/bots/${encodeURIComponent(id)}/memory`,request)} loadModels={(provider,refresh)=>api<ModelCatalog>(`/providers/${provider}/models?refresh=${refresh}`)} onClose={()=>setBotsOpen(false)} onChat={device.control?(async bot=>{const result=await api<{id:string}>(`/sessions/${encodeURIComponent(selected)}/bots/${bot.id}/chat`,{});setSelected(result.id);setReplay(null);setBotsOpen(false);await refreshRef.current();}):undefined}/></Suspense>}
-    {context && <Suspense fallback={null}><ContextPanel key={context.id} snapshot={context.snapshot} load={() => api<Diagnostics>(`/sessions/${encodeURIComponent(context.id)}/diagnostics`)} onClose={() => setContext(null)} onAttach={device.control && connected ? (label, text) => {
+    {context && <Suspense fallback={null}><ContextPanel key={context.id} snapshot={context.snapshot} load={async () => { const report=await api<Diagnostics>(`/sessions/${encodeURIComponent(context.id)}/diagnostics`);return {...report,client_measurement:new ClientMeasurement().report(report.turn_measurement)}; }} onClose={() => setContext(null)} onAttach={device.control && connected ? (label, text) => {
       const extra = attachment(label, text);
       if ((drafts[context.id] || '').length + extra.length > 16000) throw new Error('Shorten your draft before adding this report, or copy it instead.');
       setDrafts(previous => ({...previous, [context.id]:(previous[context.id] || '') + extra})); setContext(null);

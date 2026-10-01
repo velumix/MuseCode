@@ -187,6 +187,22 @@ pub fn exec_command(
     cmd.current_dir(workspace)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // The Windows sandbox account can differ from the desktop owner. Trust
+    // just this selected repository in the child environment, never '*', ACLs
+    // or the user's global Git config. Host git_status also applies it as -c.
+    if let Some(root) = crate::workspace_tools::repository_root(workspace) {
+        if let Some(count) = match std::env::var("GIT_CONFIG_COUNT") {
+            Ok(count) => count.parse::<u32>().ok(),
+            Err(std::env::VarError::NotPresent) => Some(0),
+            Err(_) => None,
+        }
+        .filter(|n| *n < 100)
+        {
+            cmd.env("GIT_CONFIG_COUNT", (count + 1).to_string())
+                .env(format!("GIT_CONFIG_KEY_{count}"), "safe.directory")
+                .env(format!("GIT_CONFIG_VALUE_{count}"), root);
+        }
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

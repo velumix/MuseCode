@@ -19,6 +19,7 @@ override this with `MUSE_CODE_CONFIG_DIR`; the override is not a provider settin
 | `history/<tab-id>.json` | Bounded recent conversation event history |
 | `appearance.json` | Theme, layout, typography and workflow preferences |
 | `desktop.json` | Desktop notification preferences |
+| `agent-tools.json` | Host tool permissions, including separate desktop capture and native input grants |
 | `remote.json` | Remote settings, approved devices and hashed login credentials |
 | `boards/` | Workspace task boards, including retained trash |
 | `bots/` | Bot profiles and instructions |

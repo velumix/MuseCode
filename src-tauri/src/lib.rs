@@ -25,8 +25,11 @@ mod runner;
 mod session_log;
 mod storage;
 mod tailscale;
+mod tool_bridge;
+mod tool_control;
 mod usb;
 mod workspace_access;
+mod workspace_tools;
 
 use pty::PtyState;
 use runner::AgentState;
@@ -34,6 +37,29 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if std::env::args().any(|arg| arg == "--velum-tool-stdio") {
+        if let Err(error) = tool_bridge::stdio() {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    let mut context = tauri::generate_context!();
+    // Explicit native QA instances have their own configuration, WebView and
+    // single-instance identity. They never forward to the user's live app.
+    if std::env::var_os("VELUM_ISOLATED_TEST").is_some() {
+        if let Some(directory) = std::env::var_os("MUSE_CODE_CONFIG_DIR") {
+            use sha2::Digest;
+            let tag = format!(
+                "{:x}",
+                sha2::Sha256::digest(directory.to_string_lossy().as_bytes())
+            );
+            context.config_mut().identifier = format!("com.velumix.musecode.qa.{}", &tag[..20]);
+            if let Some(window) = context.config_mut().app.windows.first_mut() {
+                window.title = format!("Velum native QA {}", &tag[..8]);
+            }
+        }
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             desktop::show(app, None)
@@ -53,12 +79,16 @@ pub fn run() {
             automation::setup(app.handle());
             desktop::setup(app)?;
             preferences::setup(app)?;
+            tool_bridge::setup(app)?;
             remote::setup(app)
         })
         .on_window_event(desktop::close_to_tray)
         .invoke_handler(tauri::generate_handler![
             preferences::preferences_load,
             preferences::preferences_save,
+            tool_bridge::agent_tools_status,
+            tool_bridge::agent_tools_configure,
+            tool_bridge::agent_tools_disconnect,
             app_context::workspace_pick,
             app_context::workspace_check,
             app_context::app_diagnostics,
@@ -117,7 +147,7 @@ pub fn run() {
             desktop::desktop_show,
             desktop::desktop_quit
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {

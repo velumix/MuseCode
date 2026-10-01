@@ -14,6 +14,7 @@
 | Guide | Covers |
 | --- | --- |
 | [Appearance](appearance.md) | Themes, glass, typography, layout and settings profiles |
+| [Agent tools](agent-tools.md) | Scoped file tools, paged search, vault search, browser previews and optional desktop control |
 | [Project context](project-context.md) | Workspace access, app context and diagnostic attachments |
 | [Usage](usage.md) | Provider token counts, timing and tok/s limits |
 | [Memory](memory.md) | Shared/project notes, review, budgets and selective recall |
@@ -42,6 +43,7 @@
 QA reports describe a specific build and environment; they are not guarantees
 about every future release, provider or device. Recent records:
 
+- [Agent tools and independent timing, September 30](qa-agent-tools-2026-09-30.md).
 - [Focused conversation UX, September 30](qa-focused-experience-2026-09-30.md).
 - [Queue, status and provider metrics, September 30](qa-queue-provider-metrics-2026-09-30.md).
 - [Themes and settings, September 30](qa-ui-customization-2026-09-30.md).

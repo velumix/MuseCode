@@ -1,7 +1,7 @@
 {
   "name": "velum-code",
   "private": true,
-  "version": "0.6.2",
+  "version": "0.6.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,6 +13,8 @@
     "check": "npm run build && npm test && npm run test:sdk && npm run test:rust",
     "check:extensions": "cargo build --manifest-path src-tauri/Cargo.toml && node scripts/extensions-smoke.mjs",
     "check:native": "cargo build --manifest-path src-tauri/Cargo.toml && node scripts/native-smoke.mjs",
+    "check:tools": "cargo build --manifest-path src-tauri/Cargo.toml && node scripts/agent-tools-smoke.mjs",
+    "check:provider-mcp": "node scripts/provider-mcp-config-smoke.mjs",
     "check:remote": "npm run build && cargo build --manifest-path src-tauri/Cargo.toml && node scripts/remote-smoke.mjs",
     "tauri": "tauri",
     "check:bots": "cargo build --manifest-path src-tauri/Cargo.toml && node scripts/bots-smoke.mjs",

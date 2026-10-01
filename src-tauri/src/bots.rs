@@ -78,14 +78,7 @@ fn plain(text: &str, max: usize) -> bool {
 }
 fn safe_path(path: &Path) -> Result<(), String> {
     if let Ok(meta) = fs::symlink_metadata(path) {
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::MetadataExt;
-            if meta.file_attributes() & 0x400 != 0 {
-                return Err("Bot files cannot be links.".into());
-            }
-        }
-        if meta.file_type().is_symlink() {
+        if crate::workspace_tools::linked(&meta) {
             return Err("Bot files cannot be links.".into());
         }
     }

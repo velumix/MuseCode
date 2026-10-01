@@ -47,6 +47,9 @@ pub enum AgentEvent {
         turn: Option<crate::provider_usage::TurnUsage>,
     },
     UsageReset,
+    TurnMetrics {
+        measurement: crate::tool_bridge::Measurement,
+    },
     BotIdentity {
         bot: crate::bots::Identity,
     },
@@ -146,6 +149,35 @@ fn truncate(mut text: String) -> String {
     if text.chars().count() > MAX_TEXT_CHARS {
         text = text.chars().take(MAX_TEXT_CHARS).collect();
         text.push_str(TRUNCATED_MARKER);
+    }
+    text
+}
+
+/// Transcript rendering never needs MCP image bytes. The original response
+/// still goes directly to the provider; only derived UI/log events use this.
+pub(crate) fn tool_output(value: &Value) -> String {
+    fn summarize(value: &mut Value) {
+        if value["type"] == "image" && value["data"].is_string() {
+            let mime = value["mimeType"].as_str().unwrap_or("image").to_owned();
+            *value = serde_json::json!({"type":"image","mimeType":mime,"delivery":"Image supplied to provider; binary data omitted from this transcript."});
+            return;
+        }
+        match value {
+            Value::Array(items) => items.iter_mut().for_each(summarize),
+            Value::Object(object) => object.values_mut().for_each(summarize),
+            _ => {}
+        }
+    }
+    let mut display = value.clone();
+    summarize(&mut display);
+    display.to_string()
+}
+
+pub(crate) fn tool_text(text: String) -> String {
+    if text.contains("\"image\"") && text.contains("\"data\"") {
+        if let Ok(value) = serde_json::from_str::<Value>(&text) {
+            return tool_output(&value);
+        }
     }
     text
 }
@@ -332,7 +364,7 @@ impl Fold {
                 first_str(&payload, &["text", "delta", "chunk"])
                     .map(|text| AgentEvent::ToolDelta {
                         task_id,
-                        text: truncate(text),
+                        text: truncate(tool_text(text)),
                     })
                     .into_iter()
                     .collect()
@@ -387,7 +419,7 @@ impl Fold {
                     .map(|text| AgentEvent::ToolResult {
                         task_id,
                         call_id,
-                        text: truncate(text),
+                        text: truncate(tool_text(text)),
                     })
                     .into_iter()
                     .collect()
@@ -455,6 +487,21 @@ impl Fold {
 #[cfg(test)]
 mod tests {
     use super::{AgentEvent, Fold, TodoItem};
+
+    #[test]
+    fn image_tool_results_keep_metadata_without_binary_transcript_noise() {
+        let image = serde_json::json!({"content":[{"type":"image","mimeType":"image/png","data":"private-image-binary"},{"type":"text","text":"Preview captured"}]});
+        let line = serde_json::json!({"payload_type":"tool.result","payload":{"call_id":"screenshot","text":image.to_string()}}).to_string();
+        let event = Fold::default().fold_line(&line);
+        let AgentEvent::ToolResult { text, .. } = &event[0] else {
+            panic!("Expected a tool result");
+        };
+        assert!(text.contains("image/png"));
+        assert!(text.contains("Preview captured"));
+        assert!(!text.contains("private-image-binary"));
+        assert_eq!(super::tool_text("normal output".into()), "normal output");
+        assert_eq!(image["content"][0]["data"], "private-image-binary");
+    }
 
     // Verbatim records captured from `muse exec --json` (CLI 1.4.0); only
     // task_kind values were swapped where the echo provider never emits a

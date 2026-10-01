@@ -36,6 +36,8 @@ export async function boot(page: Page, delay = 0, configure = true) {
       }
       const api = (w.qa = {
         calls: [] as any[],
+        measurement: null as any,
+        toolPermissions:{enabled:true,file_delete:true,vault_search:true,browser:true,native_screenshot:false,native_control:false},
         sessions: new Map(),
         agentQueues: new Map<string, any>(),
         failSend: false,
@@ -356,9 +358,14 @@ export async function boot(page: Page, delay = 0, configure = true) {
             setTimeout(()=>api.emit('agent-event',{id:args.id,event:{kind:'turn_end',status:'completed'}}),10);
             return {id:args.id,turn_id:'probe-turn'};
           }
+          if(cmd === 'agent_tools_status' || cmd === 'agent_tools_configure' || cmd === 'agent_tools_disconnect') {
+            if(cmd==='agent_tools_configure') api.toolPermissions={...args.permissions};
+            if(cmd==='agent_tools_disconnect') (api as any).toolDisconnected=true;
+            return {permissions:api.toolPermissions,ready:true,browser_available:true,native_available:true,providers:[{provider:'muse',installed:true,registration:(api as any).toolDisconnected?'on_next_turn':'configured'},{provider:'codex',installed:true,registration:'per_turn'}]};
+          }
           if (cmd === 'app_diagnostics') {
             if (api.failDiagnostics) throw 'Diagnostics unavailable';
-            return {app:'Velum Code',version:'0.6.1',host_os:'windows',checked_at:1800000000,workspace:{path:'<selected-project>',git_repository:true,message:'Host and agent results are separate.'},
+            return {turn_measurement:api.measurement,app:'Velum Code',version:'0.6.1',host_os:'windows',checked_at:1800000000,workspace:{path:'<selected-project>',git_repository:true,message:'Host and agent results are separate.'},
               workspace_access:{host:accessReport('Velum host process',false),agent:accessReport('Muse agent tools',true),selection:{kind:args.workspace==='C:\\profile-home'?'user_profile_root':'project_directory',guidance:args.workspace==='C:\\profile-home'?'Choose a project folder and Apply it before coding in Codex Standard mode.':null},permissions:{requested_mode:permissionMode?'yolo':'standard',launched_mode:agentChecked?(permissionMode?'yolo':'standard'):null,revision,effective:{status:'untested'}}},
               connections:[{name:'GitHub',status:'untested',detail:'No live health evidence.'}],attachments:{detail:'Velum does not discover provider UI/document sessions.'},
               providers:[{provider:'muse',installed:true,authentication:'not checked',tool_connections:'not checked'},{provider:'antigravity',installed:true,authentication:'not checked',tool_connections:'not checked'}],memory:{readable:true,enabled:true,notes:2,budget_bytes:3000,capture:'review'},sessions:{active:0,failed:0,blocked:0}};

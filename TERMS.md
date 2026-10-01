@@ -90,6 +90,17 @@ YOLO deliberately enables a provider's permission bypass and can remove its
 approval or sandbox protections. Keep backups and choose a workspace and
 permission level appropriate for the task.
 
+Velum's optional host tools have separate permissions from provider shell
+sandboxes. Project file removal is permanent and is not a recycle-bin operation.
+Browser previews can contact sites and perform page actions. Desktop screenshot
+and native input permissions, when enabled, can expose visible information or
+interact with Windows apps under your account. YOLO does not enable these
+desktop permissions. A managed local MCP registration may be added to Muse
+and Antigravity configuration, with an original-file backup. Review the
+[agent tools guide](docs/agent-tools.md) and choose permissions appropriate for
+the work you authorize. Disabling access does not undo actions or recall
+information already received by another party.
+
 Queued messages can run automatically when active work finishes. Enabled bot
 schedules can run while Windows is awake and the app is open or in the tray.
 Review pending messages, schedules and permissions before leaving work

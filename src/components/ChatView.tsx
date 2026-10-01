@@ -20,6 +20,7 @@ import { emptyQueue, type MessageQueue as Queue } from '../messageQueue';
 import ProviderWait from './ProviderWait';
 import { progressMessage, type ProviderProgress } from '../providerProgress';
 import { mergeUsage, type UsageSnapshot } from '../usage';
+import { ClientMeasurement, type HostMeasurement } from '../turnMeasurement';
 import { attachment, chatSnapshot, type AccessCheck, type Diagnostics } from '../context';
 const ContextPanel = lazy(() => import('./ContextPanel'));
 
@@ -325,6 +326,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
   const historyRef = useRef<string[]>([]);
   const draftRef = useRef("");
   const turnStartRef = useRef(0);
+  const clientMeasurementRef = useRef(new ClientMeasurement());
   const nativeIdRef = useRef<string | null>(null);
   const assistantSeenRef = useRef(false);
   const optimisticPromptRef = useRef<{ prompt: string; blockId: number } | null>(null);
@@ -394,6 +396,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
     setShowLatest(false);
     setMemoryUsage(null);
     setUsage({});
+    clientMeasurementRef.current.reset();
     titleAssignedRef.current = false;
     setActivity("");
     setProviderProgress(null);
@@ -415,10 +418,14 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
             : previous.kind === 'error' || previous.kind === 'done' ? previous : { kind: 'idle' });
           break;
         }
+        case "turn_metrics": clientMeasurementRef.current.observe(e.measurement as unknown as HostMeasurement); break;
         case "usage": setUsage(previous => mergeUsage(previous, e)); break;
-        case "usage_reset": setUsage({}); setMemoryUsage(null); setProviderProgress(null); break;
+        case "usage_reset": clientMeasurementRef.current.reset(); setUsage({}); setMemoryUsage(null); setProviderProgress(null); break;
         case "memory_context": setMemoryUsage({titles:Array.isArray(e.titles)?e.titles as string[]:[],bytes:typeof e.bytes==="number"?e.bytes:0}); break;
         case "turn_start": {
+          clientMeasurementRef.current.start(replaying);
+          turnStartRef.current = performance.now();
+          setTurnEpoch(previous => previous + 1);
           setProviderProgress(null);
           setUsage(previous => ({ ...previous, turn: null }));
           setMemoryUsage(null);
@@ -429,7 +436,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
           }
           assistantSeenRef.current = false;
           runningRef.current = true;
-          turnStartRef.current = Date.now();
+          turnStartRef.current = performance.now();
           setTurnEpoch(previous => previous + 1);
           setRunning(true);
           const detail = e.queued ? 'Starting queued message' : e.remote ? 'Sent from your phone' : 'Starting response';
@@ -465,6 +472,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
           break;
         }
         case "turn_end": {
+          if (!replaying) clientMeasurementRef.current.finish();
           setProviderProgress(null);
           const status = asString(e.status) ?? "completed";
           const reason = asString(e.reason);
@@ -685,8 +693,8 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
   useEffect(() => {
     if (!running) return;
     setElapsed(0);
-    const t0 = turnStartRef.current || Date.now();
-    const t = window.setInterval(() => setElapsed(Date.now() - t0), 500);
+    const t0 = turnStartRef.current || performance.now();
+    const t = window.setInterval(() => setElapsed(Math.max(0, Math.round(performance.now() - t0))), 500);
     return () => window.clearInterval(t);
   }, [running, turnEpoch]);
 
@@ -759,7 +767,7 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
       setMemoryUsage(null);
       setHistIdx(null);
       historyRef.current = [...historyRef.current.slice(-49), prompt];
-      turnStartRef.current = Date.now();
+      turnStartRef.current = performance.now();
       setTurnEpoch(previous => previous + 1);
       const userId = ++idRef.current;
       optimisticPromptRef.current = { prompt, blockId: userId };
@@ -1055,10 +1063,10 @@ export default function ChatView({ provider, options, initialWorkspace, sessionI
       </div>
       {workspaceEditorOpen && blocks.some(b=>b.kind==='assistant') && <p className="workspace-editor-hint">Applying a different project starts a fresh conversation in this tab.</p>}
       </div>
-      {contextSnapshot !== null && active && <Suspense fallback={null}><ContextPanel key={`${nativeIdRef.current}:${yolo}`} snapshot={contextSnapshot} load={() => invoke<Diagnostics>('app_diagnostics', { workspace: effective, id: nativeIdRef.current })} check={() => invoke<AccessCheck>('workspace_check', { workspace: effective, write: true, id: nativeIdRef.current })} agentBusy={running || queue.items.length > 0 || !ready} checkAgent={async () => {
+      {contextSnapshot !== null && active && <Suspense fallback={null}><ContextPanel key={`${nativeIdRef.current}:${yolo}`} snapshot={contextSnapshot} load={async () => { const report = await invoke<Diagnostics>('app_diagnostics', { workspace: effective, id: nativeIdRef.current }); return {...report, client_measurement:clientMeasurementRef.current.report(report.turn_measurement)}; }} check={() => invoke<AccessCheck>('workspace_check', { workspace: effective, write: true, id: nativeIdRef.current })} agentBusy={running || queue.items.length > 0 || !ready} checkAgent={async () => {
         if (!nativeIdRef.current || runningRef.current || queueRef.current.items.length) throw new Error('Finish or clear queued messages before testing agent access.');
         runningRef.current = true; setRunning(true); setActivity('Checking workspace access'); setStatus({kind:'running',detail:'Checking workspace access'});
-        turnStartRef.current = Date.now(); assistantSeenRef.current = false;
+        turnStartRef.current = performance.now(); assistantSeenRef.current = false;
         try { await invoke('agent_check_access', {id:nativeIdRef.current,yolo}); }
         catch (e) { runningRef.current = false; setRunning(false); setStatus({kind:'error',message:String(e)}); throw e; }
       }} onClose={() => setContextSnapshot(null)} onAttach={(label, text) => {

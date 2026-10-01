@@ -38,6 +38,8 @@ never leave a device.
 | Phone names, permissions, pairing status and credential hashes | Approve and revoke device access | Saved on desktop; phones store a login cookie. Tailscale handles its own account and connection information. |
 | Plugin code, permissions and private settings | Install and run optional tools | Browsing/installing/updating contacts public GitHub services. A plugin receives only the supported host data permitted for that command. |
 | Sign-in authorization code | Complete an optional Antigravity CLI sign-in | Temporarily forwarded to that CLI; not saved as a chat message. The CLI handles provider credential storage. |
+| Browser preview pages, semantic snapshots, screenshots and optional native app actions | An isolated preview browser or separately enabled Windows controls; temporary preview profiles can contain page data/cookies | Page hosts receive browser requests. Selected page content and screenshots go to the CLI/provider and can appear in its records. Native input can act in Windows apps under your account. |
+| Host tool configuration, timing and provider token counts | Local permission settings and sanitized per-turn diagnostic metadata; managed Muse/Antigravity MCP registrations | Token counts/timing can be attached to a provider message. MCP setup is local; original provider configuration backups may contain existing credentials. |
 | Diagnostics or support material you choose to copy, attach or submit | Troubleshoot a problem | Attached context goes to the selected CLI. Reports you submit go to the chosen support channel and its operator. Public issues are public. |
 
 Velum does not require you to enter an API key into a Velum account. Provider
@@ -77,6 +79,8 @@ some collection, and required runtime data may still be sent. See
 The runtime may be downloaded from Microsoft if missing during installation.
 Android WebView and your operating system have their own update, diagnostic
 and storage behavior. These are separate from the absence of Velum analytics.
+
+The optional host tools bridge binds file operations to a selected project and vault search to enabled active project/shared/current-bot notes. A file removal is permanent and hash-checked; it is not a recycle-bin operation. Browser previews use a fresh temporary profile, separate from your personal browser. Velum closes it at turn end and attempts cleanup, but a crash or file lock can leave data in the system temporary directory. Optional desktop screenshots can include private information and overlapping windows. Desktop capture and native input default to off and are separate from YOLO. Disabling a capability blocks subsequent calls; it does not undo completed actions or recall provider data. See the [agent tools guide](docs/agent-tools.md).
 
 ## 3. Local storage and retention
 
