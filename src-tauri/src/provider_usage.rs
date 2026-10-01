@@ -439,14 +439,23 @@ mod tests {
         // A later step with a smaller input (e.g. a compacted retry) must not
         // lower the occupancy mark; duplicates must not move it either.
         let second = uuid::Uuid::new_v4().to_string();
-        std::fs::write(&log.0, format!("{}\n{}\n", record(&first, 27020), record(&second, 8000))).unwrap();
+        std::fs::write(
+            &log.0,
+            format!("{}\n{}\n", record(&first, 27020), record(&second, 8000)),
+        )
+        .unwrap();
         monitor.poll(&log.0, &session, &run);
         assert_eq!(monitor.context_estimate().unwrap().used_tokens, 27020);
         // Growth is reflected on the next poll.
         let third = uuid::Uuid::new_v4().to_string();
         std::fs::write(
             &log.0,
-            format!("{}\n{}\n{}\n", record(&first, 27020), record(&second, 8000), record(&third, 27299)),
+            format!(
+                "{}\n{}\n{}\n",
+                record(&first, 27020),
+                record(&second, 8000),
+                record(&third, 27299)
+            ),
         )
         .unwrap();
         monitor.poll(&log.0, &session, &run);
