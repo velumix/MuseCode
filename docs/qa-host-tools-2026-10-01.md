@@ -112,5 +112,38 @@ same checks passed, including Unicode input and window capture. No runtime
 change or Windows policy change was made between attempts; this remains
 evidence of an intermittent desktop-control rejection, not a proven fix for it.
 
+## Real Muse retest after installation
+
+The owner's subsequent Muse report verifies two live rates against reported
+provider counts:
+
+| Snapshot | Output tokens | Host elapsed | Whole-turn average |
+| --- | --- | --- | --- |
+| Reported live baseline | 247 | 21,042 ms | 11.7384 tok/s |
+| Reported later live snapshot | 1,453 | 90,996 ms | 15.9677 tok/s |
+| Saved completed host measurement | 2,528 | 125,353 ms | 20.167048 tok/s |
+
+Both reported live rates match `output_tokens * 1000 / elapsed_ms` to the
+reported precision. The saved completion for run
+`61e28788-9d15-4159-9ae4-1590c89e4b45` has `finished: true`, ten tool calls,
+zero tool errors, first event at 8,521 ms and first visible assistant output at
+100,577 ms. The 90,996 ms snapshot was taken before that output, so its null
+`first_output_ms` was expected. That field measures visible output observed by
+the host, not a provider's first decoded token. Numeric-only evidence is
+`.qa/muse-live-verification-2026-10-01.json`.
+
+The report also states that isolated browser open/snapshot and the full
+write/inspect/delete lifecycle passed, with a clean project afterward. Those
+particular feature calls were not independently repeated for this record.
+Search still had a continuation cursor; its first page does not establish full
+coverage. Optional native permissions remained off.
+
+Two interpretations in the report need correction: an unfinished turn can
+have a valid provisional rate when reported counts exist; earlier missing live
+counts despite retained provider records were the 0.6.3 bug fixed in 0.6.4.
+Also, the earlier rejected deletions supplied 41-character hashes, as recorded
+above. They were incomplete arguments correctly rejected by the guard, rather
+than evidence of a valid-hash rejection.
+
 See [agent tools](agent-tools.md) for hash copying, search pagination and browser
 behavior, and [usage](usage.md) for completed host/client diagnostics.
