@@ -15,7 +15,7 @@ See [agent tools](agent-tools.md) for permissions and limits.
 | Dependency notices and legal consistency | Passed; legal documents remain drafts |
 | Real native MCP bridge | Passed through all three provider launch paths with deterministic CLI fixtures |
 | Installed Muse CLI, local echo | Real stdio adapter initialize and tool discovery passed on 1.4.2-R4684.1; no model/API call |
-| Installed Codex and Antigravity configuration | Per-turn Codex configuration and credential-name allowlist accepted; Antigravity read the isolated MCP entry |
+| Installed Codex metadata and Antigravity configuration | Codex per-turn config/credential-name allowlist accepted; actual adapter initialize/discovery passed through app-server metadata; Antigravity read the isolated MCP entry |
 
 Native tests use an explicit private app identifier, configuration directory,
 WebView profile and test window title. They can run alongside the user's app
@@ -77,8 +77,10 @@ These contain fixture evidence, not user conversation content or credentials.
 These tests establish native tool behavior, timing arithmetic and provider
 launch/configuration compatibility. They did **not** make paid model requests
 or verify new end-to-end tool calls through signed-in Codex/Antigravity model
-sessions. Their configuration parsing was checked; Muse's actual local echo
-session additionally initialized and discovered the real adapter.
+sessions. Antigravity's configuration parsing was checked. Muse's actual local
+echo session and Codex's app-server MCP metadata both initialized and discovered
+the real adapter without making a model request. The Codex discovery fixture
+also rejects unsupported resource methods, as a tools-only server may do.
 
 Token counts remain provider-reported accounting. No independent provider
 tokenizer or pure decoder-speed measurement is claimed. Unreported counters
@@ -105,7 +107,8 @@ The installer, raw executable, build manifest, 34 legal resources and debug/
 release verification reports are archived in the desktop workspace's
 `Builds/Windows/2026-09-30-agent-tools` folder. Release fixture evidence is also
 in `.qa/agent tools 1790828617099 & project/result.json` and
-`.qa/provider MCP 1790828616824/result.json`.
+`.qa/provider MCP 1790829274210/result.json` (latest path is also recorded in the
+archived `release-provider-mcp-verification.json`).
 
 **Installation is pending:** the existing installed 0.6.2 app is still running.
 The user was asked to finish work and fully quit from the tray before replacing

@@ -60,7 +60,7 @@ See [appearance and customization](appearance.md) for the settings controls and 
 ```sh
 npm run check          # TypeScript + production frontend build + browser tests + Rust tests
 npm run check:tools    # native MCP, all provider launch fixtures, search/vault scope, browser/native capture and real client timing (no model calls)
-npm run check:provider-mcp # installed CLI configuration + Muse local-echo adapter discovery (no API calls)
+npm run check:provider-mcp # CLI configuration + Muse/Codex real adapter discovery (no model calls)
 npm run check:native   # Windows debug build + real WebView2/IPC/ConPTY smoke test
 npm run check:remote   # real Tailscale HTTPS + native app + phone browser (Tailscale sign-in required)
 npm run check:extensions # GitHub plugins, Kanban, permissions and restart/crash recovery (internet required)

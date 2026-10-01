@@ -1,14 +1,16 @@
 // Validate installed CLI configuration without API credentials or model calls.
 // Muse's local echo provider connects through the real Velum stdio adapter to
-// a private MCP fixture. Codex/Agy checks parse configuration, not live calls.
+// a private MCP fixture. Codex metadata also checks real adapter discovery;
+// Agy checks configuration parsing. No model request is made.
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
 import { randomBytes } from 'node:crypto';
+import { createInterface } from 'node:readline';
 
 assert.equal(process.platform, 'win32');
 const run = promisify(execFile);
@@ -51,9 +53,9 @@ const server = http.createServer(async (req, res) => {
   const request = JSON.parse(bytes); methods.push(request.method);
   const result = request.method === 'initialize'
     ? { protocolVersion: request.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'velum_code', version: 'fixture' } }
-    : request.method === 'tools/list' ? { tools: [] } : {};
+    : request.method === 'tools/list' ? { tools: [{ name: 'turn_diagnostics', description: 'Fixture timing', inputSchema: { type: 'object', properties: {} } }] } : null;
   res.setHeader('content-type', 'application/json');
-  res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }));
+  res.end(JSON.stringify(result === null ? {jsonrpc:'2.0',id:request.id,error:{code:-32601,message:'Method not found'}} : { jsonrpc: '2.0', id: request.id, result }));
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 try {
@@ -67,7 +69,29 @@ try {
   });
   assert(!result.stdout.includes(token) && !result.stderr.includes(token));
   assert(methods.includes('initialize') && methods.includes('tools/list'), 'Installed Muse did not initialize/discover the configured adapter. ' + result.stderr.slice(0,1200));
-  report.muse = { version, localEcho: true, realAdapterInitialize: true, realAdapterDiscovery: true, methods };
+  report.muse = { version, localEcho: true, realAdapterInitialize: true, realAdapterDiscovery: true, methods: [...methods] };
+  const before = methods.length;
+  const child = spawn(path.join(process.env.LOCALAPPDATA, 'Programs/OpenAI/Codex/bin/codex.exe'), ['app-server', ...Object.entries(config).flatMap(([k,v])=>['-c',`mcp_servers.velum_code.${k}=${JSON.stringify(v)}`])], {
+    cwd:fixture,windowsHide:true,stdio:['pipe','pipe','pipe'],env:{...process.env,CODEX_HOME:codexHome,VELUM_TOOL_TOKEN:token,VELUM_TOOL_URL:`http://127.0.0.1:${server.address().port}/mcp`},
+  });
+  let serial=0;const pending=new Map();
+  createInterface({input:child.stdout}).on('line',line=>{let response;try{response=JSON.parse(line);}catch{return;}const request=pending.get(response.id);if(request){pending.delete(response.id);response.error?request.reject(Error(response.error.message)):request.resolve(response.result);}});
+  child.stderr.resume();
+  const rpc=(method,params)=>new Promise((resolve,reject)=>{
+    const id=++serial;const timeout=setTimeout(()=>{pending.delete(id);reject(Error('Codex metadata request timed out.'));},15000);
+    pending.set(id,{resolve:value=>{clearTimeout(timeout);resolve(value);},reject:error=>{clearTimeout(timeout);reject(error);}});
+    child.stdin.write(JSON.stringify({id,method,params})+'\n');
+  });
+  try {
+    await rpc('initialize',{clientInfo:{name:'velum-tool-qa',version:'1'},capabilities:{experimentalApi:true}});
+    child.stdin.write(JSON.stringify({method:'initialized'})+'\n');
+    const status=await rpc('mcpServerStatus/list',{limit:10});
+    assert(status.data.some(server=>server.name==='velum_code'&&server.tools.turn_diagnostics));
+    assert(methods.slice(before).includes('initialize')&&methods.slice(before).includes('tools/list'));
+    report.codex={...report.codex,liveConnectionTested:true,realAdapterInitialize:true,realAdapterDiscovery:true,modelCalls:false,methods:methods.slice(before)};
+  } finally {
+    try{execFileSync('taskkill',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});}catch{}
+  }
 } finally {
   await new Promise(resolve => server.close(resolve));
 }
