@@ -20,7 +20,10 @@ fn hidden(command: &mut Command) {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 }
-fn helper(mut command: Command, input: &Value) -> Result<Value, String> {
+fn helper(command: Command, input: &Value) -> Result<Value, String> {
+    helper_timeout(command, input, Duration::from_secs(25))
+}
+fn helper_timeout(mut command: Command, input: &Value, timeout: Duration) -> Result<Value, String> {
     hidden(&mut command);
     let mut child=command.spawn().map_err(|_|"The control helper could not start. Check Node/PowerShell installation and Windows application policy.")?;
     let bytes = serde_json::to_vec(input).unwrap();
@@ -51,7 +54,7 @@ fn helper(mut command: Command, input: &Value) -> Result<Value, String> {
             Err(_) => break None,
             _ => {}
         }
-        if started.elapsed() > Duration::from_secs(25) {
+        if started.elapsed() > timeout {
             let _ = child.kill();
             let _ = child.wait();
             timed_out = true;
@@ -71,7 +74,10 @@ fn helper(mut command: Command, input: &Value) -> Result<Value, String> {
     #[cfg(not(test))]
     let _ = errors;
     if timed_out {
-        return Err("The control operation timed out after 25 seconds.".into());
+        return Err(format!(
+            "The control operation timed out after {} seconds.",
+            timeout.as_secs()
+        ));
     }
     let value: Value = serde_json::from_slice(&bytes).map_err(|_| {
         "Control helper failed or was blocked by Windows policy. No valid response was returned."
@@ -84,16 +90,24 @@ fn helper(mut command: Command, input: &Value) -> Result<Value, String> {
     }
     Ok(value)
 }
-fn chromium() -> Option<PathBuf> {
-    let mut paths = vec![];
-    for env in ["PROGRAMFILES(X86)", "PROGRAMFILES", "LOCALAPPDATA"] {
-        if let Some(dir) = std::env::var_os(env) {
-            let dir = PathBuf::from(dir);
-            paths.push(dir.join("Microsoft/Edge/Application/msedge.exe"));
-            paths.push(dir.join("Google/Chrome/Application/chrome.exe"));
-        }
-    }
-    paths.into_iter().find(|p| p.is_file())
+fn chromium_candidates() -> Vec<PathBuf> {
+    let roots: Vec<_> = ["PROGRAMFILES(X86)", "PROGRAMFILES", "LOCALAPPDATA"]
+        .into_iter()
+        .filter_map(std::env::var_os)
+        .map(PathBuf::from)
+        .collect();
+    [
+        "Microsoft/Edge/Application/msedge.exe",
+        "Google/Chrome/Application/chrome.exe",
+    ]
+    .into_iter()
+    .filter_map(|relative| {
+        roots
+            .iter()
+            .map(|root| root.join(relative))
+            .find(|p| p.is_file())
+    })
+    .collect()
 }
 fn node() -> Option<PathBuf> {
     std::env::var_os("PATH")
@@ -103,7 +117,7 @@ fn node() -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 pub fn browser_available() -> bool {
-    cfg!(windows) && chromium().is_some() && node().is_some()
+    cfg!(windows) && !chromium_candidates().is_empty() && node().is_some()
 }
 
 fn clean_profile(profile: &std::path::Path) {
@@ -131,8 +145,10 @@ pub struct Browser {
 }
 impl Browser {
     pub fn start() -> Result<Self, String> {
-        let executable =
-            chromium().ok_or("Install Microsoft Edge or Google Chrome for browser previews.")?;
+        let candidates = chromium_candidates();
+        if candidates.is_empty() {
+            return Err("Install Microsoft Edge or Google Chrome for browser previews.".into());
+        }
         let node =
             node().ok_or("Node.js 22 or newer is required for isolated browser previews.")?;
         let mut version = Command::new(&node);
@@ -153,6 +169,33 @@ impl Browser {
                 "Browser previews require Node.js 22 or newer (built-in WebSocket).".into(),
             );
         }
+        Self::start_candidates(&candidates, node)
+    }
+    fn start_candidates(candidates: &[PathBuf], node: PathBuf) -> Result<Self, String> {
+        // Two fresh-profile attempts plus a bounded browser operation fit
+        // within the existing 40-second MCP transport timeout.
+        let client = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_millis(350))
+            .build()
+            .map_err(|_| "Cannot check preview browser readiness.")?;
+        let mut failures = vec![];
+        for executable in candidates.iter().take(2) {
+            match Self::start_one(executable, &node, &client) {
+                Ok(browser) => return Ok(browser),
+                Err(reason) => {
+                    let name = executable.file_name().unwrap_or_default().to_string_lossy();
+                    failures.push(format!("{name}: {reason}"));
+                }
+            }
+        }
+        Err(format!("Isolated browser startup failed ({}). Check browser updates and Windows application policy.", failures.join("; ")))
+    }
+    fn start_one(
+        executable: &std::path::Path,
+        node: &std::path::Path,
+        client: &reqwest::blocking::Client,
+    ) -> Result<Self, String> {
         let profile = std::env::temp_dir().join(format!("velum-browser-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&profile).map_err(|_| "Cannot create the isolated browser profile.")?;
         let mut command = Command::new(executable);
@@ -176,41 +219,85 @@ impl Browser {
             Ok(child) => child,
             Err(_) => {
                 let _ = std::fs::remove_dir(&profile);
-                return Err("The isolated preview browser could not start.")?;
+                return Err("process could not be launched".into());
             }
         };
         let started = Instant::now();
-        let endpoint = loop {
+        let readiness = loop {
             if let Ok(data) = std::fs::read_to_string(profile.join("DevToolsActivePort")) {
-                if let Some(port) = data.lines().next().and_then(|p| p.parse::<u16>().ok()) {
-                    break format!("http://127.0.0.1:{port}");
+                if let Some(endpoint) = ready_endpoint(client, &data) {
+                    break Ok(endpoint);
                 }
             }
-            if started.elapsed() > Duration::from_secs(12)
-                || child.try_wait().ok().flatten().is_some()
-            {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    break Err(format!(
+                        "process exited before its debug endpoint was ready (code {})",
+                        status
+                            .code()
+                            .map(|c| c.to_string())
+                            .unwrap_or_else(|| "unavailable".into())
+                    ))
+                }
+                Err(_) => break Err("process status could not be checked".to_string()),
+                _ => {}
+            }
+            if started.elapsed() > Duration::from_secs(9) {
+                break Err("debug endpoint was not ready within 9 seconds".into());
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        };
+        let endpoint = match readiness {
+            Ok(endpoint) => endpoint,
+            Err(reason) => {
                 let _ = child.kill();
                 let _ = child.wait();
                 clean_profile(&profile);
-                return Err("Browser debug endpoint did not start. Check browser installation and Windows application policy.".into());
+                return Err(reason);
             }
-            std::thread::sleep(Duration::from_millis(100));
         };
         Ok(Self {
             child,
             profile,
             endpoint,
-            node,
+            node: node.to_path_buf(),
         })
     }
     pub fn call(&mut self, name: &str, args: &Value) -> Result<Value, String> {
         let mut command = Command::new(&self.node);
         command.arg("-e").arg(include_str!("tool-browser.cjs"));
-        helper(
+        helper_timeout(
             command,
             &json!({"endpoint":self.endpoint,"tool":name,"args":args}),
+            Duration::from_secs(20),
         )
     }
+}
+fn ready_endpoint(client: &reqwest::blocking::Client, data: &str) -> Option<String> {
+    let mut lines = data.lines();
+    let port = lines.next()?.parse::<u16>().ok().filter(|p| *p > 0)?;
+    let path = lines.next()?.trim();
+    if !path.starts_with("/devtools/browser/") {
+        return None;
+    }
+    let endpoint = format!("http://127.0.0.1:{port}");
+    let body = client
+        .get(format!("{endpoint}/json/version"))
+        .send()
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .text()
+        .ok()?;
+    let value: Value = serde_json::from_str(&body).ok()?;
+    let socket = reqwest::Url::parse(value["webSocketDebuggerUrl"].as_str()?).ok()?;
+    (socket.scheme() == "ws"
+        && socket.host_str() == Some("127.0.0.1")
+        && socket.port() == Some(port)
+        && socket.path() == path
+        && socket.username().is_empty()
+        && socket.password().is_none())
+    .then_some(endpoint)
 }
 impl Drop for Browser {
     fn drop(&mut self) {
@@ -249,6 +336,77 @@ mod tests {
         .is_err());
         let windows = native("native_windows", &json!({})).unwrap();
         assert!(windows["windows"].is_array());
+    }
+    #[test]
+    fn browser_falls_back_after_a_missing_or_exited_first_process() {
+        if !browser_available() {
+            return;
+        }
+        let valid = chromium_candidates()[0].clone();
+        let missing = std::env::temp_dir().join(format!(
+            "velum-missing-browser-{}.exe",
+            uuid::Uuid::new_v4()
+        ));
+        // where.exe rejects Chromium arguments and exits without opening a
+        // browser. This exercises startup failure without changing OS policy.
+        let exited =
+            PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32/where.exe");
+        for first in [missing.clone(), exited.clone()] {
+            let browser =
+                Browser::start_candidates(&[first, valid.clone()], node().unwrap()).unwrap();
+            let profile = browser.profile.clone();
+            assert!(browser.endpoint.starts_with("http://127.0.0.1:"));
+            drop(browser);
+            assert!(!profile.exists());
+        }
+        let error = Browser::start_candidates(&[exited, missing], node().unwrap())
+            .err()
+            .unwrap();
+        assert!(error.contains("process exited"));
+        assert!(error.contains("process could not be launched"));
+        assert!(!error.contains(&std::env::temp_dir().to_string_lossy().to_string()));
+    }
+    #[test]
+    fn browser_readiness_requires_a_matching_live_debug_endpoint() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            for socket in [
+                format!("ws://example.invalid:{port}/devtools/browser/test"),
+                format!("ws://127.0.0.1:{port}/devtools/browser/other"),
+                format!("ws://127.0.0.1:{port}/devtools/browser/test"),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(1)))
+                    .unwrap();
+                let _ = stream.read(&mut [0; 2048]);
+                let content = json!({"webSocketDebuggerUrl":socket}).to_string();
+                write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{content}",content.len()).unwrap();
+            }
+        });
+        let client = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(1))
+            .build()
+            .unwrap();
+        for data in [
+            "",
+            "0\n/devtools/browser/test",
+            "invalid\n/devtools/browser/test",
+            "65536\n/devtools/browser/test",
+            "9\nwrong-path",
+        ] {
+            assert!(ready_endpoint(&client, data).is_none());
+        }
+        let data = format!("{port}\n/devtools/browser/test\n");
+        assert!(ready_endpoint(&client, &data).is_none());
+        assert!(ready_endpoint(&client, &data).is_none());
+        assert_eq!(
+            ready_endpoint(&client, &data),
+            Some(format!("http://127.0.0.1:{port}"))
+        );
+        server.join().unwrap();
     }
     #[test]
     fn isolated_browser_controls_and_screenshots_are_real() {

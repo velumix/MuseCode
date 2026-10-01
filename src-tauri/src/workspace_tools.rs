@@ -115,7 +115,10 @@ pub fn inspect(root: &Path, relative: &str) -> Result<Value, String> {
 
 pub fn delete(root: &Path, relative: &str, expected: &str) -> Result<Value, String> {
     if expected.len() != 64 || !expected.bytes().all(|c| c.is_ascii_hexdigit()) {
-        return Err("Inspect the file first and supply its SHA-256.".into());
+        return Err(format!(
+            "Invalid expected_sha256: supply all 64 hexadecimal characters from inspect_file.sha256 unchanged; received {} characters. A hash prefix cannot authorize removal. No file was deleted.",
+            expected.chars().count()
+        ));
     }
     let path = resolve(root, relative)?;
     if digest(&path)? != expected.to_ascii_lowercase() {
@@ -458,6 +461,25 @@ mod tests {
         assert_eq!(output.len(), 24000);
         assert!(truncated);
         assert_eq!(input.position(), 64000);
+    }
+    #[test]
+    fn incomplete_hash_reports_the_actual_argument_length_without_removal() {
+        let f = Fixture::new();
+        fs::write(f.0.join("probe.txt"), "probe v2").unwrap();
+        let hash = inspect(&f.0, "probe.txt").unwrap()["sha256"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        for short in [&hash[..41], &hash[..8], ""] {
+            let error = delete(&f.0, "probe.txt", short).unwrap_err();
+            assert!(error.contains("all 64 hexadecimal characters"));
+            assert!(error.contains(&format!("received {} characters", short.len())));
+            assert!(f.0.join("probe.txt").is_file());
+        }
+        assert!(delete(&f.0, "probe.txt", &"z".repeat(64)).is_err());
+        assert!(f.0.join("probe.txt").is_file());
+        assert!(delete(&f.0, "probe.txt", &hash.to_ascii_uppercase()).is_ok());
+        assert!(!f.0.join("probe.txt").exists());
     }
     #[test]
     fn removal_is_hash_guarded_and_confined() {

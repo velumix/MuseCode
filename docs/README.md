@@ -43,6 +43,7 @@
 QA reports describe a specific build and environment; they are not guarantees
 about every future release, provider or device. Recent records:
 
+- [Host tool follow-up, October 1](qa-host-tools-2026-10-01.md).
 - [Live counter diagnostics follow-up, September 30](qa-live-counters-2026-09-30.md).
 - [Agent tools and independent timing, September 30](qa-agent-tools-2026-09-30.md).
 - [Focused conversation UX, September 30](qa-focused-experience-2026-09-30.md).

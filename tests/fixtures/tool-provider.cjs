@@ -33,6 +33,8 @@ if (!argv.includes('exec') && !argv.includes('--input-format')) {
     while(page.next_cursor){page=await call('workspace_search',{query:'needle',cursor:page.next_cursor,limit:7});matches.push(...page.matches);pages++;assert(pages<100);}
     assert.equal(matches.length,220);assert(matches.every(m=>!m.path.includes('node_modules')&&!m.path.includes('.preview')));report.search={matches:matches.length,pages,skipped:page.skipped_entries};
     const filename=provider+'-cleanup.txt';const inspected=await call('inspect_file',{path:filename});
+    const malformed=await rpc('tools/call',{name:'delete_file',arguments:{path:filename,expected_sha256:inspected.sha256.slice(0,41)}});
+    assert.equal(malformed.isError,true);assert(malformed.content[0].text.includes('received 41 characters'));assert(fs.existsSync(path.join(process.cwd(),filename)));report.fullHashRequired=true;
     const rejected=await rpc('tools/call',{name:'delete_file',arguments:{path:filename,expected_sha256:'0'.repeat(64)}});assert.equal(rejected.isError,true);
     const deleted=await call('delete_file',{path:filename,expected_sha256:inspected.sha256});assert(deleted.deleted);assert(!fs.existsSync(path.join(process.cwd(),filename)));report.hashGuardedDelete=true;
     for(const file of ['../outside.txt','.git/config']){const value=await rpc('tools/call',{name:'inspect_file',arguments:{path:file}});assert.equal(value.isError,true);}

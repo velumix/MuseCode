@@ -76,7 +76,7 @@ try {
   await page.getByRole('button',{name:'Add to message',exact:true}).click();
   assert((await page.locator('.composer textarea').inputValue()).includes('"client_measurement"'));
   const reports=readFileSync(reportFile,'utf8').trim().split('\n').map(JSON.parse);assert.equal(reports.length,4);
-  assert(reports.every(r=>r.initialize&&r.search.matches===220&&r.hashGuardedDelete&&r.gitStatus&&r.vaultScope&&r.originRejected&&r.missingAuthRejected));
+  assert(reports.every(r=>r.initialize&&r.search.matches===220&&r.fullHashRequired&&r.hashGuardedDelete&&r.gitStatus&&r.vaultScope&&r.originRejected&&r.missingAuthRejected));
   assert(reports.every(r=>r.liveMeasurement?.output_tokens===125&&r.liveMeasurement.finished===false));
   assert(reports.find(r=>r.provider==='codex')?.native?.unicodeInput);
   assert(reports.every(r=>r.browser?.screenshot),'Expected installed Edge/Chrome + Node >=22 browser checks.');

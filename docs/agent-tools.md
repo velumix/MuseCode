@@ -13,7 +13,7 @@ YOLO does not enable desktop screenshots or native input.
 | Tool | Scope and behavior |
 | --- | --- |
 | `inspect_file` | A relative regular project file, up to 256 MiB; returns size and SHA-256, without its content |
-| `delete_file` | Permanently removes one regular file after checking the inspected hash. Rejects directories, parent traversal, links/redirecting reparse points, alternate streams and Git metadata. A changed file must be inspected again. |
+| `delete_file` | Permanently removes one regular file after checking all 64 hexadecimal characters of `inspect_file.sha256`, copied unchanged. Shortened hashes are rejected. Rejects directories, parent traversal, links/redirecting reparse points, alternate streams and Git metadata. A changed file must be inspected again. |
 | `workspace_search` | Literal text or filename search, with up to 50 results per page. Follow `next_cursor` until null. Cursors belong to this turn. |
 | `git_status` | Reads the selected project's status with `safe.directory` for the detected repository in this command only; it does not edit global Git configuration or ownership. |
 | `vault_search` | Searches enabled active shared/project notes and the current bot's private vault. Other projects/bots and pending/archived notes are excluded. Follow `next_offset`. Excerpts can be shorter than a whole note. |
@@ -25,6 +25,13 @@ YOLO does not enable desktop screenshots or native input.
 Workspace file tools require a project directory; the initial user-profile
 root is not a project. Git metadata is read only by the purpose-built status
 command and is unavailable to file inspection, removal or search.
+
+### File removal
+
+Copy the complete `inspect_file.sha256` value into `delete_file.expected_sha256`.
+A length or format rejection reports how many characters were supplied and
+leaves the file intact. Inspect again after changing a file; a valid full hash
+for different content is rejected separately.
 
 ### Search limits
 
@@ -48,6 +55,10 @@ page, or a search with omissions, as proof that no matching file exists.
 The preview browser has its own temporary profile and loopback debugging
 endpoint. It does not attach to an existing personal browser or reuse its
 cookies. It closes when the turn ends and Velum attempts to remove its profile.
+Startup verifies that the profile's debugging port has a live, matching browser
+endpoint. If the first installed browser cannot start, Velum tries the other
+installed browser with a fresh profile. Failure reports distinguish a launch
+failure, an early process exit and a readiness timeout.
 A crash, Windows lock or failed cleanup can leave a `velum-browser-<UUID>`
 directory in the system temporary directory. It can contain page data, cookies
 and downloads from that preview session. Review and remove abandoned profiles
