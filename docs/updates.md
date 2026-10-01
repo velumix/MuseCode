@@ -25,8 +25,9 @@ companion do not perform desktop updates.
 
 ## First installation
 
-Versions through 0.6.5 do not contain an updater. Install the signed 0.6.6 Windows
-bundle once to add it. Afterwards, use the in-app update control. The update
+Versions through 0.6.5 do not contain an updater. Install the latest signed
+Windows bundle once to add it. Local 0.6.6 copies already include it. Afterwards,
+use the in-app update control. The update
 feed only includes published stable GitHub releases; drafts and prereleases
 are excluded. Until the first release is published, Settings reports that
 the feed is unavailable.
@@ -42,8 +43,9 @@ installer and do not need Rust, Node or a local checkout.
    the public key against the app configuration and sends secrets over stdin.
 2. Keep `package.json`, both npm lockfile version fields, the Cargo package
    version and `src-tauri/tauri.conf.json` at the same version. Refresh bundled
-   dependency notices with `npm run legal:notices`. Add release notes under
-   `docs/releases/VERSION.md`.
+   dependency notices with `npm run legal:notices`. Review the current behavior
+   described in the privacy notice and terms, then update `reviewedAppVersion`
+   in `legal/publisher.json`. Add release notes under `docs/releases/VERSION.md`.
 3. Commit the release, create its `vMAJOR.MINOR.PATCH` tag and push that tag.
    The **Windows release** workflow builds and signs the NSIS installer, writes
    `latest.json` and checksums, and creates a GitHub release draft. It can also
