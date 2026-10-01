@@ -41,7 +41,7 @@ Protocol references: [Codex non-interactive JSON output](https://learn.chatgpt.c
 
 ## Attached measurement report
 
-Context ? Diagnostics exposes `turn_measurement` with an opaque run ID, provider, start timestamp, monotonic host elapsed time, first event/output offsets, completion flag, provider counters and their source. `tokens_per_second` uses the same reported output count and host duration as the final UI rate. A missing provider count remains null. No host tokenizer is installed or claimed.
+Context > Diagnostics exposes `turn_measurement` with an opaque run ID, provider, start timestamp, monotonic host elapsed time, first event/output offsets, completion flag, provider counters and their source. `tokens_per_second` uses the same reported output count and host duration as the final UI rate. A missing provider count remains null. No host tokenizer is installed or claimed.
 
 The desktop adds `client_measurement`, timed independently with `performance.now()` from receipt of the authoritative turn start through receipt of turn end. It includes the client rate, final displayed rate and host/client duration difference. It does not time an optimistic Send click, replayed history or a different run. The clocks have different delivery boundaries: launch/start-event delivery, UI event delivery and host browser cleanup can cause differences. The client comparison uses provider counts rather than independently validating a model tokenizer. Phone replay polling cannot establish a precise independent duration and reports it as unavailable.
 

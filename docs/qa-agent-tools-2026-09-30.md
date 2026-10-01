@@ -90,5 +90,23 @@ drafts pending publisher decisions and legal review.
 
 ## Packaging
 
-The verified source is ready for the optimized Windows installer build.
-Installation status and release smoke results are recorded after packaging.
+The optimized Rust build and NSIS installer succeeded from runtime/frontend
+source commit `5514d9d9874b6b3c4a0cbbe01f945698bd6cd02b`. The native tool/UI
+timing smoke and installed-CLI configuration checks were repeated against that
+release executable and passed. Dependency notices and legal consistency passed
+again after packaging.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Velum Code 0.6.3 x64 installer | `661770b7940f7748db270b6ba562848d7646a112e426d1173d865787ad7a55da` |
+| Raw release executable | `bb7a3a113857dcbb5524104b1168e86355b1188c97090630ed24dede83a4e829` |
+
+The installer, raw executable, build manifest, 34 legal resources and debug/
+release verification reports are archived in the desktop workspace's
+`Builds/Windows/2026-09-30-agent-tools` folder. Release fixture evidence is also
+in `.qa/agent tools 1790828617099 & project/result.json` and
+`.qa/provider MCP 1790828616824/result.json`.
+
+**Installation is pending:** the existing installed 0.6.2 app is still running.
+The user was asked to finish work and fully quit from the tray before replacing
+the executable. No user conversation was interrupted to perform this update.
