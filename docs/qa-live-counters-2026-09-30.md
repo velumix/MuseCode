@@ -43,6 +43,7 @@ completed report to the next message. See [usage](usage.md).
 | Clippy, all targets, warnings denied | Passed |
 | TypeScript and production frontend | Passed |
 | Usage and measurement UI checks | 7 passed |
+| Full browser/UI suite | 150 passed |
 | Native MCP tools and UI timing | Passed: Muse, Codex and Antigravity fixture launch paths report 125 live output tokens with `finished: false`, then the correct final rate and a completed independent client report |
 
 Native evidence: `.qa/agent tools 1790831089647 & project/result.json` and
@@ -60,6 +61,23 @@ token-speed measurement. Legal documents remain drafts.
 
 ## Packaging and installation
 
-The follow-up source is ready for a Windows 0.6.4 build. The currently installed
-0.6.3 executable and its archived verification record remain the previous
-runtime build until the update is installed.
+The optimized Windows build and NSIS installer succeeded from runtime/frontend
+source commit `b2d9df8ea8e07bd5972982d75760a0b568de7f93`. Native tool/live-counter/
+UI-timing checks and real Muse/Codex MCP initialization/discovery passed again
+against that release executable. Antigravity's CLI configuration parsing and
+regenerated dependency-notice/legal consistency checks also passed.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Velum Code 0.6.4 x64 installer | `f095c7fb38c503b436163b34288c5704fbd89b0ca0e43078f9872ed8f88a8a00` |
+| Raw release executable | `964e430b6bf8604ac8fb4241b5df13453e5d0fee1a52ee804f3d323dae8df990` |
+
+Release evidence: `.qa/agent tools 1790831615429 & project/result.json` and
+`client-report.json`, plus `.qa/provider MCP 1790831615049/result.json`.
+The desktop archive is `Builds/Windows/2026-09-30-live-counters`, containing
+the installer, raw executable, 34 legal resources and verification reports.
+
+**Installation is pending:** the current 0.6.3 app is running. Windows requires
+it to fully quit before the installed executable can be replaced. Its final
+rates are already working; the 0.6.4 update adds the live-diagnostics fix and
+clearer measurement status.
