@@ -68,6 +68,18 @@ impl Measurement {
     pub fn new(provider: crate::providers::Provider, started_at_ms: i64) -> Self {
         Self {run_id:uuid::Uuid::new_v4().to_string(),provider,started_at_ms,counter_source:"not reported".into(),host_clock:"Rust Instant; elapsed from provider launch through process exit".into(),tokenizer:"No host tokenizer. Counts come from the provider; text length is never substituted.".into(),..Default::default()}
     }
+    /// Publish the same provider snapshot used by the UI while this turn runs.
+    /// A model completion supplies counts; only process exit finishes the turn.
+    pub fn observe_usage(&mut self, usage: crate::provider_usage::TurnUsage, source: &str) {
+        if self.finished {
+            return;
+        }
+        if let Some(elapsed) = usage.elapsed_ms {
+            self.elapsed_ms = elapsed;
+        }
+        self.counters = Some(usage);
+        self.counter_source = source.into();
+    }
     pub fn value(&self) -> Value {
         let mut v = serde_json::to_value(self).unwrap();
         v["tokens_per_second"] = self
@@ -882,6 +894,32 @@ mod tests {
         std::fs::remove_file(path).unwrap();
         std::fs::remove_file(backup).unwrap();
         std::fs::remove_dir(dir).unwrap();
+    }
+    #[test]
+    fn live_usage_reports_counts_without_finishing_or_overwriting_a_finished_turn() {
+        for provider in [
+            crate::providers::Provider::Muse,
+            crate::providers::Provider::Codex,
+            crate::providers::Provider::Antigravity,
+        ] {
+            let mut measured = Measurement::new(provider, 1000);
+            assert!(measured.value()["tokens_per_second"].is_null());
+            let usage = crate::provider_usage::TurnUsage {
+                output_tokens: Some(125),
+                elapsed_ms: Some(2500),
+                ..Default::default()
+            };
+            measured.observe_usage(usage.clone(), "provider fixture counters");
+            assert_eq!(measured.counters, Some(usage));
+            assert_eq!(measured.elapsed_ms, 2500);
+            assert_eq!(measured.counter_source, "provider fixture counters");
+            assert_eq!(measured.value()["tokens_per_second"], 50.0);
+            assert!(!measured.finished);
+            measured.finished = true;
+            let completed = measured.clone();
+            measured.observe_usage(crate::provider_usage::TurnUsage::zero(), "late snapshot");
+            assert_eq!(measured, completed);
+        }
     }
     #[test]
     fn measurement_rate_uses_reported_output_and_host_duration() {

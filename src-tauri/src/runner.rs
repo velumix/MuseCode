@@ -509,6 +509,7 @@ fn spawn_reader(
                 let id = id.clone();
                 let stdout_usage = Arc::clone(&stdout_usage);
                 let muse_run = Arc::clone(&muse_run);
+                let measurement = Arc::clone(&measurement);
                 std::thread::spawn(move || {
                     let mut last = None;
                     let mut last_turn = None;
@@ -544,6 +545,10 @@ fn spawn_reader(
                                     let sessions = app.state::<AgentState>();
                                     let sessions = sessions.sessions.lock().unwrap();
                                     if sessions.get(&id).is_some_and(|s| Arc::ptr_eq(s, &session)) {
+                                        measurement.lock().unwrap().observe_usage(
+                                            usage.clone(),
+                                            "Muse retained session records; current session and root run only",
+                                        );
                                         emit(
                                             &app,
                                             &id,
@@ -590,6 +595,17 @@ fn spawn_reader(
                             let state = app.state::<AgentState>();
                             let sessions = state.sessions.lock().unwrap();
                             if sessions.get(&id).is_some_and(|s| Arc::ptr_eq(s, &session)) {
+                                {
+                                    let mut measured = measurement.lock().unwrap();
+                                    if !stdout_usage.load(Ordering::Relaxed) {
+                                        if let Some(usage) = turn.clone() {
+                                            measured.observe_usage(
+                                                usage,
+                                                "Codex retained session delta; launch baseline excludes earlier turns",
+                                            );
+                                        }
+                                    }
+                                }
                                 emit(
                                     &app,
                                     &id,
@@ -685,13 +701,13 @@ fn spawn_reader(
                 {
                     // Exec completion describes this turn, including resume.
                     // Session-log totals are only a fallback/live estimate.
-                    stdout_usage.store(true, Ordering::Relaxed);
                     usage.elapsed_ms =
                         Some(started.elapsed().as_millis().min(u64::MAX as u128) as u64);
                     turn_usage = Some(usage.clone());
                     let mut measured = measurement.lock().unwrap();
-                    measured.counters = Some(usage.clone());
-                    measured.counter_source = "provider stdout completion/step counters".into();
+                    stdout_usage.store(true, Ordering::Relaxed);
+                    measured
+                        .observe_usage(usage.clone(), "provider stdout completion/step counters");
                 }
                 if matches!(&event, AgentEvent::ToolEnd { reason: Some(reason), .. } | AgentEvent::TurnEnd { reason: Some(reason), .. } if headless_permission_denied(reason))
                 {

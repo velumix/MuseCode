@@ -38,3 +38,17 @@ test('a diagnostics attachment includes host counts and the observed client dura
   await page.getByRole('button',{name:'Add to message'}).click();expect(await page.locator('.composer textarea').inputValue()).toContain('"client_measurement"');
   expect(await page.evaluate(()=>(window as any).qa.calls.filter((c:any)=>c.cmd==='agent_send').length)).toBe(0);
 });
+
+test('diagnostics distinguish awaiting counts from a completed unreported turn',async({page})=>{
+  await boot(page);
+  await page.evaluate(value=>{(window as any).qa.measurement=value;},{...measured,finished:false,counters:null,counter_source:'not reported'});
+  await page.getByLabel('Project context and diagnostics').click();
+  const panel=page.getByRole('dialog',{name:'Know what’s connected.'});
+  await expect(panel).toContainText('Running turn');
+  await expect(panel).toContainText('Awaiting provider output token counts');
+  await page.evaluate(value=>{(window as any).qa.measurement=value;},{...measured,counters:null,counter_source:'not reported'});
+  await page.getByRole('button',{name:'Refresh report'}).click();
+  await expect(panel).toContainText('Completed turn');
+  await expect(panel).toContainText('The provider did not report output token counts for this turn.');
+  await expect(panel).not.toContainText('Awaiting provider output token counts');
+});

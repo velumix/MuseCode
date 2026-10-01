@@ -77,6 +77,7 @@ try {
   assert((await page.locator('.composer textarea').inputValue()).includes('"client_measurement"'));
   const reports=readFileSync(reportFile,'utf8').trim().split('\n').map(JSON.parse);assert.equal(reports.length,4);
   assert(reports.every(r=>r.initialize&&r.search.matches===220&&r.hashGuardedDelete&&r.gitStatus&&r.vaultScope&&r.originRejected&&r.missingAuthRejected));
+  assert(reports.every(r=>r.liveMeasurement?.output_tokens===125&&r.liveMeasurement.finished===false));
   assert(reports.find(r=>r.provider==='codex')?.native?.unicodeInput);
   assert(reports.every(r=>r.browser?.screenshot),'Expected installed Edge/Chrome + Node >=22 browser checks.');
   // Native permission defaults remain off. Actual preview browser screenshots
@@ -84,7 +85,7 @@ try {
   const disabled=await invoke('agent_tools_configure',{permissions:{...status.permissions,enabled:false}});assert.equal(disabled.permissions.enabled,false);
   writeFileSync(path.join(runDir,'result.json'),JSON.stringify({installed,release,reports,outcomes,clientReport,attachedWithoutSending:true,disabled:true},null,2));
   assert(existsSync(path.join(workspace,'source-0.txt')));
-  console.log('PASS: all three provider launch paths expose real MCP tools, paginated search, hash-guarded deletion, scoped vault search, command-only Git trust, isolated browser actions/screenshots, and host timing.');
+  console.log('PASS: all three provider launch paths expose real MCP tools, paginated search, hash-guarded deletion, scoped vault search, command-only Git trust, isolated browser actions/screenshots, live provider counters and completed host/client timing.');
   console.log(`Artifacts: ${runDir}`);
 } finally {
   if(invoke)await invoke('desktop_quit').catch(()=>{});await browser?.close().catch(()=>{});

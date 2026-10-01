@@ -42,6 +42,31 @@ if (!argv.includes('exec') && !argv.includes('--input-format')) {
     assert(!vault.notes.some(n=>['Pending note','Other project note','Other bot private note',provider==='codex'?'Visible active note':'Private active note'].includes(n.title)));
     report.vaultScope=true;report.sharedOptInRespected=provider==='codex';
     const measured=await call('turn_diagnostics');assert(measured.elapsed_ms>=0);assert(measured.mcp_initialized);assert(measured.host_clock.includes('Rust Instant'));report.hostTiming=true;
+    assert.equal(measured.finished,false);assert.equal(measured.counters,null);assert.equal(measured.tokens_per_second,null);
+    // A completed model call can report counts while the provider process is
+    // still working. Host diagnostics and UI must use that same live snapshot.
+    if(provider==='muse') {
+      assert(process.env.XDG_DATA_HOME,'Fixture provider storage must be isolated');
+      const dir=path.join(process.env.XDG_DATA_HOME,'muse/sessions/2026/09/30',session);fs.mkdirSync(dir,{recursive:true});
+      fs.appendFileSync(path.join(dir,'session.jsonl'),JSON.stringify({schema_version:1,id:randomUUID(),stream:{kind:'session',id:session},payload_type:'runtime.session',payload:{run_id:runId,event:{kind:'model_completed',usage:{input_tokens:100,cached_tokens:0,output_tokens:125,reasoning_tokens:0}}}})+'\n');
+    } else if(provider==='codex') {
+      assert(process.env.CODEX_HOME,'Fixture provider storage must be isolated');
+      const dir=path.join(process.env.CODEX_HOME,'sessions/2026/09/30');fs.mkdirSync(dir,{recursive:true});
+      fs.appendFileSync(path.join(dir,'rollout-'+session+'.jsonl'),JSON.stringify({timestamp:new Date().toISOString(),type:'event_msg',payload:{type:'token_count',info:{model_context_window:1000,last_token_usage:{input_tokens:100,output_tokens:125,total_tokens:225},total_token_usage:{input_tokens:100,cached_input_tokens:0,output_tokens:125,reasoning_output_tokens:0}}}})+'\n');
+    } else {
+      emit({event:'step_update',step_update:{step_index:8,step_type:'agent_response',state:'RUNNING',usage:{input_tokens:100,output_tokens:125,cache_read_tokens:0,thinking_tokens:0}}});
+    }
+    let live;
+    for(let attempt=0;attempt<50;attempt++) {
+      live=await call('turn_diagnostics');
+      if(live.counters?.output_tokens===125)break;
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
+    assert.equal(live.counters?.output_tokens,125,'Live provider counts did not reach host diagnostics');
+    assert.equal(live.finished,false,'Model usage must not finish the provider turn');
+    assert.equal(live.tokens_per_second,125000/live.elapsed_ms);
+    assert.notEqual(live.counter_source,'not reported');
+    report.liveMeasurement={elapsed_ms:live.elapsed_ms,output_tokens:live.counters.output_tokens,tokens_per_second:live.tokens_per_second,counter_source:live.counter_source,finished:live.finished};
     if(names.includes('browser_open')) {
       const tab=await call('browser_open',{url:process.env.VELUM_QA_PREVIEW});let snapshot;
       for(let n=0;n<30;n++){snapshot=await call('browser_snapshot',{tab_id:tab.tab_id});if(JSON.stringify(snapshot).includes('Tool preview fixture'))break;await new Promise(r=>setTimeout(r,50));}
@@ -65,7 +90,7 @@ if (!argv.includes('exec') && !argv.includes('--input-format')) {
     child.stdin.end();await new Promise(resolve=>child.on('exit',resolve));
     if(provider==='codex') {emit({type:'item.completed',item:{id:'answer',type:'agent_message',text:'Velum tool fixture passed'}});emit({type:'turn.completed',usage:{input_tokens:100,output_tokens:125,cached_input_tokens:0,reasoning_output_tokens:0}});}
     else if(provider==='antigravity') {emit({event:'step_update',step_update:{step_index:8,step_type:'agent_response',state:'DONE',text_delta:'Velum tool fixture passed',usage:{input_tokens:100,output_tokens:125,cache_read_tokens:0,thinking_tokens:0}}});emit({event:'result',result:{status:'SUCCESS',response:'Velum tool fixture passed'}});}
-    else {const dir=path.join(process.env.XDG_DATA_HOME,'muse/sessions/2026/09/30',session);fs.mkdirSync(dir,{recursive:true});fs.appendFileSync(path.join(dir,'session.jsonl'),JSON.stringify({schema_version:1,id:randomUUID(),stream:{kind:'session',id:session},payload_type:'runtime.session',payload:{run_id:runId,event:{kind:'model_completed',usage:{input_tokens:100,cached_tokens:0,output_tokens:125,reasoning_tokens:0}}}})+'\n');emit({payload_type:'run.output.delta',payload:{text:'Velum tool fixture passed'}});emit({payload_type:'run.terminal.completed',payload:{terminal:'completed',text:'Velum tool fixture passed'}});}
+    else {emit({payload_type:'run.output.delta',payload:{text:'Velum tool fixture passed'}});emit({payload_type:'run.terminal.completed',payload:{terminal:'completed',text:'Velum tool fixture passed'}});}
   };
   run().catch(error=>{console.error('Velum tool fixture failed: '+error.message);child?.kill();process.exitCode=1;});
 }
