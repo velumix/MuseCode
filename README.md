@@ -82,7 +82,7 @@ Jobs run while Windows is awake and Velum is open or in the tray. Review/Done ta
 
 1. Open [Windows CI](https://github.com/velumix/VelumCode/actions/workflows/windows.yml) and choose the latest successful run.
 2. Download **VelumCode-windows-x64** from **Artifacts** and extract the ZIP.
-3. Run **Velum Code_0.6.2_x64-setup.exe**, then launch **Velum Code** from your desktop or Start menu.
+3. Run the `Velum Code_<version>_x64-setup.exe` installer from the extracted ZIP, then launch **Velum Code** from your desktop or Start menu.
 
 CI artifacts require a GitHub sign-in and are retained for 14 days. These are unsigned development builds. Install the bundle so Windows can register the app's notification identity and click handler.
 

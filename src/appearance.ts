@@ -303,8 +303,8 @@ export function palette(settings: AppearanceValues, systemDark: boolean) {
       settings.glass ? (settings.glow / 100) * (dark ? 0.19 : 0.11) : 0,
     ),
   ];
-  const muted = readable(mix(surface, text, 0.65), surfaces);
-  const subtle = readable(mix(surface, text, 0.55), surfaces);
+  const muted = readable(mix(surface, text, 0.65), surfaces, 6);
+  const subtle = readable(mix(surface, text, 0.55), surfaces, 5.2);
   return {
     theme,
     bg,

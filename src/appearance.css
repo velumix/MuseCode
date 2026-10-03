@@ -147,7 +147,7 @@ textarea:focus-visible {
   padding-block: calc(10px * var(--density));
 }
 .app .sidebar-footer button {
-  padding-block: calc(10px * var(--density));
+  padding-block: calc(8px * var(--density));
 }
 .app .sidebar-project {
   margin-bottom: calc(23px * var(--density));
@@ -158,9 +158,6 @@ textarea:focus-visible {
 .app .sidebar-footer {
   flex-shrink: 0;
   padding-top: calc(12px * var(--density));
-}
-.app .sidebar-footnote {
-  padding-top: calc(7px * var(--density));
 }
 .app .starter-btn {
   padding-block: calc(17px * var(--density));
@@ -271,7 +268,7 @@ textarea:focus-visible {
   display: none;
 }
 :root[data-hints="false"]
-  :is(.composer-hint, .footer-hint, .sidebar-footnote, .phone-composer-note) {
+  :is(.composer-hint, .footer-hint, .phone-composer-note) {
   display: none;
 }
 :root[data-avatars="false"]
@@ -304,8 +301,7 @@ textarea:focus-visible {
     .sidebar-label > span:first-child,
     .tab-copy,
     .sidebar-footer button > span,
-    .sidebar-footer kbd,
-    .sidebar-footnote
+    .sidebar-footer kbd
   ) {
   display: none;
 }
@@ -481,9 +477,6 @@ textarea:focus-visible {
   }
   .app .sidebar-project {
     margin-bottom: 12px;
-  }
-  .app .sidebar-footnote {
-    display: none;
   }
   .app .chat-scroll {
     padding-block: 12px;

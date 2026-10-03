@@ -104,7 +104,6 @@ export default function TabBar({ tabs, activeId, onSelect, onClose, onNew, onCom
         <button type="button" onClick={onPlugins} aria-label="Plugins" title="Plugins"><Icon name="code" size={18}/><span>Plugins</span></button>
         <button type="button" onClick={onSettings} aria-label="Settings" title="Settings (Ctrl+,)"><Icon name="settings" size={18}/><span>Settings</span><kbd>Ctrl ,</kbd></button>
         <button type="button" onClick={onCommands} aria-label="Command menu" title="Command menu (Ctrl+K)"><Icon name="command" size={18} /><span>Command menu</span><kbd>Ctrl K</kbd></button>
-        <span className="sidebar-footnote">A little space to build something.</span>
       </div>
     </aside>
   );

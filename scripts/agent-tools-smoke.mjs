@@ -1,5 +1,6 @@
 // Tests native IPC, MCP stdio, all provider launch paths, project confinement,
 // scoped memory, browser screenshots and attached timing. No paid model calls.
+// --native also checks desktop input/capture and requires an unlocked desktop.
 import assert from 'node:assert/strict';
 import { spawn,execFileSync } from 'node:child_process';
 import { mkdirSync,writeFileSync,readFileSync,existsSync } from 'node:fs';
@@ -10,7 +11,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import { chromium } from '@playwright/test';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 assert.equal(process.platform,'win32');
-const release=process.argv.includes('--release'),installed=process.argv.includes('--installed');
+const release=process.argv.includes('--release'),installed=process.argv.includes('--installed'),native=process.argv.includes('--native');
 const appPath=installed?path.join(process.env.LOCALAPPDATA,'Velum Code/velum-code.exe'):path.join(root,`src-tauri/target/${release?'release':'debug'}/velum-code.exe`);
 const runDir=path.join(root,'.qa',`agent tools ${Date.now()} & project`),workspace=path.join(runDir,'project'),other=path.join(runDir,'other');
 mkdirSync(workspace,{recursive:true});mkdirSync(other);
@@ -25,7 +26,7 @@ const reportFile=path.join(runDir,'tools.jsonl');writeFileSync(reportFile,'');
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));let vite,app,browser,invoke;
 try {
   if(!release&&!installed){vite=spawn(process.execPath,[path.join(root,'node_modules/vite/bin/vite.js'),'--host','127.0.0.1'],{cwd:root,windowsHide:true,stdio:'ignore'});for(let n=0;n<100;n++){try{if((await fetch('http://127.0.0.1:1420')).ok)break;}catch{}await sleep(100);}}
-  app=spawn(appPath,[],{cwd:root,windowsHide:true,stdio:'ignore',env:{...process.env,PATH:`${runDir};${process.env.PATH}`,MUSE_QA_LOG:path.join(runDir,'catalog.jsonl'),MUSE_CODE_CONFIG_DIR:path.join(runDir,'settings'),VELUM_ISOLATED_TEST:'1',XDG_DATA_HOME:path.join(runDir,'provider-data'),CODEX_HOME:path.join(runDir,'codex-data'),VELUM_QA_APP:appPath,VELUM_QA_NATIVE_TITLE:'Velum native QA '+createHash('sha256').update(path.join(runDir,'settings')).digest('hex').slice(0,8),GIT_TEST_ASSUME_DIFFERENT_OWNER:'1',VELUM_QA_PREVIEW:`http://127.0.0.1:${preview.address().port}`,VELUM_QA_TOOL_REPORT:reportFile,WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:'--remote-debugging-port=19446',WEBVIEW2_USER_DATA_FOLDER:path.join(runDir,'webview')}});
+  app=spawn(appPath,[],{cwd:root,windowsHide:true,stdio:'ignore',env:{...process.env,PATH:`${runDir};${process.env.PATH}`,MUSE_QA_LOG:path.join(runDir,'catalog.jsonl'),MUSE_CODE_CONFIG_DIR:path.join(runDir,'settings'),VELUM_ISOLATED_TEST:'1',XDG_DATA_HOME:path.join(runDir,'provider-data'),CODEX_HOME:path.join(runDir,'codex-data'),VELUM_QA_APP:appPath,VELUM_QA_NATIVE:native?'1':'0',VELUM_QA_NATIVE_TITLE:'Velum native QA '+createHash('sha256').update(path.join(runDir,'settings')).digest('hex').slice(0,8),GIT_TEST_ASSUME_DIFFERENT_OWNER:'1',VELUM_QA_PREVIEW:`http://127.0.0.1:${preview.address().port}`,VELUM_QA_TOOL_REPORT:reportFile,WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:'--remote-debugging-port=19446',WEBVIEW2_USER_DATA_FOLDER:path.join(runDir,'webview')}});
   for(let n=0;n<150;n++){try{browser=await chromium.connectOverCDP('http://127.0.0.1:19446');break;}catch{}await sleep(100);}assert(browser,'Native WebView debug endpoint unavailable');
   let page;for(let n=0;n<100;n++){page=browser.contexts()[0]?.pages()[0];if(page)break;await sleep(100);}assert(page);
   await page.waitForSelector('.composer textarea:enabled');
@@ -40,8 +41,9 @@ try {
   }
   const outcomes=[];
   for(const provider of ['muse','codex','antigravity']) {
-    await invoke('agent_tools_configure',{permissions:{...status.permissions,native_screenshot:provider==='codex',native_control:provider==='codex'}});
-    if(provider==='codex'){await invoke('desktop_show');await page.locator('.composer textarea').focus();}
+    const enableNative=native&&provider==='codex';
+    await invoke('agent_tools_configure',{permissions:{...status.permissions,native_screenshot:enableNative,native_control:enableNative}});
+    if(enableNative){await invoke('desktop_show');await page.locator('.composer textarea').focus();}
     const session=await invoke('agent_new',{id:`tools-${provider}`,tabId:`tools-${provider}`,workspace,provider,botId:provider==='codex'?privateBot:null});
     await invoke('agent_send',{id:session.id,prompt:'Run the deterministic Velum tool fixture.',yolo:false});
     let diagnostic;
@@ -51,7 +53,7 @@ try {
     assert.equal(diagnostic.turn_measurement.counters.output_tokens,125);
     assert.equal(diagnostic.turn_measurement.tokens_per_second,125000/diagnostic.turn_measurement.elapsed_ms);
     const serialized=JSON.stringify(diagnostic);assert(!serialized.includes(process.env.USERPROFILE));assert(!serialized.includes('VELUM_TOOL_TOKEN'));assert(!serialized.includes('tool vault marker'));
-    if(provider==='codex')assert.equal(await page.locator('.composer textarea').inputValue(),'Velum native \u2713');
+    if(enableNative)assert.equal(await page.locator('.composer textarea').inputValue(),'Velum native \u2713');
     outcomes.push({provider,diagnostics:diagnostic});await invoke('agent_destroy',{id:session.id});
   }
   // Observe an actual UI turn using performance.now and attach its previewed
@@ -78,14 +80,16 @@ try {
   const reports=readFileSync(reportFile,'utf8').trim().split('\n').map(JSON.parse);assert.equal(reports.length,4);
   assert(reports.every(r=>r.initialize&&r.search.matches===220&&r.fullHashRequired&&r.hashGuardedDelete&&r.gitStatus&&r.vaultScope&&r.originRejected&&r.missingAuthRejected));
   assert(reports.every(r=>r.liveMeasurement?.output_tokens===125&&r.liveMeasurement.finished===false));
-  assert(reports.find(r=>r.provider==='codex')?.native?.unicodeInput);
+  assert(reports.every(r=>r.native?.status===(native&&r.provider==='codex'?'passed':'not_requested')));
+  if(native)assert(reports.find(r=>r.provider==='codex')?.native?.unicodeInput);
   assert(reports.every(r=>r.browser?.screenshot),'Expected installed Edge/Chrome + Node >=22 browser checks.');
   // Native permission defaults remain off. Actual preview browser screenshots
   // above contain only the fixture page, never the user's everyday browser.
   const disabled=await invoke('agent_tools_configure',{permissions:{...status.permissions,enabled:false}});assert.equal(disabled.permissions.enabled,false);
-  writeFileSync(path.join(runDir,'result.json'),JSON.stringify({installed,release,reports,outcomes,clientReport,attachedWithoutSending:true,disabled:true},null,2));
+  writeFileSync(path.join(runDir,'result.json'),JSON.stringify({installed,release,nativeChecks:{requested:native,status:native?'passed':'not_requested'},reports,outcomes,clientReport,attachedWithoutSending:true,disabled:true},null,2));
   assert(existsSync(path.join(workspace,'source-0.txt')));
   console.log('PASS: all three provider launch paths expose real MCP tools, paginated search, hash-guarded deletion, scoped vault search, command-only Git trust, isolated browser actions/screenshots, live provider counters and completed host/client timing.');
+  console.log(native?'PASS: native window discovery, Unicode input and screenshot checks.':'Native desktop checks not requested. Run npm run check:tools:native from an unlocked Windows desktop.');
   console.log(`Artifacts: ${runDir}`);
 } finally {
   if(invoke)await invoke('desktop_quit').catch(()=>{});await browser?.close().catch(()=>{});

@@ -70,7 +70,8 @@ See [appearance and customization](appearance.md) for the settings controls and 
 
 ```sh
 npm run check          # TypeScript + production frontend build + browser tests + Rust tests
-npm run check:tools    # native MCP, all provider launch fixtures, search/vault scope, browser/native capture and real client timing (no model calls)
+npm run check:tools    # unattended Windows MCP, provider fixtures, search/vault scope, isolated browser and real client timing (no model calls)
+npm run check:tools:native # same checks plus foreground desktop input and window capture (unlocked interactive desktop required)
 npm run check:provider-mcp # CLI configuration + Muse/Codex real adapter discovery (no model calls)
 npm run check:native   # Windows debug build + real WebView2/IPC/ConPTY smoke test
 npm run check:remote   # real Tailscale HTTPS + native app + phone browser (Tailscale sign-in required)
@@ -86,6 +87,14 @@ profile, and substitutes a deterministic CLI fixture only in that child's enviro
 does not use the configured AI provider, alter the installed app, or change your CLI settings.
 The agent-tools smoke uses an explicit separate app identifier and can run
 alongside the user's app. Other native harnesses require Velum fully quit.
+The default `check:tools` leaves native desktop permissions off and records
+native checks as `not_requested`. Use `check:tools:native` from an unlocked
+interactive Windows desktop to verify foreground focus, Unicode input and
+window capture. Windows can reject `SetForegroundWindow` in a background,
+locked or unattended session; an explicitly requested native check then fails.
+For release or installed tool checks, run `node scripts/agent-tools-smoke.mjs --release`
+or `node scripts/agent-tools-smoke.mjs --installed`; add `--native`
+to include desktop input and capture.
 Use `node scripts/native-smoke.mjs --release`
 for the packaged build, or `node scripts/native-smoke.mjs --installed --notifications` after
 installing the current bundle to also verify Windows Notification Center delivery and the

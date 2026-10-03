@@ -112,6 +112,13 @@ Windows ACL changes are introduced.
 
 ## Verify a connection
 
+For automated Windows checks, `npm run check:tools` verifies the isolated MCP
+bridge, provider fixtures, project tools, preview browser and host/client timing.
+Native desktop permissions stay off and the report marks those checks as
+`not_requested`. Run `npm run check:tools:native` from an unlocked interactive
+desktop to also test foreground input and window capture. Windows foreground
+focus restrictions can make that check fail in unattended or locked sessions.
+
 Open **Context → Diagnostics** after a turn. `turn_measurement.mcp_initialized`
 records an actual initialize call, and tool calls/errors describe this run.
 A setting or CLI installation alone is not connection evidence. Add the

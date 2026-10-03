@@ -2,6 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {spawn}=require('node:child_process');const {randomUUID}=require('node:crypto');const {createInterface}=require('node:readline');
 const provider=process.argv[2];const argv=process.argv.slice(3);
+const native=provider==='codex'&&process.env.VELUM_QA_NATIVE==='1';
 if (!argv.includes('exec') && !argv.includes('--input-format')) {
   if(provider==='muse') {process.argv.splice(2,1);require('./muse-cli.cjs');}
   else require('./provider-cli.cjs');
@@ -27,8 +28,8 @@ if (!argv.includes('exec') && !argv.includes('--input-format')) {
     child.stdin.write(JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})+'\n');
     const names=(await rpc('tools/list')).tools.map(t=>t.name);
     for(const name of ['inspect_file','delete_file','workspace_search','vault_search','git_status','turn_diagnostics'])assert(names.includes(name));
-    if(provider!=='codex'){assert(!names.includes('native_input'));assert(!names.includes('native_screenshot'));}
-    const report={provider,initialize:true,names};
+    for(const name of ['native_windows','native_input','native_screenshot'])assert.equal(names.includes(name),native,`${name} availability must match requested desktop checks`);
+    const report={provider,initialize:true,names,native:{status:'not_requested'}};
     let page=await call('workspace_search',{query:'needle',mode:'text',limit:7}),matches=[...page.matches],pages=1;
     while(page.next_cursor){page=await call('workspace_search',{query:'needle',cursor:page.next_cursor,limit:7});matches.push(...page.matches);pages++;assert(pages<100);}
     assert.equal(matches.length,220);assert(matches.every(m=>!m.path.includes('node_modules')&&!m.path.includes('.preview')));report.search={matches:matches.length,pages,skipped:page.skipped_entries};
@@ -78,11 +79,11 @@ if (!argv.includes('exec') && !argv.includes('--input-format')) {
       const value=await call('browser_action',{tab_id:tab.tab_id,action:'evaluate',expression:'document.querySelector("#result").textContent'});assert.equal(JSON.parse(value.result),'Velum test');
       const screenshot=await call('browser_screenshot',{tab_id:tab.tab_id});assert.equal(screenshot.mimeType,'image/png');assert(Buffer.from(screenshot.data,'base64').subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])));report.browser={navigation:true,fill:true,click:true,evaluate:true,screenshot:true};
     }
-    if(provider==='codex') {
+    if(native) {
       assert(names.includes('native_input'));assert(names.includes('native_screenshot'));
       const windows=await call('native_windows');const target=windows.windows.find(w=>w.title===process.env.VELUM_QA_NATIVE_TITLE);assert(target,'The isolated native test window is unavailable');
       await call('native_input',{window_id:target.window_id,action:'type',text:'Velum native \u2713'});
-      const screenshot=await call('native_screenshot',{window_id:target.window_id});assert.equal(screenshot.mimeType,'image/png');assert(Buffer.from(screenshot.data,'base64').subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])));report.native={windowDiscovery:true,unicodeInput:true,screenshot:true};
+      const screenshot=await call('native_screenshot',{window_id:target.window_id});assert.equal(screenshot.mimeType,'image/png');assert(Buffer.from(screenshot.data,'base64').subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])));report.native={status:'passed',windowDiscovery:true,unicodeInput:true,screenshot:true};
     }
     // A browser-origin request must not reach the authenticated local bridge.
     const cross=await fetch(credentials.url,{method:'POST',headers:{authorization:'Bearer '+credentials.token,'content-type':'application/json',origin:'https://untrusted.invalid'},body:JSON.stringify({id:1,method:'tools/list'})});assert.equal(cross.status,403);report.originRejected=true;
